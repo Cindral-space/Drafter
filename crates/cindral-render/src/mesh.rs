@@ -91,6 +91,10 @@ pub struct EdgeVertex {
     pub position: [f32; 3],
     /// RGB magnitudes; negative R/G encode soft/smooth, negative B a boundary profile.
     pub color: [f32; 3],
+    /// First adjacent face normal for view-dependent silhouette profiles.
+    pub normal_a: [f32; 3],
+    /// Consistently oriented second adjacent face normal, zero at boundaries.
+    pub normal_b: [f32; 3],
 }
 
 const FACE_VERTEX_BYTES: u64 = std::mem::size_of::<FaceVertex>() as u64;
@@ -643,11 +647,19 @@ fn build_face_triangles_in_frame(
 
 fn styled_edge_vertices(model: &Model, id: EdgeId, edge: &cindral_core::Edge, offset: DVec3) -> Result<[EdgeVertex; 2], KernelError> {
     let mut vertices = build_edge_vertices_in_frame(model, edge.vertices, offset)?;
+    let faces: Vec<_> = model.edge_faces(id).take(2).map(|(_, face)| {
+        let forward = std::iter::once(&face.outer).chain(face.holes.iter()).any(|ring| ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len()).any(|(a,b)| *a == edge.vertices[0] && *b == edge.vertices[1]));
+        (face.plane.normal, forward)
+    }).collect();
+    let normal_a = faces.first().map_or(DVec3::ZERO, |f| f.0);
+    let normal_b = faces.get(1).map_or(DVec3::ZERO, |f| if f.1 == faces[0].1 { -f.0 } else { f.0 });
     for vertex in &mut vertices {
+        vertex.normal_a = normal_a.as_vec3().to_array();
+        vertex.normal_b = normal_b.as_vec3().to_array();
         // Signs encode immutable edge attributes; zero remains the free-slot sentinel.
         if edge.soft { vertex.color[0] = -vertex.color[0]; }
         if edge.smooth { vertex.color[1] = -vertex.color[1]; }
-        if model.edge_face_count(id) < 2 { vertex.color[2] = -vertex.color[2]; }
+        if faces.len() < 2 { vertex.color[2] = -vertex.color[2]; }
     }
     Ok(vertices)
 }
@@ -677,10 +689,14 @@ fn build_edge_vertices_in_frame(
         EdgeVertex {
             position: a.to_array(),
             color: EDGE_COLOR,
+            normal_a: [0.; 3],
+            normal_b: [0.; 3],
         },
         EdgeVertex {
             position: b.to_array(),
             color: EDGE_COLOR,
+            normal_a: [0.; 3],
+            normal_b: [0.; 3],
         },
     ])
 }

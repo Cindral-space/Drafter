@@ -3,6 +3,7 @@ struct Camera {
     style: vec4<f32>,
     background: vec4<f32>,
     reserved: vec4<f32>,
+    view_origin: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -178,6 +179,8 @@ struct EdgeOutput {
 };
 
 struct EdgeInput {
+    @location(2) normal_a: vec3<f32>,
+    @location(3) normal_b: vec3<f32>,
     @location(0) position: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(4) m0: vec4<f32>,
@@ -192,6 +195,17 @@ struct EdgeInput {
     @location(13) inst_params: vec4<f32>,
 };
 
+fn is_profile(input: EdgeInput) -> bool {
+    if input.color.z < 0.0 { return true; }
+    let model = mat4x4<f32>(input.m0, input.m1, input.m2, input.m3);
+    let normals = mat4x4<f32>(input.n0, input.n1, input.n2, input.n3);
+    let world = model * vec4<f32>(input.position, 1.0);
+    let direction = camera.view_origin.xyz - world.xyz * camera.view_origin.w;
+    let a = (normals * vec4<f32>(input.normal_a, 0.0)).xyz;
+    let b = (normals * vec4<f32>(input.normal_b, 0.0)).xyz;
+    return dot(a, direction) * dot(b, direction) < 0.0;
+}
+
 fn edge_vertex(input: EdgeInput) -> EdgeOutput {
     var out: EdgeOutput;
     if dot(input.color, input.color) == 0.0 || (input.color.x < 0.0 && camera.style.y < 0.5) || (input.color.y < 0.0 && camera.style.z < 0.5) {
@@ -204,7 +218,7 @@ fn edge_vertex(input: EdgeInput) -> EdgeOutput {
     let world_pos = model_matrix * vec4<f32>(input.position, 1.0);
     out.position = camera.view_projection * world_pos;
     let dim = input.inst_params.y;
-    let profile = input.color.z < 0.0 && camera.style.w > 0.5;
+    let profile = is_profile(input) && camera.style.w > 0.5;
     let ink = select(vec3<f32>(0.08, 0.09, 0.10), vec3<f32>(0.94, 0.95, 0.98), dot(camera.background.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) < 0.5);
     let base = ink * select(0.75, 1.0, profile);
     out.color = base * dim;
@@ -217,7 +231,7 @@ fn vs_edge(input: EdgeInput) -> EdgeOutput { return edge_vertex(input); }
 @vertex
 fn vs_profile_left(input: EdgeInput) -> EdgeOutput {
     var out = edge_vertex(input);
-    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    if !is_profile(input) { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     out.position.x += -camera.reserved.x * out.position.w;
     return out;
 }
@@ -225,7 +239,7 @@ fn vs_profile_left(input: EdgeInput) -> EdgeOutput {
 @vertex
 fn vs_profile_right(input: EdgeInput) -> EdgeOutput {
     var out = edge_vertex(input);
-    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    if !is_profile(input) { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     out.position.x += camera.reserved.x * out.position.w;
     return out;
 }
@@ -233,7 +247,7 @@ fn vs_profile_right(input: EdgeInput) -> EdgeOutput {
 @vertex
 fn vs_profile_up(input: EdgeInput) -> EdgeOutput {
     var out = edge_vertex(input);
-    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    if !is_profile(input) { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     out.position.y += camera.reserved.y * out.position.w;
     return out;
 }
@@ -241,7 +255,7 @@ fn vs_profile_up(input: EdgeInput) -> EdgeOutput {
 @vertex
 fn vs_profile_down(input: EdgeInput) -> EdgeOutput {
     var out = edge_vertex(input);
-    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    if !is_profile(input) { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     out.position.y += -camera.reserved.y * out.position.w;
     return out;
 }

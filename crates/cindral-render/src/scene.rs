@@ -323,7 +323,7 @@ impl SceneRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cindral scene camera uniform"),
-            size: 112,
+            size: 128,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -467,6 +467,8 @@ impl SceneRenderer {
                     offset: 12,
                     shader_location: 1,
                 },
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 24, shader_location: 2 },
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 36, shader_location: 3 },
             ],
         };
 
@@ -928,6 +930,12 @@ impl SceneRenderer {
         queue.write_buffer(&self.uniform, 64, bytemuck::cast_slice(&values));
     }
 
+    fn write_view_origin(&self, queue: &wgpu::Queue, matrix: [[f32; 4]; 4]) {
+        // Homogeneous eye for perspective; a view direction (w=0) for orthographic.
+        let origin = glam::Mat4::from_cols_array_2d(&matrix).inverse() * glam::Vec4::new(0., 0., 1., 0.);
+        queue.write_buffer(&self.uniform, 112, bytemuck::cast_slice(&origin.to_array()));
+    }
+
     /// Encode the offscreen scene pass independently of egui (also used by benchmarks).
     pub fn render(
         &mut self,
@@ -962,6 +970,7 @@ impl SceneRenderer {
         }
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&view_projection));
         self.write_style(queue, size);
+        self.write_view_origin(queue, view_projection);
         if self.ensure_target_size(device, size) {
             self.render_offscreen(encoder);
         }
@@ -1143,6 +1152,7 @@ impl CallbackTrait for SceneCallback {
         }
         renderer.set_style(self.style.clone());
         renderer.write_style(queue, self.size);
+        renderer.write_view_origin(queue, self.view_projection);
         queue.write_buffer(
             &renderer.uniform,
             0,
