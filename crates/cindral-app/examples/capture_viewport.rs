@@ -107,7 +107,9 @@ fn main() -> eframe::Result {
             } else {
                 None
             };
-            if std::env::args().any(|arg| arg == "--organization") {
+            if let Some(path) = std::env::var_os("CINDRAL_CAPTURE_DRAFT") {
+                app.open_path(std::path::Path::new(&path))?;
+            } else if std::env::args().any(|arg| arg == "--organization") {
                 seed_organization(&mut app)?;
             } else if incremental {
                 let mut tool = cindral_tools::ToolSession::new(cindral_tools::ToolKind::Rectangle);

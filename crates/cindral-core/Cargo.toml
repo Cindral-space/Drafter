@@ -31,3 +31,7 @@ version = "0.12"
 [[example]]
 name="connected_benchmark"
 required-features=["bench-fixtures"]
+
+[[test]]
+name = "connected_equivalence"
+required-features = ["bench-fixtures"]

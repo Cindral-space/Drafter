@@ -22,3 +22,7 @@ base64 = "0.22"
 
 [features]
 bench-fixtures = ["cindral-core/bench-fixtures"]
+
+[[example]]
+name = "file_benchmark"
+required-features = ["bench-fixtures"]

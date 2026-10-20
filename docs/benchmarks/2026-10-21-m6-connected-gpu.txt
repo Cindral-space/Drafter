@@ -1,0 +1,4 @@
+connected GPU-completed pushpull n60 faces21604: cold 3.812 ms; steady mean 2.947 ms; max 4.501 ms; commit 0.005 ms
+connected GPU-completed move n60 faces21600: cold 5.247 ms; steady mean 3.086 ms; max 5.247 ms; commit 0.004 ms
+connected GPU-completed pushpull n100 faces60004: cold 7.624 ms; steady mean 6.308 ms; max 7.624 ms; commit 0.003 ms
+connected GPU-completed move n100 faces60000: cold 14.887 ms; steady mean 7.075 ms; max 14.887 ms; commit 0.006 ms

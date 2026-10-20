@@ -26,6 +26,25 @@ pub struct FaceStyle {
     pub color: [f32; 4],
     /// True when the face has an explicit material assignment overriding inherited container materials.
     pub explicit_material: bool,
+    /// Texture array layer index (0 = default white fallback).
+    pub texture_layer: u32,
+}
+
+impl FaceStyle {
+    /// Creates a new face style with the default white texture layer (0).
+    pub fn new(color: [f32; 4], explicit_material: bool) -> Self {
+        Self {
+            color,
+            explicit_material,
+            texture_layer: 0,
+        }
+    }
+
+    /// Sets the texture array layer.
+    pub fn with_texture(mut self, texture_layer: u32) -> Self {
+        self.texture_layer = texture_layer;
+        self
+    }
 }
 
 impl Default for FaceStyle {
@@ -33,6 +52,7 @@ impl Default for FaceStyle {
         Self {
             color: FACE_COLOR,
             explicit_material: false,
+            texture_layer: 0,
         }
     }
 }
@@ -104,6 +124,7 @@ pub struct MeshUpdate {
 struct FaceSignature {
     color: [f32; 4],
     explicit_material: bool,
+    texture_layer: u32,
     normal: DVec3,
     distance: f64,
     outer: Vec<DVec3>,
@@ -526,6 +547,7 @@ fn default_face_style(_id: FaceId, face: &Face) -> FaceStyle {
             ]
         },
         explicit_material: face.material.is_some(),
+        texture_layer: 0,
     }
 }
 
@@ -574,6 +596,7 @@ fn build_face_signature_in_frame(
     Ok(FaceSignature {
         color: style.color,
         explicit_material: style.explicit_material,
+        texture_layer: style.texture_layer,
         normal: face.plane.normal,
         distance: face.plane.distance - face.plane.normal.dot(offset),
         outer,
@@ -602,6 +625,8 @@ fn build_face_triangles_in_frame(
         return Err(KernelError::InvalidPosition);
     };
     let normal_arr = normal.to_array();
+    let packed_mat =
+        crate::texture::pack_face_material(style.texture_layer, style.explicit_material);
     let mut vertices = Vec::with_capacity(tris.len() * 3);
     for tri in tris {
         for p in tri {
@@ -613,7 +638,7 @@ fn build_face_triangles_in_frame(
                 position: pos.to_array(),
                 normal: normal_arr,
                 color: style.color,
-                material: if style.explicit_material { 1.0 } else { 0.0 },
+                material: packed_mat,
             });
         }
     }
@@ -2042,6 +2067,7 @@ mod tests {
         let custom_style = FaceStyle {
             color: [0.1, 0.2, 0.9, 0.8],
             explicit_material: true,
+            texture_layer: 0,
         };
         let (mut cache, init) =
             MeshCache::rebuild_styled(history.model(), &|_id, _f| custom_style).unwrap();
@@ -2063,6 +2089,7 @@ mod tests {
         let new_style = FaceStyle {
             color: [0.9, 0.1, 0.1, 1.0],
             explicit_material: false,
+            texture_layer: 0,
         };
         let delta = cache
             .update_styled(history.model(), &[face_id], &[], &|_id, _f| new_style)
@@ -2073,6 +2100,51 @@ mod tests {
         for v in updated_verts {
             assert_eq!(v.color, [0.9, 0.1, 0.1, 1.0]);
             assert_eq!(v.material, 0.0);
+        }
+    }
+
+    #[test]
+    fn styled_rebuild_and_update_with_texture_layer() {
+        let mut history = History::new();
+        history
+            .execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::new(0.0, 0.0, 0.0),
+                    DVec3::new(2.0, 0.0, 0.0),
+                    DVec3::new(2.0, 2.0, 0.0),
+                    DVec3::new(0.0, 2.0, 0.0),
+                ],
+                closed: true,
+            })
+            .unwrap();
+        let face_id = *history.model().faces().keys().next().unwrap();
+
+        // Layer 5, explicit = true -> packed as 5 * 2 + 1 = 11.0
+        let style_tex5 = FaceStyle {
+            color: [0.5, 0.5, 0.5, 1.0],
+            explicit_material: true,
+            texture_layer: 5,
+        };
+        let (mut cache, init) =
+            MeshCache::rebuild_styled(history.model(), &|_id, _f| style_tex5).unwrap();
+        let verts = decode_face_vertices(&init.face_writes[0].bytes);
+        for v in verts {
+            assert_eq!(v.material, 11.0);
+        }
+
+        // Updating with changed texture layer 7 (explicit = false -> 7 * 2 = 14.0) updates the slot
+        let style_tex7 = FaceStyle {
+            color: [0.5, 0.5, 0.5, 1.0],
+            explicit_material: false,
+            texture_layer: 7,
+        };
+        let delta = cache
+            .update_styled(history.model(), &[face_id], &[], &|_id, _f| style_tex7)
+            .unwrap();
+        assert_eq!(delta.face_writes.len(), 1);
+        let updated_verts = decode_face_vertices(&delta.face_writes[0].bytes);
+        for v in updated_verts {
+            assert_eq!(v.material, 14.0);
         }
     }
 }

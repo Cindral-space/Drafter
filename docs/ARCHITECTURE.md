@@ -2,7 +2,7 @@
 
 ## Status
 
-M0–M4 are implemented: workspace/CI, native GPU grid/axes and camera controls, a rendering-independent transactional geometry kernel, pure inference, five drawing tools, modification tools and shaded document rendering. A measured static 500k-triangle GPU baseline is also available. Organization and file APIs below remain design intent until their milestones. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kernel, pure inference and drawing, modify tools, nested organization/instancing, and native files/recovery/textures/import/export. Measured static 500k-triangle, component, kernel and connected-solid benchmarks distinguish their workloads and limits. M7 presentation features remain planned. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -10,14 +10,14 @@ M0–M4 are implemented: workspace/CI, native GPU grid/axes and camera controls,
 | --- | --- | --- |
 | cindral-core | Topology, entities, transforms, command history | none |
 | cindral-inference | Geometric queries and snap candidates | core |
-| cindral-tools | Tool state machines and command creation | core, inference |
-| cindral-render | Camera, GPU resources, picking and styles | core |
+| cindral-tools | Tool state machines, CPU picking/selection and command creation | core, inference |
+| cindral-render | Camera, GPU resources and styles | core |
 | cindral-io | Versioned documents and import/export | core |
 | cindral-app | Window, egui controls, input routing | all above |
 
 Rendering and UI dependencies never enter core. Tools emit commands; they do not mutate renderer buffers. IO deserializes into validated core documents.
 
-## Planned core data model
+## Core data model
 
 A document owns stable typed entity IDs and ordered maps of vertices, undirected edges, planar faces, groups, component definitions/instances, tags, and materials. Positions use double precision. One shared tolerance constant governs geometric comparisons; derived predicates account for scale. A face has an outer vertex loop, zero or more inner loops, a plane and material. Edges carry soft/smooth flags. Adjacency is derived and validated after topology changes.
 
@@ -25,9 +25,9 @@ Groups own local geometry and transforms. Component instances refer to shared de
 
 Every document mutation runs through a transactional command: prepare and validate a candidate change, apply atomically, then record the inverse. Failed commands leave the document and history intact. New successful commands clear redo history. Render caches use document revision and dirty entity sets, with per-container GPU buffers and component instancing.
 
-## Planned layers
+## Layer boundaries
 
-Inference ranks endpoint, midpoint, intersection, edge, face and directional candidates using screen-space distances. Tools hold interaction state and interpret measurements in document units. Camera math is independent of window events. Picking shares camera transforms with rendering. `.cdraft` will be a versioned compact archive with explicit migrations and validation; exporters triangulate faces including holes.
+Inference ranks endpoint, midpoint, intersection, edge, face and directional candidates using screen-space distances. Tools hold interaction state and interpret measurements in document units. Camera math is independent of window events. Picking shares camera transforms with rendering. `.cdraft` is a versioned compact ZIP/RON archive with explicit migrations and validation; exporters triangulate faces including holes.
 
 ## Validation
 
@@ -129,9 +129,9 @@ Tags are assigned to containers; loose vertices/edges/faces remain untagged so v
 
 The CPU `SceneCache` triangulates each visible definition once, applies dirty face/edge ranges only to affected definitions, and builds occurrence batches separately. Repeated components share GPU geometry buffers. `SceneRenderer` uses instanced opaque faces, edges, then transparent faces, three draws per nonempty definition rather than per occurrence. Normal matrices use inverse transpose, including mirrors and small valid scales. Instance buffers compare placements and upload coalesced changed spans; one placement writes 160 bytes when ordering/count is stable. Capacity changes or reordered batches may upload the whole batch. Multiple queued CPU updates are composed before a GPU callback so cancel/undo cannot leave stale preview slots. Fully hidden definitions release their cached/GPU resources and rebuild when revealed; document replacement explicitly removes old GPU definitions. Transparency is premultiplied with depth testing and no transparent depth writes; overlapping translucent surfaces currently use definition order without triangle sorting.
 
-M5 tests add actual proptests for nested/mirrored query transforms and definition sharing/global undo, plus deterministic tests for private-group cloning, make-unique, transform-preserving reparent/cycle rejection, material/tag deletion, DTO restoration, preview cancellation/redo, shared dirty caches, double-click/Escape navigation and the application-level three-instance shared-edit/undo script. See [M5 measurements](COMPONENT_BENCHMARK.md) and [connected solid measurements](CONNECTED_SOLID_BENCHMARK.md). These distinguish fast occurrence placement from expensive raw topology changes; the connected-solid kernel is still a major performance limitation.
+M5 tests add actual proptests for nested/mirrored query transforms and definition sharing/global undo, plus deterministic tests for private-group cloning, make-unique, transform-preserving reparent/cycle rejection, material/tag deletion, DTO restoration, preview cancellation/redo, shared dirty caches, double-click/Escape navigation and the application-level three-instance shared-edit/undo script. See [M5 measurements](COMPONENT_BENCHMARK.md) and [connected solid measurements](CONNECTED_SOLID_BENCHMARK.md). These distinguish fast occurrence placement from expensive raw topology changes; M5 exposed the connected-solid bottleneck addressed by the measured pre-M6 redesign below.
 
-### Next incremental work after the connected-solid measurement
+### M5 diagnosis, superseded by the measured redesign below
 
 The existing local edit/index/delta/partial-buffer infrastructure is in place, but dense connected-shell Boolean work and raw whole-solid transforms still exceed interactive budgets. Preserve the M5 per-definition boundaries. Next: add face-to-shell/adjacency indexes; broad-phase candidate faces for the extrusion prism; preserve untouched shell regions instead of rebuilding all connected surfaces; and use an affine whole-shell fast path with deferred index-bound updates when topology cannot change. Keep per-face material/geometry dirty ranges and metadata matrix spans separate. Add cancellation/bounded work before expensive native edits can stall the event thread. Re-measure the same 21,600-face fixture with completed operations and compare topology/volume/history against the existing kernel before enabling a fast path. Container placement measurements are not evidence that raw connected edits meet 16 ms.
 
@@ -140,3 +140,15 @@ The existing local edit/index/delta/partial-buffer infrastructure is in place, b
 The measured redesign is implemented and documented in `CONNECTED_PROFILE_ANALYSIS.md` and `CONNECTED_SOLID_BENCHMARK.md`. Whole-definition translations use compact original-value deltas and translated index/render frames; local support-face extrusion preserves untouched B-Rep regions. Full validation uses edge-envelope candidates, orientation uses direct face-edge incidence, and general Boolean reconstruction indexes welds/segments/seams and duplicate polygons. A subsequent indexed edit after translation exposed ULP differences during exact R-tree removal; removal now locates the stable ID in a conservative local neighborhood and removes the exact stored item. Undo restores original coordinates/planes exactly.
 
 At 21,600 faces the raw kernel preview maxima are 2.337 ms push/pull and 4.602 ms Move, with 0.006 ms commits. The 60,000-face scaling runs are approximately linear. A timeout/budget runner and small-model reference equivalence tests guard these paths. General collision/through-cut/hole Boolean latency is still workload-dependent; the support/pocket proof must succeed before the local path is used. M6 can use full load validation, which is hundreds of milliseconds on these fixtures, without putting it into live translations.
+
+## M6 native files, recovery, interchange and textures
+
+`cindral-io` owns versioned ZIP/RON archives, migrations, atomic writes, bounded image decoding and OBJ/STL/glTF boundaries. `DraftBundle` combines the existing runtime-independent `DocumentData` schema 1 with original encoded image assets. Archive wrapper version 2 adds coordinates and checksummed image records; its explicit v1 migration is covered by a saved binary fixture. Full document validation rebuilds runtime spatial indices at file boundaries. History, active context and construction guides remain session state; loading starts at root with empty undo/redo. See [file format and user-visible behavior](FILE_FORMAT.md).
+
+The app owns file dialogs and asset slot→GPU layer mapping, without putting IO into the kernel. It saves committed snapshots, cancels provisional drags for explicit save/open/export, and queues periodic background autosaves after capturing a DTO on the UI thread. Each document/session has a distinct recovery target. A synchronous outgoing-draft backup uses a fresh path so an older in-flight autosave cannot overwrite newer outgoing values. Recovery is explicit and opens an unsaved draft; native files are never silently replaced by recovery.
+
+Source PNG/JPEG bytes are embedded once and reused across materials/instances. Renderer previews use a bounded sRGB texture array (white layer 0, up to 127 asset layers), planar local UVs, repeat sampling and texture alpha through the opaque/transparent passes. `FaceVertex` remains 44 bytes: its material float packs the explicit-material bit and texture layer; instance parameters carry inherited texture layers. No new vertex attributes are needed. Changing the asset table updates painted face slots and instance bindings, preserving incremental geometry caches and translated render frames. Queued scene updates retain the newest texture table. Preview images are 256×256; source resolution is retained for files/export. Transparency still has the M5 ordering limitation.
+
+OBJ/STL flatten visible transformed occurrences; glTF retains nested placements, shared definition geometry and shared accessors across material variants. Native/OBJ/STL coordinates are metres/right-handed Z-up; glTF gets a single Y-up root conversion. OBJ import builds welded DTO geometry directly rather than executing a global topology rebuild per face. Native face normals/planar UVs replace arbitrary imported authored normal/UV seams; general nonplanar OBJ polygons are rejected. OBJ sidecars are individually atomic, not a multi-file transaction.
+
+M6 final IO means: 21,600-face save/load 412.748/536.676 ms;60,000-face 1079.619/1482.567 ms;5,000-instance 14.457/39.187 ms. These include full file-boundary validation, not GPU meshing or the app's second reconstruction. [File benchmark](FILE_BENCHMARK.md) records methods, sizes and raw repetitions. The strict connected kernel runner still passes; completed GPU update maxima 4.501/5.247 ms at 21,600 faces and 7.624/14.887 ms at60,000 faces (push/pull/Move), with commits 0.003–0.007 ms. The 5,000-instance render regression averages 1.556 ms (p95 1.736 ms). These workloads do not imply a full-editor frame-rate guarantee.

@@ -4,6 +4,7 @@ pub mod camera;
 pub mod grid;
 pub mod mesh;
 pub mod scene;
+pub mod texture;
 
 pub use mesh::{
     EdgeVertex, FaceStyle, FaceVertex, GeometryBuffers, MeshCache, MeshUpdate, ModelCallback,
@@ -11,4 +12,7 @@ pub use mesh::{
 };
 pub use scene::{
     DefinitionUpdate, InstanceBatch, InstanceData, SceneCallback, SceneRenderer, SceneUpdate,
+};
+pub use texture::{
+    TextureError, TexturePixels, DEFAULT_WHITE_LAYER, MAX_TEXTURE_LAYERS, PREVIEW_SIZE,
 };

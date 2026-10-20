@@ -34,6 +34,7 @@ use cindral_core::DefinitionId;
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, ScreenDescriptor};
 
 use crate::mesh::{EdgeVertex, FaceVertex, GeometryBuffers, MeshUpdate};
+use crate::texture::{prepare_preview_layers, TexturePixels, PREVIEW_SIZE};
 
 /// Offscreen color target format (transparent RGBA).
 const OFFSCREEN_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -66,7 +67,8 @@ pub struct InstanceData {
     /// Parameters:
     /// - `[0]`: 1.0 if inherited container material is enabled, 0.0 otherwise.
     /// - `[1]`: dim factor (1.0 for active context, 0.25 for outside/inactive context).
-    /// - `[2..]`: reserved for future use.
+    /// - `[2]`: texture array layer index (0.0 for white/untextured).
+    /// - `[3]`: reserved for future use.
     pub parameters: [f32; 4],
 }
 
@@ -89,6 +91,17 @@ impl InstanceData {
             material: mat_arr,
             parameters: [inherited_enabled, dim, 0.0, 0.0],
         }
+    }
+
+    /// Stores the texture array layer index in `parameters[2]`.
+    pub fn with_texture(mut self, layer: u32) -> Self {
+        self.parameters[2] = layer as f32;
+        self
+    }
+
+    /// Returns the assigned texture array layer index.
+    pub fn texture_layer(&self) -> u32 {
+        self.parameters[2].max(0.0) as u32
     }
 }
 
@@ -119,6 +132,8 @@ pub struct SceneUpdate {
     pub batches: Option<Vec<InstanceBatch>>,
     /// Definitions removed from the document, whose GPU buffers should be freed.
     pub removed: Vec<DefinitionId>,
+    /// Optional texture array image data for layers 1..N (layer 0 is reserved for white).
+    pub textures: Option<Arc<Vec<TexturePixels>>>,
 }
 
 fn align_capacity(size: u64) -> u64 {
@@ -226,7 +241,11 @@ struct OffscreenTarget {
 pub struct SceneRenderer {
     definitions: BTreeMap<DefinitionId, DefinitionState>,
     uniform: wgpu::Buffer,
+    camera_layout: wgpu::BindGroupLayout,
     camera_bind_group: wgpu::BindGroup,
+    texture_sampler: wgpu::Sampler,
+    materials_texture: wgpu::Texture,
+    default_texture_initialized: bool,
     opaque_face_pipeline: wgpu::RenderPipeline,
     transparent_face_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
@@ -235,7 +254,64 @@ pub struct SceneRenderer {
     composite_sampler: wgpu::Sampler,
     offscreen: OffscreenTarget,
     last_update: Option<Weak<SceneUpdate>>,
+    last_textures: Option<Weak<Vec<TexturePixels>>>,
     draw_calls: usize,
+}
+
+fn create_materials_texture_array(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layers: &[TexturePixels],
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let layer_count = (layers.len() as u32).max(1);
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Cindral scene materials texture array"),
+        size: wgpu::Extent3d {
+            width: PREVIEW_SIZE,
+            height: PREVIEW_SIZE,
+            depth_or_array_layers: layer_count,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    for (layer_idx, layer) in layers.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer_idx as u32,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &layer.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(PREVIEW_SIZE * 4),
+                rows_per_image: Some(PREVIEW_SIZE),
+            },
+            wgpu::Extent3d {
+                width: PREVIEW_SIZE,
+                height: PREVIEW_SIZE,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("Cindral scene materials texture array view"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+
+    (texture, view)
 }
 
 impl SceneRenderer {
@@ -251,25 +327,84 @@ impl SceneRenderer {
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Cindral scene camera layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Cindral scene texture sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            ..Default::default()
+        });
+
+        let materials_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Cindral scene materials texture array"),
+            size: wgpu::Extent3d {
+                width: PREVIEW_SIZE,
+                height: PREVIEW_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let materials_view = materials_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Cindral scene materials texture array view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
         });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Cindral scene camera binding"),
             layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&materials_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&texture_sampler),
+                },
+            ],
         });
 
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -589,7 +724,11 @@ impl SceneRenderer {
         Self {
             definitions: BTreeMap::new(),
             uniform,
+            camera_layout,
             camera_bind_group,
+            texture_sampler,
+            materials_texture,
+            default_texture_initialized: false,
             opaque_face_pipeline,
             transparent_face_pipeline,
             edge_pipeline,
@@ -598,6 +737,7 @@ impl SceneRenderer {
             composite_sampler,
             offscreen,
             last_update: None,
+            last_textures: None,
             draw_calls: 0,
         }
     }
@@ -608,12 +748,37 @@ impl SceneRenderer {
     /// - Dirty writes affect only the supplied definitions.
     /// - Instance-only batch updates (`geometry` empty) update instance buffers without
     ///   reuploading geometry.
+    /// - Textures update camera texture bindings; falls back safely on invalid pixels.
     pub fn apply_update(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         update: &SceneUpdate,
     ) {
+        if !self.default_texture_initialized {
+            let white_preview = TexturePixels::default_white_preview();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.materials_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &white_preview.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(PREVIEW_SIZE * 4),
+                    rows_per_image: Some(PREVIEW_SIZE),
+                },
+                wgpu::Extent3d {
+                    width: PREVIEW_SIZE,
+                    height: PREVIEW_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.default_texture_initialized = true;
+        }
+
         for removed_id in &update.removed {
             self.definitions.remove(removed_id);
         }
@@ -639,6 +804,39 @@ impl SceneRenderer {
                             instances: InstanceBuffer::new(device),
                         });
                 state.instances.update(device, queue, &batch.instances);
+            }
+        }
+
+        if let Some(textures) = &update.textures {
+            let changed = self
+                .last_textures
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .is_none_or(|prev| !Arc::ptr_eq(&prev, textures));
+            if changed {
+                let layers = prepare_preview_layers(textures);
+                let (texture, view) = create_materials_texture_array(device, queue, &layers);
+                self.camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Cindral scene camera binding"),
+                    layout: &self.camera_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.uniform.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
+                        },
+                    ],
+                });
+                self.materials_texture = texture;
+                self.default_texture_initialized = true;
+                self.last_textures = Some(Arc::downgrade(textures));
             }
         }
     }
@@ -716,6 +914,29 @@ impl SceneRenderer {
         view_projection: [[f32; 4]; 4],
         size: [u32; 2],
     ) {
+        if !self.default_texture_initialized {
+            let white_preview = TexturePixels::default_white_preview();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.materials_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &white_preview.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(PREVIEW_SIZE * 4),
+                    rows_per_image: Some(PREVIEW_SIZE),
+                },
+                wgpu::Extent3d {
+                    width: PREVIEW_SIZE,
+                    height: PREVIEW_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.default_texture_initialized = true;
+        }
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&view_projection));
         if self.ensure_target_size(device, size) {
             self.render_offscreen(encoder);
@@ -1096,6 +1317,7 @@ mod tests {
         assert!(update.geometry.is_empty());
         assert!(update.batches.is_none());
         assert!(update.removed.is_empty());
+        assert!(update.textures.is_none());
 
         let def_update = DefinitionUpdate {
             definition: DefinitionId(1),
@@ -1109,10 +1331,26 @@ mod tests {
             geometry: vec![def_update],
             batches: Some(vec![batch]),
             removed: vec![DefinitionId(99)],
+            textures: None,
         };
         assert_eq!(custom_update.geometry.len(), 1);
         assert_eq!(custom_update.batches.as_ref().unwrap().len(), 1);
         assert_eq!(custom_update.removed, vec![DefinitionId(99)]);
+        assert!(custom_update.textures.is_none());
+    }
+
+    #[test]
+    fn instance_data_with_texture_layer() {
+        let inst =
+            InstanceData::new(Mat4::IDENTITY, Some([0.1, 0.2, 0.3, 1.0]), 1.0).with_texture(42);
+        assert_eq!(inst.parameters[0], 1.0); // inherited enabled
+        assert_eq!(inst.parameters[1], 1.0); // dim factor
+        assert_eq!(inst.parameters[2], 42.0); // texture layer
+        assert_eq!(inst.texture_layer(), 42);
+
+        let default_inst = InstanceData::new(Mat4::IDENTITY, None, 0.5);
+        assert_eq!(default_inst.parameters[2], 0.0);
+        assert_eq!(default_inst.texture_layer(), 0);
     }
 }
 

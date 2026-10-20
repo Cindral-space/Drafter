@@ -42,7 +42,7 @@ pub(crate) struct OrganizationUi {
     material_name: String,
     color: [f32; 3],
     opacity: f32,
-    texture: String,
+    pub(crate) texture: String,
 }
 impl Default for OrganizationUi {
     fn default() -> Self {
@@ -492,8 +492,17 @@ impl DrafterApp {
                         );
                         ui.add(
                             egui::TextEdit::singleline(&mut self.organization.texture)
-                                .hint_text("Texture slot (M6 loading)"),
+                                .hint_text("Texture asset slot"),
                         );
+                        if ui
+                            .add_enabled(
+                                self.organization.material.is_some(),
+                                egui::Button::new("Load PNG/JPEG texture…"),
+                            )
+                            .clicked()
+                        {
+                            self.load_material_texture();
+                        }
                         let material = Material {
                             name: self.organization.material_name.clone(),
                             color: self.organization.color,

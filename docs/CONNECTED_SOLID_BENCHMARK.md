@@ -21,7 +21,7 @@ The deadline includes setup and startup. Thus each edit remained unfinished afte
 
 Placing the same solid inside a group exercises a different operation: it changes a local matrix without touching its topology. Three runs measured placement preview **0.004–0.007 ms**, commit **0.004–0.007 ms** and undo **0.004–0.008 ms**, excluding initial mesh preparation, scene batching and GPU upload. These are from the final [component workload](COMPONENT_BENCHMARK.md), which also contains the connected-group fixture. Fast matrix placement does not repair the raw geometry-edit bottleneck.
 
-The remaining cost is dense connected-shell Boolean reconstruction and topology validation/index updates for raw transformations. The follow-up plan in [architecture](ARCHITECTURE.md#next-incremental-work-after-the-connected-solid-measurement) targets adjacency/face broad-phase indexes, preservation of untouched shell regions, affine whole-shell fast paths, and bounded/cancellable work. At the M5 baseline, synchronous raw edits stalled the UI on this workload. The optimized measurements below supersede that baseline for the tested commands.
+The remaining cost is dense connected-shell Boolean reconstruction and topology validation/index updates for raw transformations. The follow-up plan in [architecture](ARCHITECTURE.md#connected-raw-edit-optimization-before-m6) targets adjacency/face broad-phase indexes, preservation of untouched shell regions, affine whole-shell fast paths, and bounded/cancellable work. At the M5 baseline, synchronous raw edits stalled the UI on this workload. The optimized measurements below supersede that baseline for the tested commands.
 
 ## Profiling diagnosis before algorithm changes
 
@@ -86,3 +86,17 @@ These measurements exclude initial mesh/GPU setup, picking, inference, UI layout
 | Push/pull, 60,000 faces | 6.400 | 6.571 | 10.380 | 0.009 |
 
 These completed-update runs pass the 21,600-face targets and the proportional scaling budgets. The 60,000-face cold Move update is slightly above 16 ms; steady updates are below it. No claim is made that every complex Boolean or full presented frame meets this budget.
+
+
+## M6 regression check — 2026-10-21
+
+After archive/texture integration, the strict 10-second-per-case kernel runner still passes at 21,600 and 60,000 faces. [Raw kernel results](benchmarks/2026-10-21-m6-connected.txt): 21,600-face preview maxima 1.823 ms push/pull and 4.797 ms Move; commit 0.005/0.007 ms. At 60,000 faces: 5.210/12.261 ms maxima and 0.003/0.006 ms commits. Full diagnostic validation remains 409–419 ms and 988–1138 ms respectively; it is outside these live edits and is included at native file boundaries.
+
+[Completed GPU update results](benchmarks/2026-10-21-m6-connected-gpu.txt), native Wayland/OpenGL, same fixtures and budget enforcement:
+
+| Faces | Push/pull mean / max ms | Move mean / max ms | Commit ms (push/pull / Move) |
+| ---: | ---: | ---: | ---: |
+| 21,600 | 2.947 /4.501 | 3.086 /5.247 | 0.005 /0.004 |
+| 60,000 | 6.308 /7.624 | 7.075 /14.887 | 0.003 /0.006 |
+
+All sampled updates in this rerun are below 16 ms, including the cold 60,000-face Move; scaling remains approximately linear. These are kernel/cache/completed-upload measurements, excluding actual drawing/presentation/picking/UI. Existing conservative local-extrusion guards and general-Boolean limits still apply. [M6 native save/load](FILE_BENCHMARK.md) is measured separately, with full validation included.

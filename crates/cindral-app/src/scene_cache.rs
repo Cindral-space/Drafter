@@ -17,8 +17,15 @@ pub(crate) struct SceneCache {
     baselines: BTreeMap<DefinitionId, cindral_core::DVec3>,
     placements: BTreeMap<DefinitionId, cindral_core::DVec3>,
     revision: Option<u64>,
+    texture_layers: BTreeMap<String, u32>,
+    textures: Option<Arc<Vec<cindral_render::texture::TexturePixels>>>,
 }
-fn style(doc: &DocumentHistory, _id: FaceId, face: &Face) -> FaceStyle {
+fn style(
+    doc: &DocumentHistory,
+    _id: FaceId,
+    face: &Face,
+    layers: &BTreeMap<String, u32>,
+) -> FaceStyle {
     if let Some(material) = face.material.and_then(|id| doc.materials().get(&id)) {
         return FaceStyle {
             color: [
@@ -28,6 +35,12 @@ fn style(doc: &DocumentHistory, _id: FaceId, face: &Face) -> FaceStyle {
                 material.opacity,
             ],
             explicit_material: true,
+            texture_layer: material
+                .texture
+                .as_ref()
+                .and_then(|key| layers.get(key))
+                .copied()
+                .unwrap_or_default(),
         };
     }
     let color = if face.color == [160, 177, 193, 255] {
@@ -43,9 +56,19 @@ fn style(doc: &DocumentHistory, _id: FaceId, face: &Face) -> FaceStyle {
     FaceStyle {
         color,
         explicit_material: face.color != [160, 177, 193, 255],
+        texture_layer: 0,
     }
 }
 impl SceneCache {
+    pub(crate) fn set_textures(
+        &mut self,
+        layers: BTreeMap<String, u32>,
+        pixels: Vec<cindral_render::texture::TexturePixels>,
+    ) {
+        self.texture_layers = layers;
+        self.textures = Some(Arc::new(pixels));
+        self.revision = None;
+    }
     pub(crate) fn definitions(&self) -> Vec<DefinitionId> {
         self.meshes.keys().copied().collect()
     }
@@ -57,13 +80,17 @@ impl SceneCache {
         if self.initialized && self.revision == Some(changes.revision) {
             return Ok(SceneUpdate::default());
         }
+        let textures_changed = self.textures.is_some();
         let mut translated = false;
         let instances = !self.initialized || changes.instances;
         if instances {
             self.occurrences = doc.occurrences()?;
         }
         let visible: BTreeSet<_> = self.occurrences.iter().map(|o| o.definition).collect();
-        let mut update = SceneUpdate::default();
+        let mut update = SceneUpdate {
+            textures: self.textures.take(),
+            ..Default::default()
+        };
         let removed = self
             .meshes
             .keys()
@@ -81,8 +108,9 @@ impl SceneCache {
                 .definition_model(*id)
                 .ok_or(KernelError::MissingEntity)?;
             if let std::collections::btree_map::Entry::Vacant(entry) = self.meshes.entry(*id) {
-                let (cache, mesh) =
-                    MeshCache::rebuild_styled(model, &|face_id, face| style(doc, face_id, face))?;
+                let (cache, mesh) = MeshCache::rebuild_styled(model, &|face_id, face| {
+                    style(doc, face_id, face, &self.texture_layers)
+                })?;
                 entry.insert(cache);
                 self.baselines.insert(*id, model.translation_offset());
                 self.placements.insert(*id, cindral_core::DVec3::ZERO);
@@ -96,15 +124,18 @@ impl SceneCache {
                 model.translation_offset() - self.baselines.get(id).copied().unwrap_or_default();
             translated |= self.placements.insert(*id, offset) != Some(offset);
             let dirty = changes.geometry.get(id);
-            if dirty.is_some_and(|d| d.rigid_translation) && !changes.appearance {
+            if dirty.is_some_and(|d| d.rigid_translation)
+                && !changes.appearance
+                && !textures_changed
+            {
                 continue;
             }
-            if dirty.is_some() || changes.appearance {
+            if dirty.is_some() || changes.appearance || textures_changed {
                 let mut faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
                 let edges = dirty
                     .map(|d| d.edges.iter().copied().collect::<Vec<_>>())
                     .unwrap_or_default();
-                if changes.appearance {
+                if changes.appearance || textures_changed {
                     faces.extend(
                         model
                             .faces()
@@ -121,7 +152,7 @@ impl SceneCache {
                         &faces.into_iter().collect::<Vec<_>>(),
                         &edges,
                         offset,
-                        &|face_id, face| style(doc, face_id, face),
+                        &|face_id, face| style(doc, face_id, face, &self.texture_layers),
                     )?;
                 update.geometry.push(DefinitionUpdate {
                     definition: *id,
@@ -129,7 +160,7 @@ impl SceneCache {
                 });
             }
         }
-        if instances || changes.appearance || translated {
+        if instances || changes.appearance || translated || textures_changed {
             let mut batches: BTreeMap<DefinitionId, Vec<InstanceData>> = BTreeMap::new();
             for item in &self.occurrences {
                 let world = (item.world
@@ -152,10 +183,16 @@ impl SceneCache {
                 } else {
                     0.25
                 };
-                batches
-                    .entry(item.definition)
-                    .or_default()
-                    .push(InstanceData::new(world, material, dim));
+                batches.entry(item.definition).or_default().push(
+                    InstanceData::new(world, material, dim).with_texture(
+                        item.material
+                            .and_then(|id| doc.materials().get(&id))
+                            .and_then(|m| m.texture.as_ref())
+                            .and_then(|key| self.texture_layers.get(key))
+                            .copied()
+                            .unwrap_or_default(),
+                    ),
+                );
             }
             for id in self.meshes.keys() {
                 batches.entry(*id).or_default();
@@ -208,6 +245,9 @@ pub(crate) fn merge(pending: &mut Option<Arc<SceneUpdate>>, mut next: SceneUpdat
             } else {
                 previous.geometry.push(definition);
             }
+        }
+        if next.textures.is_some() {
+            previous.textures = next.textures;
         }
         if next.batches.is_some() {
             previous.batches = next.batches;
@@ -353,5 +393,47 @@ mod tests {
         let update = cache.sync(&doc).unwrap();
         assert!(update.geometry.is_empty());
         assert_eq!(update.batches.unwrap()[0].instances[0].model[3][0], 0.);
+    }
+    #[test]
+    fn changing_texture_table_updates_material_slots_and_queued_assets() {
+        let mut doc = DocumentHistory::new();
+        doc.execute(Command::AddPolyline {
+            points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+            closed: true,
+        })
+        .unwrap();
+        let material = MaterialId(doc.to_data().next_id);
+        doc.organization(OrganizationCommand::CreateMaterial(Material {
+            name: "Textured".into(),
+            color: [1.; 3],
+            opacity: 1.,
+            texture: Some("asset".into()),
+        }))
+        .unwrap();
+        doc.organization(OrganizationCommand::PaintFaces {
+            faces: doc.model().faces().keys().copied().collect(),
+            material: Some(material),
+        })
+        .unwrap();
+        let mut cache = SceneCache::default();
+        cache.sync(&doc).unwrap();
+        cache.set_textures(
+            BTreeMap::from([("asset".into(), 1)]),
+            vec![cindral_render::texture::TexturePixels::new(
+                1,
+                1,
+                vec![20, 40, 60, 128],
+            )],
+        );
+        let update = cache.sync(&doc).unwrap();
+        assert_eq!(update.textures.as_ref().unwrap().len(), 1);
+        let bytes = &update.geometry[0].mesh.face_writes[0].bytes;
+        assert_eq!(f32::from_ne_bytes(bytes[40..44].try_into().unwrap()), 3.);
+        let mut pending = None;
+        merge(&mut pending, update);
+        cache.set_textures(BTreeMap::new(), Vec::new());
+        merge(&mut pending, cache.sync(&doc).unwrap());
+        assert!(pending.unwrap().textures.as_ref().unwrap().is_empty());
+        assert!(cache.sync(&doc).unwrap().textures.is_none());
     }
 }

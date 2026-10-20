@@ -1,0 +1,19 @@
+Building release connected_benchmark...
+    Finished `release` profile [optimized] target(s) in 0.29s
+Running pushpull n=60...
+mode pushpull; segments 60; vertices 21602; edges 43200; faces 21600; setup_ms 169.773
+preview_cold_ms 1.771; preview_mean_ms 1.694; preview_p95_ms 1.741; preview_max_ms 1.823; commit_ms 0.005; undo_ms 0.087; redo_ms 0.086; full_validation_ms 409.031
+preview_budget_ms 16.000; commit_budget_ms 100.000; budget_pass true
+Running move n=60...
+mode move; segments 60; vertices 21602; edges 43200; faces 21600; setup_ms 163.329
+preview_cold_ms 4.797; preview_mean_ms 1.042; preview_p95_ms 1.422; preview_max_ms 4.797; commit_ms 0.007; undo_ms 2.495; redo_ms 3.058; full_validation_ms 418.549
+preview_budget_ms 16.000; commit_budget_ms 100.000; budget_pass true
+Running pushpull n=100...
+mode pushpull; segments 100; vertices 60002; edges 120000; faces 60000; setup_ms 448.720
+preview_cold_ms 4.469; preview_mean_ms 4.310; preview_p95_ms 4.840; preview_max_ms 5.210; commit_ms 0.003; undo_ms 0.115; redo_ms 0.089; full_validation_ms 988.177
+preview_budget_ms 44.444; commit_budget_ms 277.778; budget_pass true
+Running move n=100...
+mode move; segments 100; vertices 60002; edges 120000; faces 60000; setup_ms 423.717
+preview_cold_ms 12.261; preview_mean_ms 2.474; preview_p95_ms 2.694; preview_max_ms 12.261; commit_ms 0.006; undo_ms 7.293; redo_ms 6.037; full_validation_ms 1137.834
+preview_budget_ms 44.444; commit_budget_ms 277.778; budget_pass true
+All connected performance benchmarks completed successfully.

@@ -7,6 +7,7 @@ use cindral_render::{
     scene::{SceneCallback, SceneRenderer, SceneUpdate},
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
+mod files_ui;
 mod modify_ui;
 mod organization_ui;
 mod scene_cache;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 /// Editor state; geometry changes are committed only through core commands.
 pub struct DrafterApp {
+    files: files_ui::FileState,
     camera: Camera,
     modifying: bool,
     modify: ModifySession,
@@ -42,6 +44,7 @@ pub struct DrafterApp {
 impl Default for DrafterApp {
     fn default() -> Self {
         Self {
+            files: files_ui::FileState::default(),
             camera: Camera::default(),
             modifying: false,
             modify: ModifySession::new(ModifyKind::Select),
@@ -449,6 +452,7 @@ impl eframe::App for DrafterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                self.file_menu(ui);
                 ui.label(
                     RichText::new("CINDRAL DRAFTER")
                         .strong()
@@ -494,9 +498,12 @@ impl eframe::App for DrafterApp {
                 let field=ui.add(egui::TextEdit::singleline(&mut self.measurement).desired_width(145.).hint_text(if self.modifying {match self.modify.kind(){ModifyKind::Rotate=>"angle / deg",ModifyKind::Scale=>"factor / x / %",_=>"distance"}} else {match self.tool.kind(){ToolKind::Rectangle=>"width,height",ToolKind::Arc=>"degrees",_=>"length / radius"}}));
                 if field.lost_focus() && ctx.input(|i|i.key_pressed(Key::Enter)) {self.apply_measurement();}
             });
+            ui.label(self.file_status());
             if let Some(error)=&self.error {ui.colored_label(Color32::LIGHT_RED,error);}
             else {ui.label("MMB orbit · Shift+MMB pan · Scroll zoom · Arrows lock X/Y/Z · Esc cancel · Type a value, Enter");}
         });
+        self.recovery_window(ctx);
+        self.autosave_tick(ctx);
         self.organization_panel(ctx);
         egui::SidePanel::left("navigation")
             .exact_width(174.)
@@ -639,8 +646,12 @@ impl eframe::App for DrafterApp {
                 if rect.width() <= 0. || rect.height() <= 0. {
                     return;
                 }
-                self.viewport_input(&response);
                 let aspect = rect.width() / rect.height();
+                if self.files.fit {
+                    self.extents(aspect);
+                    self.files.fit = false;
+                }
+                self.viewport_input(&response);
                 let matrix = self.camera.view_projection(aspect);
                 ui.painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(

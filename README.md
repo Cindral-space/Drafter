@@ -22,7 +22,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M3: drawing and inference
 - [x] M4: modification tools
 - [x] M5: organization
-- [ ] M6: files and export
+- [x] M6: files and export
 - [ ] M7: presentation
 
 ## Run the viewport
@@ -61,7 +61,7 @@ The example captures the rendered window and exits. Use the native display sessi
 
 `cindral-core::History` owns a read-only `Model`. Draw with `Command::AddEdge` or `AddPolyline`, erase with `EraseEdges`, set soft/smooth flags with `SetEdgeStyle`, and combine actions into an atomic `Batch`. `execute`, `undo` and `redo` return `Result<bool, KernelError>`; failed edits preserve both geometry and history. See the core crate's tested example and [architecture](docs/ARCHITECTURE.md) for the public interface.
 
-The kernel welds/splits intersections and overlaps, derives planar regions with holes, triangulates them, and heals erased coplanar boundaries. Coordinates are f64 meters with a shared 1e-7 m tolerance and a supported ±1e6 m coordinate range. Local transactions, delta history and dirty mesh uploads handle edits; see [kernel measurements](docs/KERNEL_BENCHMARK.md). Extrusion and other modification tools come in M4.
+The kernel welds/splits intersections and overlaps, derives planar regions with holes, triangulates them, and heals erased coplanar boundaries. Coordinates are f64 meters with a shared 1e-7 m tolerance and a supported ±1e6 m coordinate range. Local transactions, delta history and dirty mesh uploads handle edits; see [kernel measurements](docs/KERNEL_BENCHMARK.md). Extrusion and modification tools use the same command/history boundary.
 
 ## Large-mesh baseline
 
@@ -97,6 +97,19 @@ See [kernel benchmark](docs/KERNEL_BENCHMARK.md) for measured update costs and [
 
 Select connected geometry and use **Group selection** or **Component** in the Outliner. Components share a definition; **Unique** breaks the selected link. Double-click a container to edit it, and use Escape, Exit, or click outside to leave. Tools and snaps use that context's local geometry; surrounding instances are dimmed. Global undo/redo reverts shared edits across every instance.
 
-The Outliner supports rename, hide, duplicate and drag-to-reparent. Tags control container visibility; loose geometry remains untagged. Create RGB/opacity materials in the sidebar, select one for Paint Bucket or **Paint selected**; texture slots are stored as values for M6. Use Move/Copy, Rotate and Scale on containers for live matrix previews and one release commit.
+The Outliner supports rename, hide, duplicate and drag-to-reparent. Tags control container visibility; loose geometry remains untagged. Create RGB/opacity materials in the sidebar, select one for Paint Bucket or **Paint selected**; load PNG/JPEG textures through the Materials panel. Use Move/Copy, Rotate and Scale on containers for live matrix previews and one release commit.
 
-See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid limitations](docs/CONNECTED_SOLID_BENCHMARK.md). Reproduce the native organization capture with `--organization` on the `capture_viewport` example. Schema version 1 DTOs are ready; `.cdraft` encoding/export remains M6.
+See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid measurements](docs/CONNECTED_SOLID_BENCHMARK.md). Reproduce the native organization capture with `--organization` on the `capture_viewport` example. Native archive version 2 stores document schema 1, embedded textures and shared definitions.
+
+
+## Files and interchange (M6)
+
+Use **File** to create/open/save `.cdraft`, import OBJ, export OBJ/STL/glTF 2, and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup offers retained crash snapshots.
+
+Materials can embed PNG/JPEG images; original bytes survive native round trips, while the viewport uses 256×256 planar previews. OBJ/STL flatten visible instances in metres/Z-up; glTF shares meshes with nested placement nodes and converts to metres/Y-up. See [format, migration, recovery and interchange limits](docs/FILE_FORMAT.md) and [save/load measurements](docs/FILE_BENCHMARK.md).
+
+```sh
+cargo run --release -p cindral-io --features bench-fixtures --example file_benchmark
+cargo run -p cindral-io --example make_texture_demo -- /tmp/textured.cdraft
+CINDRAL_CAPTURE_DRAFT=/tmp/textured.cdraft WGPU_BACKEND=opengl cargo run -p cindral-app --example capture_viewport -- /tmp/textured.ppm
+```

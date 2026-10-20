@@ -1,0 +1,9 @@
+connected-21600 run1: save_ms 465.114; load_ms 555.585; zip_bytes 720272
+connected-21600 run2: save_ms 383.263; load_ms 527.953; zip_bytes 720272
+connected-21600 run3: save_ms 389.868; load_ms 526.491; zip_bytes 720272
+connected-60000 run1: save_ms 1039.526; load_ms 1512.521; zip_bytes 1795954
+connected-60000 run2: save_ms 1053.873; load_ms 1466.720; zip_bytes 1795954
+connected-60000 run3: save_ms 1145.459; load_ms 1468.461; zip_bytes 1795954
+instances-5000 run1: save_ms 14.215; load_ms 39.708; zip_bytes 47897
+instances-5000 run2: save_ms 14.243; load_ms 38.760; zip_bytes 47897
+instances-5000 run3: save_ms 14.914; load_ms 39.093; zip_bytes 47897
