@@ -443,6 +443,8 @@ fn surfaces(
         vertices: old.vertices.clone(),
         ..Model::default()
     };
+    let insertion_span =
+        tracing::info_span!("surfaces.insert_segments", polygons = polygons.len()).entered();
     for p in &polygons {
         for (a, b) in p.vertices.iter().zip(p.vertices.iter().cycle().skip(1)) {
             if a.distance(*b) > TOLERANCE {
@@ -450,6 +452,8 @@ fn surfaces(
             }
         }
     }
+    drop(insertion_span);
+    let seam_span = tracing::info_span!("surfaces.seam_scan", edges = result.edges.len()).entered();
     // Split edges first, then remove boundaries shared by coplanar convex pieces.
     let mut seams = Vec::new();
     for (id, e) in &result.edges {
@@ -479,9 +483,14 @@ fn surfaces(
     for id in seams {
         result.edges.remove(&id);
     }
+    drop(seam_span);
     result.heal_scope = None;
+    let heal_span = tracing::info_span!("surfaces.heal").entered();
     result.heal()?;
+    drop(heal_span);
+    let rebuild_span = tracing::info_span!("surfaces.rebuild_faces").entered();
     result.rebuild_faces()?;
+    drop(rebuild_span);
     let mut remove = Vec::new();
     for id in result.faces.keys() {
         let triangles = result.triangulate(*id)?;

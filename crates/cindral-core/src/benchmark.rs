@@ -127,3 +127,9 @@ mod tests {
         f.history.model().validate().unwrap();
     }
 }
+
+/// Execute the retained reference algorithm for small-model equivalence tests.
+/// This benchmark-only API must never be used for interactive large models.
+pub fn reference_execute(history: &mut History, command: Command) -> Result<bool, KernelError> {
+    history.execute(command)
+}
