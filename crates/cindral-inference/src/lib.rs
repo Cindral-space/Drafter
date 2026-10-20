@@ -132,6 +132,8 @@ pub struct Query {
     pub axis_lock: Option<Axis>,
     /// Optional tangent guide.
     pub tangent: Option<TangentHint>,
+    /// Optional section in this query coordinate frame.
+    pub section: Option<cindral_core::SectionPlane>,
 }
 impl Query {
     /// Construct an unconstrained query on the XY work plane.
@@ -145,6 +147,7 @@ impl Query {
             previous_direction: None,
             axis_lock: None,
             tangent: None,
+            section: None,
         }
     }
 }

@@ -4,6 +4,7 @@ struct Camera {
     background: vec4<f32>,
     reserved: vec4<f32>,
     view_origin: vec4<f32>,
+    section: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -20,6 +21,7 @@ struct FaceOutput {
     @location(5) dim: f32,
     @location(6) uv: vec2<f32>,
     @location(7) tex_layer: f32,
+    @location(8) section_distance: f32,
 };
 
 @vertex
@@ -40,6 +42,7 @@ fn vs_face(
     @location(13) inst_params: vec4<f32>,
 ) -> FaceOutput {
     var out: FaceOutput;
+    out.section_distance = 0.0;
     // Degenerate/zeroed slot detection uses zero normal rather than color
     if dot(normal, normal) == 0.0 {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
@@ -59,13 +62,14 @@ fn vs_face(
 
     let world_pos = model_matrix * vec4<f32>(position, 1.0);
     out.position = camera.view_projection * world_pos;
+    out.section_distance = select(dot(camera.section, world_pos), 0.0, material < 0.0);
 
     // Normal transformation using inverse-transpose normal matrix (handles mirror/non-uniform scale)
     let transformed_normal = (normal_matrix * vec4<f32>(normal, 0.0)).xyz;
     out.normal = transformed_normal;
 
     // Decode FaceVertex.material packed float: texture_layer * 2 + explicit_material_bit
-    let mat_int = u32(material + 0.5);
+    let mat_int = u32(max(material, 0.0) + 0.5);
     let face_layer = mat_int / 2u;
     let explicit_bit = mat_int % 2u;
     let explicit_material = f32(explicit_bit);
@@ -156,6 +160,7 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
 
 @fragment
 fn fs_face_opaque(in: FaceOutput) -> @location(0) vec4<f32> {
+    if in.section_distance < -0.00001 { discard; }
     let color = compute_face_shading(in);
     if color.a < 0.999 {
         discard;
@@ -165,6 +170,7 @@ fn fs_face_opaque(in: FaceOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_face_transparent(in: FaceOutput) -> @location(0) vec4<f32> {
+    if in.section_distance < -0.00001 { discard; }
     let color = compute_face_shading(in);
     if color.a >= 0.999 {
         discard;
@@ -176,6 +182,7 @@ fn fs_face_transparent(in: FaceOutput) -> @location(0) vec4<f32> {
 struct EdgeOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
+    @location(1) section_distance: f32,
 };
 
 struct EdgeInput {
@@ -208,6 +215,7 @@ fn is_profile(input: EdgeInput) -> bool {
 
 fn edge_vertex(input: EdgeInput) -> EdgeOutput {
     var out: EdgeOutput;
+    out.section_distance = 0.0;
     if dot(input.color, input.color) == 0.0 || (input.color.x < 0.0 && camera.style.y < 0.5) || (input.color.y < 0.0 && camera.style.z < 0.5) {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         out.color = vec3<f32>(0.0, 0.0, 0.0);
@@ -216,6 +224,7 @@ fn edge_vertex(input: EdgeInput) -> EdgeOutput {
 
     let model_matrix = mat4x4<f32>(input.m0, input.m1, input.m2, input.m3);
     let world_pos = model_matrix * vec4<f32>(input.position, 1.0);
+    out.section_distance = dot(camera.section, world_pos);
     out.position = camera.view_projection * world_pos;
     let dim = input.inst_params.y;
     let profile = is_profile(input) && camera.style.w > 0.5;
@@ -262,5 +271,6 @@ fn vs_profile_down(input: EdgeInput) -> EdgeOutput {
 
 @fragment
 fn fs_edge(in: EdgeOutput) -> @location(0) vec4<f32> {
+    if in.section_distance < -0.00001 { discard; }
     return vec4<f32>(in.color, 1.0);
 }

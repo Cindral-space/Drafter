@@ -158,7 +158,7 @@ impl DrafterApp {
                 .inverse()
                 .transform_vector3(direction.as_dvec3()),
         };
-        let hit = cindral_tools::pick(self.history.model(), ray, view, cursor, 10.);
+        let hit = cindral_tools::pick_section(self.history.model(), ray, view, cursor, 10., self.local_section().as_ref());
         let mut query = Query::new(cursor, ray, view);
         query.plane = DrawingPlane {
             origin: self.modify.anchor().unwrap_or(self.work_plane.origin),
@@ -170,6 +170,7 @@ impl DrafterApp {
                 self.work_plane.normal
             },
         };
+        query.section = self.local_section();
         query.anchor = self.modify.anchor();
         query.axis_lock = self.axis_lock;
         self.snap = self.engine.infer(self.history.model(), &query);

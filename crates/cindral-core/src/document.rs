@@ -642,6 +642,8 @@ impl DocumentHistory {
         style: crate::ViewStyle,
     ) -> crate::SavedScene {
         crate::SavedScene {
+            sections: Default::default(),
+            shadows: Default::default(),
             name,
             camera,
             style,

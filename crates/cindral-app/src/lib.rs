@@ -12,6 +12,7 @@ mod modify_ui;
 mod organization_ui;
 mod presentation_ui;
 mod scene_cache;
+mod section_ui;
 use eframe::egui::{self, Color32, Key, PointerButton, RichText};
 use glam::Vec2;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ pub struct DrafterApp {
     presentation: cindral_core::Presentation,
     presentation_ui: presentation_ui::PresentationUi,
     presentation_serial: u64,
+    section_ui: section_ui::SectionUi,
     camera: Camera,
     modifying: bool,
     modify: ModifySession,
@@ -52,6 +54,7 @@ impl Default for DrafterApp {
             presentation: Default::default(),
             presentation_ui: Default::default(),
             presentation_serial: 0,
+            section_ui: Default::default(),
             camera: Camera::default(),
             modifying: false,
             modify: ModifySession::new(ModifyKind::Select),
@@ -290,6 +293,7 @@ impl DrafterApp {
                 self.camera.orbit(Vec2::new(delta.x, delta.y));
             }
         }
+        if self.section_input(response) { return; }
         if self.organization_pointer(response) {
             return;
         }
@@ -407,6 +411,7 @@ impl DrafterApp {
                     },
                     view,
                 );
+                query.section = self.local_section();
                 query.plane = self.tool.plane();
                 query.anchor = self.tool.anchor();
                 query.axis_lock = self.axis_lock;
@@ -738,6 +743,7 @@ impl eframe::App for DrafterApp {
                             view_projection: matrix.to_cols_array_2d(),
                         },
                     ));
+                self.prepare_sections();
                 ui.painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
                         rect,
@@ -749,8 +755,11 @@ impl eframe::App for DrafterApp {
                             ],
                             update: self.pending.take(),
                             style: self.presentation.style.clone(),
+                            section: self.presentation.sections.cut().cloned(),
+                            caps: self.section_ui.caps.clone(),
                         },
                     ));
+                self.section_widgets(ui,rect);
                 let view = View {
                     matrix: matrix.as_dmat4() * self.history.world_transform(),
                     size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),

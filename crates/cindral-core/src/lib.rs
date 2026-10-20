@@ -82,3 +82,6 @@ mod local_extrusion;
 
 mod presentation;
 pub use presentation::*;
+
+mod section;
+pub use section::section_cap;

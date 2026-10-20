@@ -52,11 +52,14 @@ impl DrafterApp {
         self.files.last_revision = None;
     }
     fn capture_scene(&self, name: String) -> SavedScene {
-        self.history.capture_scene(
+        let mut scene = self.history.capture_scene(
             name,
             camera_values(&self.camera),
             self.presentation.style.clone(),
-        )
+        );
+        scene.sections=self.presentation.sections.clone();
+        scene.shadows=self.presentation.shadows.clone();
+        scene
     }
     fn add_scene(&mut self, name: String) {
         if !valid_name(&name) || self.presentation.scenes.len() >= 1000 {
@@ -128,6 +131,9 @@ impl DrafterApp {
             apply_camera(&mut self.camera, &scene.camera);
             None
         };
+        self.section_ui = Default::default();
+        self.presentation.sections = scene.sections;
+        self.presentation.shadows = scene.shadows;
         self.presentation.style = scene.style;
         self.presentation_ui.selected = Some(index);
         self.presentation_ui.name = scene.name;
@@ -239,6 +245,7 @@ impl DrafterApp {
                 if self.presentation.style != before {
                     self.presentation_changed();
                 }
+                self.section_panel(ui);
                 ui.separator();
                 ui.checkbox(&mut self.presentation_ui.animate, "Animate scene camera");
                 if self.presentation_ui.transition.is_some()
@@ -331,6 +338,29 @@ mod tests {
         app.organize(OrganizationCommand::CreateTag("Layer".into()))
             .unwrap();
         app
+    }
+    #[test]
+    fn scripted_section_scene_restores_view_without_geometry_edits() {
+        let mut app=fixture();
+        let geometry=app.history.to_data();
+        app.place_section(DVec3::new(0.5,0.,0.),DVec3::X);
+        app.presentation.shadows.enabled=true;
+        app.presentation.shadows.minutes=540.;
+        let sections=app.presentation.sections.clone();
+        let shadows=app.presentation.shadows.clone();
+        app.add_scene("Cut view".into());
+        app.presentation.sections.planes[0].distance=3.;
+        app.presentation.sections.planes[0].flip();
+        app.presentation.sections.enabled=false;
+        app.presentation.shadows.enabled=false;
+        app.restore_scene(0,0.,false);
+        assert_eq!(app.presentation.sections,sections);
+        assert_eq!(app.presentation.shadows,shadows);
+        assert_eq!(app.history.to_data(),geometry);
+        app.prepare_sections();
+        let caps=app.section_ui.caps.clone();
+        app.prepare_sections();
+        assert!(Arc::ptr_eq(&caps,&app.section_ui.caps));
     }
     #[test]
     fn scripted_scene_capture_switch_restore_and_native_roundtrip() {

@@ -584,7 +584,7 @@ impl DrafterApp {
 }
 
 impl DrafterApp {
-    fn scene_hit(&self, ray: Ray, view: View, cursor: DVec2) -> Option<cindral_tools::InstanceHit> {
+    pub(crate) fn scene_hit(&self, ray: Ray, view: View, cursor: DVec2) -> Option<cindral_tools::InstanceHit> {
         let items = self
             .scene
             .occurrences()
@@ -600,7 +600,7 @@ impl DrafterApp {
                 })
             })
             .collect::<Vec<_>>();
-        cindral_tools::pick_instances(&items, ray, view, cursor, 10.)
+        cindral_tools::pick_instances_section(&items, ray, view, cursor, 10., self.presentation.sections.cut())
     }
     pub(crate) fn selected_world_bounds(
         &self,
@@ -888,6 +888,7 @@ impl DrafterApp {
                 },
                 normal: self.work_plane.normal,
             };
+            query.section=self.local_section();
             if let Some(snap) = self.engine.infer(self.history.model(), &query) {
                 drag.last = snap.position;
                 self.snap = Some(snap);

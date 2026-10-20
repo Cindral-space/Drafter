@@ -8,7 +8,7 @@ mod modify;
 mod selection;
 pub use modify::{Guide, ModifyKind, ModifySession};
 mod session;
-pub use selection::{pick, Hit, Selection};
+pub use selection::{pick_section, pick, Hit, Selection};
 mod units;
 
 pub use cindral_core::{Command, DVec3};
@@ -29,4 +29,4 @@ mod tests {
 }
 
 mod scene;
-pub use scene::{local_query, pick_instances, InstanceHit, PickInstance};
+pub use scene::{pick_instances_section, local_query, pick_instances, InstanceHit, PickInstance};

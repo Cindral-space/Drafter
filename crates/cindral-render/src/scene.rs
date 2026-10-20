@@ -252,6 +252,11 @@ pub struct SceneRenderer {
     overlay_edge_pipeline: wgpu::RenderPipeline,
     profile_pipelines: Vec<wgpu::RenderPipeline>,
     style: cindral_core::ViewStyle,
+    section: Option<cindral_core::SectionPlane>,
+    cap_buffer: InstanceBuffer,
+    cap_identity: InstanceBuffer,
+    cap_vertices: u32,
+    last_caps: Option<Weak<Vec<FaceVertex>>>,
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     composite_sampler: wgpu::Sampler,
@@ -323,7 +328,7 @@ impl SceneRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cindral scene camera uniform"),
-            size: 128,
+            size: 144,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -766,6 +771,11 @@ impl SceneRenderer {
             overlay_edge_pipeline,
             profile_pipelines,
             style: Default::default(),
+            section: None,
+            cap_buffer: InstanceBuffer::new(device),
+            cap_identity: InstanceBuffer::new(device),
+            cap_vertices: 0,
+            last_caps: None,
             composite_pipeline,
             composite_layout,
             composite_sampler,
@@ -944,6 +954,25 @@ impl SceneRenderer {
         self.style = style;
     }
 
+    /// Set the non-destructive cut and independently cached world-space cap mesh.
+    pub fn set_section(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, plane: Option<cindral_core::SectionPlane>, caps: &Arc<Vec<FaceVertex>>) {
+        self.section = plane;
+        let equation = self.section.as_ref().map_or([0.;4], |p| [p.normal[0] as f32,p.normal[1] as f32,p.normal[2] as f32,-p.distance as f32]);
+        queue.write_buffer(&self.uniform,128,bytemuck::cast_slice(&equation));
+        if self.last_caps.as_ref().and_then(Weak::upgrade).is_some_and(|old| Arc::ptr_eq(&old,caps)) { return; }
+        self.cap_vertices = caps.len() as u32;
+        if !caps.is_empty() {
+            let size = (caps.len()*std::mem::size_of::<FaceVertex>()) as u64;
+            if size>self.cap_buffer.capacity_bytes {
+                self.cap_buffer.buffer = device.create_buffer(&wgpu::BufferDescriptor { label:Some("Section view cap"),size:align_capacity(size*2),usage:wgpu::BufferUsages::VERTEX|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false });
+                self.cap_buffer.capacity_bytes=align_capacity(size*2);
+            }
+            queue.write_buffer(&self.cap_buffer.buffer,0,bytemuck::cast_slice(caps));
+            self.cap_identity.update(device,queue,&[InstanceData::new(glam::Mat4::IDENTITY,None,1.)]);
+        }
+        self.last_caps=Some(Arc::downgrade(caps));
+    }
+
     fn write_style(&self, queue: &wgpu::Queue, size: [u32; 2]) {
         use cindral_core::StyleMode;
         let mode = match self.style.mode {
@@ -1060,6 +1089,13 @@ impl SceneRenderer {
                     );
                     draw_calls += 1;
                 }
+            }
+
+            if self.cap_vertices>0 && self.style.mode != cindral_core::StyleMode::Wireframe {
+                pass.set_vertex_buffer(0,self.cap_buffer.buffer.slice(..));
+                pass.set_vertex_buffer(1,self.cap_identity.buffer.slice(..));
+                pass.draw(0..self.cap_vertices,0..1);
+                draw_calls+=1;
             }
 
             // 2. Edge pass (depth writes enabled)
@@ -1193,6 +1229,10 @@ pub struct SceneCallback {
     pub update: Option<Arc<SceneUpdate>>,
     /// Uniform-only viewport appearance.
     pub style: cindral_core::ViewStyle,
+    /// Effective world cutting plane.
+    pub section: Option<cindral_core::SectionPlane>,
+    /// Separate world cap triangles, original model buffers are retained.
+    pub caps: Arc<Vec<FaceVertex>>,
 }
 
 impl CallbackTrait for SceneCallback {
@@ -1210,6 +1250,7 @@ impl CallbackTrait for SceneCallback {
         if let Some(update) = &self.update {
             renderer.apply_update_once(device, queue, update);
         }
+        renderer.set_section(device,queue,self.section.clone(),&self.caps);
         renderer.set_style(self.style.clone());
         renderer.write_style(queue, self.size);
         renderer.write_view_origin(queue, self.view_projection);

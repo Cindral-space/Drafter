@@ -144,6 +144,7 @@ impl Engine {
             } else {
                 (SnapKind::Endpoint, 1)
             };
+            if query.section.as_ref().is_some_and(|p| !p.retains(position)) { continue; }
             let candidate = Candidate {
                 snap: Snap {
                     position,
@@ -209,6 +210,7 @@ impl Engine {
             if !screen_distance.is_finite() || screen_distance > self.radius_pixels {
                 continue;
             }
+            if query.section.as_ref().is_some_and(|p| !p.retains(position)) { continue; }
             let candidate = Candidate {
                 snap: Snap {
                     position,
@@ -242,8 +244,9 @@ impl Engine {
             let Some(vb) = model.vertices().get(&edge.vertices[1]) else {
                 continue;
             };
-            let a = va.position;
-            let b = vb.position;
+            let [a,b] = if let Some(p) = &query.section {
+                let Some(segment) = p.clip_segment(va.position,vb.position) else { continue; }; segment
+            } else { [va.position,vb.position] };
             if !a.is_finite() || !b.is_finite() || a.distance(b) <= TOLERANCE {
                 continue;
             }
@@ -274,6 +277,7 @@ impl Engine {
             if !screen_distance.is_finite() || screen_distance > self.radius_pixels {
                 continue;
             }
+            if query.section.as_ref().is_some_and(|p| !p.retains(position)) { continue; }
             let candidate = Candidate {
                 snap: Snap {
                     position,
@@ -426,6 +430,7 @@ impl Engine {
             if !screen_distance.is_finite() {
                 continue;
             }
+            if query.section.as_ref().is_some_and(|p| !p.retains(position)) { continue; }
             let candidate = Candidate {
                 snap: Snap {
                     position,

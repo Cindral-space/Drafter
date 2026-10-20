@@ -156,6 +156,7 @@ impl DrafterApp {
         self.files.textures = bundle.textures;
         self.presentation = bundle.presentation;
         self.presentation_ui = Default::default();
+        self.section_ui = Default::default();
         self.presentation_serial = self.presentation_serial.wrapping_add(1);
         self.reset_file_target(path);
         self.sync_file_textures()?;

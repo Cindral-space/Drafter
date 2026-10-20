@@ -140,6 +140,10 @@ pub fn pick_instances(
     cursor: DVec2,
     radius: f64,
 ) -> Option<InstanceHit> {
+    pick_instances_section(items,ray,view,cursor,radius,None)
+}
+/// Scene picking with a world-space section plane, including cut-aware occlusion.
+pub fn pick_instances_section(items: &[PickInstance<'_>], ray: Ray, view: View, cursor: DVec2, radius: f64, section: Option<&cindral_core::SectionPlane>) -> Option<InstanceHit> {
     if items.is_empty()
         || !cursor.is_finite()
         || !radius.is_finite()
@@ -241,6 +245,7 @@ pub fn pick_instances(
             };
 
             let world_point = cand.item.world.transform_point3(local_point);
+            if section.is_some_and(|p| !p.retains(world_point)) { continue; }
             if view.project(world_point).is_none() {
                 continue;
             }
@@ -280,6 +285,7 @@ pub fn pick_instances(
                 continue;
             }
             let v_world = cand.item.world.transform_point3(v_local);
+            if section.is_some_and(|p| !p.retains(v_world)) { continue; }
             let Some(screen_pos) = view.project(v_world) else {
                 continue;
             };
@@ -301,6 +307,7 @@ pub fn pick_instances(
                 &view,
                 ray.origin,
                 ray_dir,
+                section,
             ) {
                 continue;
             }
@@ -357,8 +364,9 @@ pub fn pick_instances(
                 continue;
             }
 
-            let a_world = cand.item.world.transform_point3(a_loc);
-            let b_world = cand.item.world.transform_point3(b_loc);
+            let original_a = cand.item.world.transform_point3(a_loc);
+            let original_b = cand.item.world.transform_point3(b_loc);
+            let [a_world,b_world] = if let Some(p) = section { let Some(segment)=p.clip_segment(original_a,original_b) else {continue;}; segment } else { [original_a,original_b] };
             if a_world.distance(b_world) <= TOLERANCE {
                 continue;
             }
@@ -390,11 +398,13 @@ pub fn pick_instances(
                 &view,
                 ray.origin,
                 ray_dir,
+                section,
             ) {
                 continue;
             }
 
-            let p_local = a_loc.lerp(b_loc, u_param);
+            let p_local = cand.inv_world.transform_point3(p_world);
+            let _ = u_param;
             let candidate = (cand_idx, edge_id, p_local, p_world, screen_dist, ray_depth);
             if let Some((best_cidx, best_id, _, _, best_sdist, best_rdepth)) = best_edge {
                 if (screen_dist - best_sdist).abs() > TOLERANCE {
@@ -814,6 +824,7 @@ fn is_point_occluded(
     view: &View,
     ray_origin: DVec3,
     ray_dir: DVec3,
+    section: Option<&cindral_core::SectionPlane>,
 ) -> bool {
     let inv_vp = view.matrix.inverse();
     let (test_origin, test_dir, target_dist) = if inv_vp.is_finite() {
@@ -878,12 +889,13 @@ fn is_point_occluded(
                 }
             }
 
-            let Some((_, t)) =
+            let Some((point, t)) =
                 ray_face_intersection(cand.item.model, face, loc_test_origin, loc_test_dir)
             else {
                 continue;
             };
 
+            if section.is_some_and(|p| !p.retains(cand.item.world.transform_point3(point))) { continue; }
             if t < target_dist - TOLERANCE {
                 return true;
             }
