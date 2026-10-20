@@ -1,12 +1,4 @@
-//! Render boundary for Cindral Drafter.
+//! Camera math and persistent GPU resources for Cindral Drafter's viewport.
 
-/// The crate identifier for diagnostics.
-pub const CRATE_NAME: &str = "cindral-render";
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn identifies_crate() {
-        assert_eq!(super::CRATE_NAME, "cindral-render");
-    }
-}
+pub mod camera;
+pub mod grid;

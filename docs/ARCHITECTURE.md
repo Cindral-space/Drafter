@@ -2,7 +2,7 @@
 
 ## Status
 
-M0 establishes compileable crate boundaries and cross-platform CI. Geometry and file APIs below are design intent, not implemented functionality. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0 and M1 are implemented: workspace/CI, native GPU grid/axes, camera navigation, standard views and projection switching. Geometry and file APIs below are design intent, not implemented functionality. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -36,3 +36,15 @@ Every crate has a test target. CI runs formatting, Clippy with warnings denied, 
 ## M1 camera interface (frozen)
 
 `cindral_render::camera` uses glam f32 for viewport transforms (core topology will use f64). Z is up; X red, Y green, Z blue. `Projection` is Perspective/Orthographic; `StandardView` is Iso/Top/Bottom/Front/Back/Left/Right. `Camera: Clone + Debug + Default` has public `target: Vec3`, `distance: f32`, `yaw: f32`, `pitch: f32`, `projection: Projection`. Methods: `eye(&self)->Vec3`, `view_projection(&self, aspect:f32)->Mat4` (wgpu depth 0..1), `orbit(&mut self, delta:Vec2)`, `pan(&mut self, delta:Vec2, viewport_height:f32)`, `zoom(&mut self, scroll:f32, cursor_ndc:Vec2, aspect:f32)`, `zoom_extents(&mut self, min:Vec3, max:Vec3, aspect:f32)`, `set_view(&mut self, view:StandardView)`, `ray(&self, ndc:Vec2, aspect:f32)->(Vec3,Vec3)`. Orbit/pan deltas are logical pixels, scroll is points (positive zooms in), cursor NDC has Y up. Zoom preserves the intersection with the target-depth view plane. Top/bottom must be nonsingular. Methods ignore nonfinite input and clamp distance and pitch to safe ranges. `Camera` is independent of egui/winit.
+
+## M1 renderer and input integration
+
+The app embeds a custom `egui-wgpu` callback in the central viewport. `GridRenderer` owns a persistent line-list vertex buffer, pipeline, uniform buffer and bind group; only the 64-byte camera matrix is updated while navigating. winit is provided by eframe, which owns the surface lifecycle and GPU device. The callback respects egui's viewport/scissor and uses the same sample count and color format as its enclosing render pass. A future geometry pass needs a dedicated depth target; M1 renders construction lines only.
+
+The app routes MMB orbit, Shift+MMB pan, smooth scroll zoom and hovered keyboard shortcuts into the camera. UI actions use the same camera methods. The static grid spans ±50 meters and is not yet adaptive. Zoom extents fits the central ±10 meter area until core geometry supplies document bounds. M1 does not establish the 500k-triangle performance requirement.
+
+### M1 validation and limits
+
+The camera uses an analytic basis that remains valid at the poles. Perspective and orthographic projection share target-plane scale; scroll keeps a cursor ray's target-plane intersection anchored. Read-only transforms sanitize malformed public fields. Targets beyond ±1e9 per coordinate are outside the current f32 viewport range and are rejected/reset before transform evaluation. A later large-coordinate implementation will need a floating origin.
+
+27 workspace tests pass, including synthetic egui input frames for middle-drag orbit, Shift+middle-drag pan and shortcut hover scoping, and camera tests covering 1500 combinations of extents bounds/orientations/projections/aspects. The `capture_viewport` example uses egui's native screenshot command and wgpu GPU readback, writes a PPM and exits; its 1280×800 capture was visually checked on native Wayland with the OpenGL backend. Formatting and strict workspace Clippy pass. No Windows/macOS runtime or large-model benchmark has been performed.

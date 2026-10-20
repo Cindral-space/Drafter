@@ -6,3 +6,10 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cindral-render = { path = "../cindral-render" }
+eframe = { version = "0.33.3", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+glam = "0.30"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
