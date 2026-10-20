@@ -13,3 +13,7 @@ eframe = { version = "0.33.3", default-features = false, features = ["wgpu", "de
 glam = "0.30"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[example]]
+name = "renderer_benchmark"
+test = true

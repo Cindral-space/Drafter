@@ -99,14 +99,18 @@ pub(crate) fn intersections(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> Vec<DVec3
     let lu = u.length();
     let lv = v.length();
     let cross = u.cross(v);
-    if cross.length() <= TOLERANCE * TOLERANCE * lu * lv {
-        if (c - a).cross(u / lu).length() > TOLERANCE {
-            return Vec::new();
-        }
+    // Test physical collinearity before dividing by the cross product. Large
+    // translations can perturb normalized directions even when every endpoint
+    // is well within the distance tolerance of the same supporting line.
+    let unit = u / lu;
+    if (c - a).cross(unit).length() <= TOLERANCE && (d - a).cross(unit).length() <= TOLERANCE {
         return [a, b, c, d]
             .into_iter()
             .filter(|p| on_segment(*p, a, b) && on_segment(*p, c, d))
             .collect();
+    }
+    if cross.length() <= TOLERANCE * TOLERANCE * lu * lv {
+        return Vec::new();
     }
     let offset = c - a;
     let t = offset.cross(v).dot(cross) / cross.length_squared();
@@ -149,4 +153,43 @@ pub(crate) fn contains(points: &[DVec2], point: DVec2) -> bool {
         }
     }
     inside
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segment_distance_tolerance_has_physical_units() {
+        for length in [0.001, 1.0, 10000.0] {
+            let end = DVec3::X * length;
+            assert!(on_segment(
+                end * 0.5 + DVec3::Y * TOLERANCE * 0.5,
+                DVec3::ZERO,
+                end
+            ));
+            assert!(!on_segment(
+                end * 0.5 + DVec3::Y * TOLERANCE * 2.0,
+                DVec3::ZERO,
+                end
+            ));
+        }
+    }
+
+    #[test]
+    fn canonical_planes_compare_across_opposite_normals() {
+        let a = Plane {
+            normal: DVec3::Z,
+            distance: 3.0,
+        };
+        let b = Plane {
+            normal: -DVec3::Z,
+            distance: -3.0,
+        };
+        assert!(a.equivalent(&b));
+        assert!(!a.equivalent(&Plane {
+            normal: DVec3::Z,
+            distance: 4.0
+        }));
+    }
 }

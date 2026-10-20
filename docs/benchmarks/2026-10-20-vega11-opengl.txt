@@ -1,0 +1,49 @@
+Cindral Drafter / 2026-10-20 Asia/Manila
+Release build, stable Rust 1.98.1. Native Wayland, wgpu 27 OpenGL backend.
+Three sequential runs after compilation and kernel test processes completed.
+Each run: 20 warmup + 100 measured submissions. Not full editor frame time.
+
+Run 1
+Cindral renderer benchmark: simple one-draw static baseline
+adapter:      AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl, Other)
+target:       1280x800 Rgba8Unorm + Depth32Float
+grid:         500x500 cells
+triangles:    500000
+vertices:     251001
+index memory: 6000000 bytes (5.72 MiB)
+build:        release (debug assertions off)
+raster check: 35.1% of pixels covered
+warmup/measured: 20/100 submissions
+frame ms:     mean 1.460  p50 1.419  p95 1.712  max 1.865
+throughput:   684.7 frames/s, 342.4 Mtriangles/s (at mean)
+vs 16.67 ms: mean 0.09x, p95 0.10x of budget (reference only; not full editor performance)
+
+Run 2
+Cindral renderer benchmark: simple one-draw static baseline
+adapter:      AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl, Other)
+target:       1280x800 Rgba8Unorm + Depth32Float
+grid:         500x500 cells
+triangles:    500000
+vertices:     251001
+index memory: 6000000 bytes (5.72 MiB)
+build:        release (debug assertions off)
+raster check: 35.1% of pixels covered
+warmup/measured: 20/100 submissions
+frame ms:     mean 1.628  p50 1.494  p95 2.028  max 3.579
+throughput:   614.1 frames/s, 307.1 Mtriangles/s (at mean)
+vs 16.67 ms: mean 0.10x, p95 0.12x of budget (reference only; not full editor performance)
+
+Run 3
+Cindral renderer benchmark: simple one-draw static baseline
+adapter:      AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl, Other)
+target:       1280x800 Rgba8Unorm + Depth32Float
+grid:         500x500 cells
+triangles:    500000
+vertices:     251001
+index memory: 6000000 bytes (5.72 MiB)
+build:        release (debug assertions off)
+raster check: 35.1% of pixels covered
+warmup/measured: 20/100 submissions
+frame ms:     mean 1.528  p50 1.502  p95 1.704  max 2.085
+throughput:   654.6 frames/s, 327.3 Mtriangles/s (at mean)
+vs 16.67 ms: mean 0.09x, p95 0.10x of budget (reference only; not full editor performance)

@@ -2,7 +2,7 @@
 
 ## Status
 
-M0 and M1 are implemented: workspace/CI, native GPU grid/axes, camera navigation, standard views and projection switching. Geometry and file APIs below are design intent, not implemented functionality. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0–M2 are implemented: workspace/CI, native GPU grid/axes and camera controls, plus a rendering-independent transactional geometry kernel. A measured static 500k-triangle GPU baseline is also available. Organization and file APIs below remain design intent until their milestones. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -31,7 +31,7 @@ Inference ranks endpoint, midpoint, intersection, edge, face and directional can
 
 ## Validation
 
-Every crate has a test target. CI runs formatting, Clippy with warnings denied, and workspace tests on Linux, macOS and Windows. Kernel work adds example-based and property tests for topology and command reversibility. Performance claims require measured representative scenes; no 500k-triangle performance result exists yet.
+Every crate has a test target. CI runs formatting, Clippy with warnings denied, and workspace tests on Linux, macOS and Windows. Kernel work adds example-based and property tests for topology and command reversibility. Performance claims require measured representative scenes; the static 500k-triangle baseline is recorded in `RENDERER_BENCHMARK.md` with workload limits.
 
 ## M1 camera interface (frozen)
 
@@ -47,7 +47,7 @@ The app routes MMB orbit, Shift+MMB pan, smooth scroll zoom and hovered keyboard
 
 The camera uses an analytic basis that remains valid at the poles. Perspective and orthographic projection share target-plane scale; scroll keeps a cursor ray's target-plane intersection anchored. Read-only transforms sanitize malformed public fields. Targets beyond ±1e9 per coordinate are outside the current f32 viewport range and are rejected/reset before transform evaluation. A later large-coordinate implementation will need a floating origin.
 
-27 workspace tests pass, including synthetic egui input frames for middle-drag orbit, Shift+middle-drag pan and shortcut hover scoping, and camera tests covering 1500 combinations of extents bounds/orientations/projections/aspects. The `capture_viewport` example uses egui's native screenshot command and wgpu GPU readback, writes a PPM and exits; its 1280×800 capture was visually checked on native Wayland with the OpenGL backend. Formatting and strict workspace Clippy pass. No Windows/macOS runtime or large-model benchmark has been performed.
+27 workspace tests pass, including synthetic egui input frames for middle-drag orbit, Shift+middle-drag pan and shortcut hover scoping, and camera tests covering 1500 combinations of extents bounds/orientations/projections/aspects. The `capture_viewport` example uses egui's native screenshot command and wgpu GPU readback, writes a PPM and exits; its 1280×800 capture was visually checked on native Wayland with the OpenGL backend. Formatting and strict workspace Clippy pass. No Windows/macOS runtime was tested in M1. The later large-mesh baseline is documented separately.
 
 ## Large-mesh benchmark contract
 
@@ -64,3 +64,11 @@ Commands: `AddEdge { start: DVec3, end: DVec3 }`; `AddPolyline { points: Vec<DVe
 M2 reconstructs bounded planar regions from split 3D edge arrangements using angular half-edge traversal, decomposes walks at bridges/articulations, and assigns nested loops as holes. Every bounded region has a face, so an inner closed loop creates both an annulus and its enclosed face. Supporting planes are derived at non-collinear vertices; existing plane orientation is retained where possible. Faces have a canonical normal, not a closed-solid outward orientation. Erasing edges rebuilds regions and dissolves redundant collinear degree-two vertices unless styles differ. Intersection splits inherit edge styles. Triangulation uses earcutr with all face rings projected relative to the same local origin.
 
 This is a correctness-first kernel: global face rebuilding/full edge-intersection validation is at least quadratic on dense input; history snapshots cost model-sized memory per step. It is independent of the static GPU benchmark. Spatial indexing, incremental topology and compact inverse deltas are future optimization work. Groups/components/tags/material assignment enter at M5; solid extrusion enters at M4, not M2.
+
+### M2 validation and remaining limits
+
+The core has 34 tests plus a tested public-API documentation example: 26 deterministic geometry/history cases and eight property tests, configured for 1,152 generated cases per normal run plus persisted regressions. Coverage includes randomly tilted planes translated by up to 200 km; chord split/erase healing; hole area and hole-excluding triangulation; self-crossing and concave loops; bridges and touching holes; cube faces; angular degeneracies; style inheritance; rollback, no-op/redo behavior, exact undo/redo and ID high-water behavior. Random planar segment arrangements additionally check Euler's bounded-region invariant after each insertion. The complete workspace, including the benchmark example, runs 65 tests plus the documentation example.
+
+Adversarial review found and fixed two different predicate problems: shallow-angle intersections were discarded by a fixed angular cutoff, while translated collinear overlaps were missed when rounding perturbed their directions. Plane candidates now use physical altitude, overlap detection checks physical distance before angular intersection division, and persistent proptest seeds retain the translated-overlap failure. Existing plane candidates are deduplicated and face identities compare canonical loops independent of winding to prevent duplicate regions from numerically equivalent candidate planes.
+
+M2 does not introduce draw-tool UI, solid manifold validation, outward solid winding, groups/components, persistence, or large-document editing performance claims. Geometry is validated before command commit; the global arrangement algorithm and snapshot history still require future scalability work. The independent GPU baseline measures one indexed draw with depth/shading, with 1.46–1.63 ms mean and 1.70–2.03 ms p95 on the local Radeon Vega 11/OpenGL release runs; it excludes editor interaction, UI, picking, dirty rebuilds and instancing. M3 has not started.

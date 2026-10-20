@@ -109,20 +109,12 @@ impl Model {
     /// Area of a face in square meters, subtracting its holes.
     pub fn face_area(&self, id: FaceId) -> Result<f64, KernelError> {
         let face = self.faces.get(&id).ok_or(KernelError::MissingEntity)?;
-        Ok(
-            geometry::signed_area(&self.project_loop(&face.outer, face.plane)?).abs()
-                - face
-                    .holes
-                    .iter()
-                    .map(|ring| {
-                        self.project_loop(ring, face.plane)
-                            .map(|p| geometry::signed_area(&p).abs())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-                    .iter()
-                    .sum::<f64>(),
-        )
+        let outer = geometry::signed_area(&self.project_loop(&face.outer, face.plane)?).abs();
+        face.holes.iter().try_fold(outer, |area, ring| {
+            Ok(area - geometry::signed_area(&self.project_loop(ring, face.plane)?).abs())
+        })
     }
+
     /// Triangulate one face, including holes, into world-space triangles.
     pub fn triangulate(&self, id: FaceId) -> Result<Vec<[DVec3; 3]>, KernelError> {
         let face = self.faces.get(&id).ok_or(KernelError::MissingEntity)?;

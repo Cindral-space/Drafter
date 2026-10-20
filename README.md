@@ -18,7 +18,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 
 - [x] M0: workspace and checks
 - [x] M1: viewport
-- [ ] M2: geometry kernel
+- [x] M2: geometry kernel
 - [ ] M3: drawing and inference
 - [ ] M4: modification tools
 - [ ] M5: organization
@@ -56,3 +56,17 @@ WGPU_BACKEND=opengl cargo run -p cindral-app --example capture_viewport -- /tmp/
 ```
 
 The example captures the rendered window and exits. Use the native display session: forcing X11 in a Wayland session can make EGL choose a different platform from the window.
+
+## Geometry kernel (M2)
+
+`cindral-core::History` owns a read-only `Model`. Draw with `Command::AddEdge` or `AddPolyline`, erase with `EraseEdges`, set soft/smooth flags with `SetEdgeStyle`, and combine actions into an atomic `Batch`. `execute`, `undo` and `redo` return `Result<bool, KernelError>`; failed edits preserve both geometry and history. See the core crate's tested example and [architecture](docs/ARCHITECTURE.md) for the public interface.
+
+The kernel welds/splits intersections and overlaps, derives planar regions with holes, triangulates them, and heals erased coplanar boundaries. Coordinates are f64 meters with a shared 1e-7 m tolerance and a supported ±1e6 m coordinate range. The current global topology rebuild and snapshot history favor correctness over large-document editing speed. Drawing UI comes in M3; extrusion and other modification tools come in M4.
+
+## Large-mesh baseline
+
+```sh
+WGPU_BACKEND=opengl cargo run --release -p cindral-app --example renderer_benchmark
+```
+
+This renders a 500,000-triangle shaded heightfield with depth at 1280×800. See [measured results and limits](docs/RENDERER_BENCHMARK.md). It measures a static GPU workload, not complete editor frame time.

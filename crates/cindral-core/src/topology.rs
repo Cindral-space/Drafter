@@ -143,7 +143,12 @@ impl Model {
     }
 
     pub(crate) fn rebuild_faces(&mut self) -> Result<(), KernelError> {
-        let mut planes: Vec<Plane> = self.faces.values().map(|face| face.plane).collect();
+        let mut planes = Vec::<Plane>::new();
+        for face in self.faces.values() {
+            if !planes.iter().any(|plane| plane.equivalent(&face.plane)) {
+                planes.push(face.plane);
+            }
+        }
         for (id, vertex) in &self.vertices {
             let neighbors: Vec<_> = self
                 .incident_edges(*id)

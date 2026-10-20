@@ -3,6 +3,23 @@
 //! All positions are meters in a right-handed Z-up coordinate system. Model
 //! maps are read-only; [`History::execute`] is the mutation entry point.
 
+//! # Example
+//!
+//! ```
+//! use cindral_core::{Command, DVec3, History, KernelError};
+//! let mut history = History::new();
+//! history.execute(Command::AddPolyline {
+//!     points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+//!     closed: true,
+//! })?;
+//! assert_eq!(history.model().faces().len(), 1);
+//! history.execute(Command::AddEdge { start: DVec3::ZERO, end: DVec3::X + DVec3::Y })?;
+//! assert_eq!(history.model().faces().len(), 2);
+//! history.undo()?;
+//! assert_eq!(history.model().faces().len(), 1);
+//! # Ok::<(), KernelError>(())
+//! ```
+
 mod command;
 mod geometry;
 mod model;
