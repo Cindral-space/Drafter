@@ -1,6 +1,6 @@
 use glam::DVec3;
 
-use crate::{EdgeId, KernelError, Model};
+use crate::{EdgeId, FaceId, KernelError, Model, VertexId};
 
 /// The supported document mutations. A batch is one atomic undo step.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +30,20 @@ pub enum Command {
         /// Interpolate shading across the edge.
         smooth: bool,
     },
+    /// Extrude a planar face along its canonical normal by signed meters.
+    PushPull { face: FaceId, distance: f64 },
+    /// Transform selected vertices, or duplicate their induced geometry.
+    Transform {
+        vertices: Vec<VertexId>,
+        matrix: glam::DMat4,
+        copy: bool,
+    },
+    /// Draw an inset (positive distance) or outset boundary on a face.
+    Offset { face: FaceId, distance: f64 },
+    /// Sweep a face along an ordered polyline path.
+    FollowMe { face: FaceId, path: Vec<DVec3> },
+    /// Apply a face color.
+    PaintFace { faces: Vec<FaceId>, color: [u8; 4] },
     /// Execute several mutations as one transaction and one history entry.
     Batch(Vec<Command>),
 }
@@ -40,6 +54,13 @@ impl Command {
             return Err(KernelError::BatchDepth);
         }
         match self {
+            Self::PushPull { .. }
+            | Self::Transform { .. }
+            | Self::Offset { .. }
+            | Self::FollowMe { .. }
+            | Self::PaintFace { .. } => {
+                Err(KernelError::InvalidTopology("M4 operation pending".into()))
+            }
             Self::AddEdge { start, end } => {
                 model.insert_segment(*start, *end)?;
                 Ok(true)

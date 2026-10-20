@@ -84,6 +84,13 @@ impl Selection {
             return Err(KernelError::BatchDepth);
         }
         match command {
+            Command::PushPull { .. }
+            | Command::Transform { .. }
+            | Command::Offset { .. }
+            | Command::FollowMe { .. }
+            | Command::PaintFace { .. } => {
+                return Err(KernelError::InvalidTopology("M4 operation pending".into()))
+            }
             Command::AddEdge { start, end } => {
                 self.geometry = true;
                 self.points.extend([*start, *end]);
