@@ -12,3 +12,4 @@ glam = "0.30"
 egui-wgpu = "0.33.3"
 bytemuck = { version = "1", features = ["derive"] }
 egui = "0.33.3"
+cindral-core = { path = "../cindral-core" }

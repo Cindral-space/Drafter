@@ -14,3 +14,10 @@ thiserror = "2"
 
 [dev-dependencies]
 proptest = "1"
+
+[features]
+bench-fixtures = []
+
+[[example]]
+name = "kernel_benchmark"
+required-features = ["bench-fixtures"]

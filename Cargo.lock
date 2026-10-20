@@ -388,6 +388,7 @@ name = "cindral-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cindral-core",
  "egui",
  "egui-wgpu",
  "glam",

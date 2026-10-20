@@ -196,3 +196,14 @@ impl History {
         Ok(true)
     }
 }
+
+#[cfg(feature = "bench-fixtures")]
+impl History {
+    pub(crate) fn benchmark_seed(model: Model) -> Self {
+        Self {
+            high_water: model.next_id,
+            model,
+            ..Self::default()
+        }
+    }
+}

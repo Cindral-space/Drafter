@@ -58,3 +58,7 @@ pub enum KernelError {
     #[error("face triangulation failed")]
     Triangulation,
 }
+
+/// Deterministic model construction for performance experiments only.
+#[cfg(feature = "bench-fixtures")]
+pub mod benchmark;

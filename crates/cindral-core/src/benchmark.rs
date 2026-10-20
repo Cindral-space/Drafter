@@ -1,0 +1,91 @@
+//! Known-topology fixtures, outside user document construction and timing.
+//!
+//! Each separated unit square has a diagonal: 4 vertices, 5 edges, 2 faces.
+//! Direct construction avoids quadratic seed insertion and is feature-gated.
+
+use crate::{
+    Command, DVec3, Edge, EdgeId, Face, FaceId, History, KernelError, Model, Plane, Vertex,
+    VertexId,
+};
+
+/// Large seeded document and the single-face edit to measure.
+pub struct Fixture {
+    /// Empty-history seeded model.
+    pub history: History,
+    /// Segment splitting the first triangle at the midpoint of its outer edge.
+    pub edit: Command,
+}
+
+/// Construct `columns * rows` separated triangulated squares in linear time.
+/// 100×100 yields exactly 50,000 edges and 20,000 faces.
+pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError> {
+    if columns == 0 || rows == 0 || columns > 1000 || rows > 1000 {
+        return Err(KernelError::InvalidPosition);
+    }
+    let mut model = Model::default();
+    for y in 0..rows {
+        for x in 0..columns {
+            let origin = DVec3::new(x as f64 * 2.0, y as f64 * 2.0, 0.0);
+            let points = [
+                origin,
+                origin + DVec3::X,
+                origin + DVec3::X + DVec3::Y,
+                origin + DVec3::Y,
+            ];
+            let mut ids = Vec::new();
+            for position in points {
+                let id = VertexId::from_raw(model.allocate()?);
+                model.vertices.insert(id, Vertex { position });
+                ids.push(id);
+            }
+            for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0), (0, 2)] {
+                let mut vertices = [ids[a], ids[b]];
+                vertices.sort();
+                let id = EdgeId::from_raw(model.allocate()?);
+                model.edges.insert(
+                    id,
+                    Edge {
+                        vertices,
+                        soft: false,
+                        smooth: false,
+                    },
+                );
+            }
+            for indices in [[0, 1, 2], [0, 2, 3]] {
+                let id = FaceId::from_raw(model.allocate()?);
+                model.faces.insert(
+                    id,
+                    Face {
+                        outer: indices.map(|i| ids[i]).to_vec(),
+                        holes: Vec::new(),
+                        plane: Plane {
+                            normal: DVec3::Z,
+                            distance: 0.0,
+                        },
+                    },
+                );
+            }
+        }
+    }
+    Ok(Fixture {
+        history: History::benchmark_seed(model),
+        edit: Command::AddEdge {
+            start: DVec3::ZERO,
+            end: DVec3::new(1.0, 0.5, 0.0),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn seed_is_structurally_valid_and_edit_has_expected_effect() {
+        let mut f = super::tiled_squares(2, 2).unwrap();
+        assert_eq!(f.history.model().edges().len(), 20);
+        assert_eq!(f.history.model().faces().len(), 8);
+        f.history.model().validate().unwrap();
+        f.history.execute(f.edit).unwrap();
+        assert_eq!(f.history.model().faces().len(), 9);
+        f.history.model().validate().unwrap();
+    }
+}
