@@ -100,6 +100,10 @@ impl Default for Model {
 }
 
 impl Model {
+    /// Runtime translation of the spatial coordinate frame (never serialized).
+    pub fn translation_offset(&self) -> DVec3 {
+        self.spatial.as_ref().map_or(DVec3::ZERO, |s| s.offset)
+    }
     /// All vertices; no mutable map is exposed.
     pub fn vertices(&self) -> &BTreeMap<VertexId, Vertex> {
         &self.vertices
@@ -195,7 +199,16 @@ impl Model {
     }
     pub(crate) fn intern(&mut self, position: DVec3) -> Result<VertexId, KernelError> {
         geometry::validate_position(position)?;
-        if let Some((id, _)) = self
+        if let Some(index) = &self.spatial {
+            if let Some(id) = index
+                .vertices_near(position)
+                .into_iter()
+                .filter(|id| self.vertices[id].position.distance(position) <= TOLERANCE)
+                .min()
+            {
+                return Ok(id);
+            }
+        } else if let Some((id, _)) = self
             .vertices
             .iter()
             .find(|(_, v)| v.position.distance(position) <= TOLERANCE)
@@ -204,6 +217,9 @@ impl Model {
         }
         let id = VertexId::from_raw(self.allocate()?);
         self.vertices.insert(id, Vertex { position });
+        if let Some(index) = &mut self.spatial {
+            index.add_vertex(id, position);
+        }
         Ok(id)
     }
     pub(crate) fn project_loop(
@@ -256,16 +272,43 @@ impl Model {
         }
         let intersection_span =
             tracing::info_span!("validate.edge_pairs", edges = self.edges.len()).entered();
-        let edges: Vec<_> = self.edges.values().collect();
-        for (i, a) in edges.iter().enumerate() {
-            for b in &edges[i + 1..] {
-                let crossings = geometry::intersections(
-                    self.position(a.vertices[0])?,
-                    self.position(a.vertices[1])?,
-                    self.position(b.vertices[0])?,
-                    self.position(b.vertices[1])?,
-                );
-                for point in crossings {
+        // Conservative R-tree broad phase; the exact tolerance-aware predicate below
+        // is unchanged. Expanded AABBs retain touching and shallow-angle cases.
+        let edges: Vec<_> = self
+            .edges
+            .values()
+            .map(|edge| {
+                Ok((
+                    edge,
+                    self.position(edge.vertices[0])?,
+                    self.position(edge.vertices[1])?,
+                ))
+            })
+            .collect::<Result<_, KernelError>>()?;
+        let tree = rstar::RTree::bulk_load(
+            edges
+                .iter()
+                .enumerate()
+                .map(|(i, (_, a, b))| {
+                    rstar::primitives::GeomWithData::new(
+                        rstar::primitives::Line::new(a.to_array(), b.to_array()),
+                        i,
+                    )
+                })
+                .collect(),
+        );
+        for (i, (a, pa, pb)) in edges.iter().enumerate() {
+            let bounds = rstar::AABB::from_corners(
+                (pa.min(*pb) - DVec3::splat(TOLERANCE)).to_array(),
+                (pa.max(*pb) + DVec3::splat(TOLERANCE)).to_array(),
+            );
+            for candidate in tree.locate_in_envelope_intersecting(&bounds) {
+                let j = candidate.data;
+                if j <= i {
+                    continue;
+                }
+                let (b, pc, pd) = edges[j];
+                for point in geometry::intersections(*pa, *pb, pc, pd) {
                     let shared = a
                         .vertices
                         .iter()

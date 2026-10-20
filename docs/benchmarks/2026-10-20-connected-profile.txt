@@ -1,0 +1,103 @@
+Instrumentation-only baseline; release; n60 process deadline25s; n12 completed.
+
+profile-move60.txt
+2026-10-20T12:43:01.760616Z  INFO spatial.build: cindral_core::spatial: enter
+2026-10-20T12:43:01.966186Z  INFO spatial.build: cindral_core::spatial: close time.busy=206ms time.idle=8.87µs
+mode: move; fixture: 21602 vertices / 43200 edges / 21600 faces (n=60); setup 245.336 ms
+2026-10-20T12:43:01.968462Z  INFO modification.prepare: cindral_core::modification: enter
+2026-10-20T12:43:02.004841Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: enter
+2026-10-20T12:43:02.017413Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: close time.busy=12.6ms time.idle=8.10µs
+2026-10-20T12:43:02.017463Z  INFO modification.prepare:prepare.patch_clone{faces=21600 edges=43200}: cindral_core::modification: enter
+2026-10-20T12:43:02.077432Z  INFO modification.prepare:prepare.patch_clone{faces=21600 edges=43200}: cindral_core::modification: close time.busy=60.0ms time.idle=7.96µs
+2026-10-20T12:43:02.077491Z  INFO modification.prepare:modification.transform: cindral_core::modification: enter
+2026-10-20T12:43:02.102198Z  INFO modification.prepare:modification.transform: cindral_core::modification: close time.busy=24.7ms time.idle=6.98µs
+2026-10-20T12:43:02.102272Z  INFO modification.prepare:model.validate: cindral_core::model: enter
+2026-10-20T12:43:02.113928Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=43200}: cindral_core::model: enter
+
+profile-pushpull60.txt
+2026-10-20T12:43:26.767129Z  INFO spatial.build: cindral_core::spatial: enter
+2026-10-20T12:43:26.940504Z  INFO spatial.build: cindral_core::spatial: close time.busy=173ms time.idle=8.10µs
+mode: pushpull; fixture: 21602 vertices / 43200 edges / 21600 faces (n=60); setup 207.105 ms
+2026-10-20T12:43:26.942061Z  INFO modification.prepare: cindral_core::modification: enter
+2026-10-20T12:43:26.942138Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: enter
+2026-10-20T12:43:26.975697Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: close time.busy=33.6ms time.idle=6.21µs
+2026-10-20T12:43:26.975754Z  INFO modification.prepare:prepare.patch_clone{faces=21600 edges=43200}: cindral_core::modification: enter
+2026-10-20T12:43:27.026561Z  INFO modification.prepare:prepare.patch_clone{faces=21600 edges=43200}: cindral_core::modification: close time.busy=50.8ms time.idle=5.17µs
+2026-10-20T12:43:27.026613Z  INFO modification.prepare:modification.push_pull: cindral_core::modification: enter
+2026-10-20T12:43:27.026630Z  INFO modification.prepare:modification.push_pull:modification.oriented: cindral_core::modification: enter
+
+profile-move12.txt
+2026-10-20T12:43:51.750963Z  INFO spatial.build: cindral_core::spatial: enter
+2026-10-20T12:43:51.758777Z  INFO spatial.build: cindral_core::spatial: close time.busy=7.81ms time.idle=10.3µs
+mode: move; fixture: 866 vertices / 1728 edges / 864 faces (n=12); setup 9.864 ms
+2026-10-20T12:43:51.758925Z  INFO modification.prepare: cindral_core::modification: enter
+2026-10-20T12:43:51.759881Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: enter
+2026-10-20T12:43:51.760181Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: close time.busy=300µs time.idle=4.82µs
+2026-10-20T12:43:51.760198Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: enter
+2026-10-20T12:43:51.761983Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: close time.busy=1.78ms time.idle=7.54µs
+2026-10-20T12:43:51.762027Z  INFO modification.prepare:modification.transform: cindral_core::modification: enter
+2026-10-20T12:43:51.762824Z  INFO modification.prepare:modification.transform: cindral_core::modification: close time.busy=795µs time.idle=8.10µs
+2026-10-20T12:43:51.762891Z  INFO modification.prepare:model.validate: cindral_core::model: enter
+2026-10-20T12:43:51.763247Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=1728}: cindral_core::model: enter
+2026-10-20T12:43:51.978580Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=1728}: cindral_core::model: close time.busy=215ms time.idle=8.03µs
+2026-10-20T12:43:51.978624Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: enter
+2026-10-20T12:43:51.980909Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: close time.busy=2.28ms time.idle=6.57µs
+2026-10-20T12:43:51.980960Z  INFO modification.prepare:model.validate: cindral_core::model: close time.busy=218ms time.idle=7.54µs
+2026-10-20T12:43:51.980983Z  INFO modification.prepare: cindral_core::modification: close time.busy=222ms time.idle=5.24µs
+edit_ms: 235.669; result: Ok(true)
+
+profile-pushpull12.txt
+2026-10-20T12:43:52.001122Z  INFO spatial.build: cindral_core::spatial: enter
+2026-10-20T12:43:52.005980Z  INFO spatial.build: cindral_core::spatial: close time.busy=4.85ms time.idle=7.40µs
+mode: pushpull; fixture: 866 vertices / 1728 edges / 864 faces (n=12); setup 5.898 ms
+2026-10-20T12:43:52.006072Z  INFO modification.prepare: cindral_core::modification: enter
+2026-10-20T12:43:52.006096Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: enter
+2026-10-20T12:43:52.006885Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: close time.busy=786µs time.idle=4.75µs
+2026-10-20T12:43:52.006901Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: enter
+2026-10-20T12:43:52.008244Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: close time.busy=1.34ms time.idle=3.77µs
+2026-10-20T12:43:52.008260Z  INFO modification.prepare:modification.push_pull: cindral_core::modification: enter
+2026-10-20T12:43:52.008272Z  INFO modification.prepare:modification.push_pull:modification.oriented: cindral_core::modification: enter
+2026-10-20T12:43:52.020636Z  INFO modification.prepare:modification.push_pull:modification.oriented: cindral_core::modification: close time.busy=12.4ms time.idle=6.63µs
+2026-10-20T12:43:52.051659Z  INFO modification.prepare:modification.push_pull:modification.surfaces: cindral_core::modification: enter
+2026-10-20T12:43:53.967734Z  INFO modification.prepare:modification.push_pull:modification.surfaces: cindral_core::modification: close time.busy=1.92s time.idle=8.59µs
+2026-10-20T12:43:53.967811Z  INFO modification.prepare:modification.push_pull: cindral_core::modification: close time.busy=1.96s time.idle=4.75µs
+2026-10-20T12:43:53.967831Z  INFO modification.prepare:model.validate: cindral_core::model: enter
+2026-10-20T12:43:53.967850Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=21}: cindral_core::model: enter
+2026-10-20T12:43:53.967925Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=21}: cindral_core::model: close time.busy=73.3µs time.idle=3.84µs
+2026-10-20T12:43:53.967937Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: enter
+2026-10-20T12:43:53.967980Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: close time.busy=40.6µs time.idle=4.26µs
+2026-10-20T12:43:53.967992Z  INFO modification.prepare:model.validate: cindral_core::model: close time.busy=162µs time.idle=4.75µs
+2026-10-20T12:43:53.968022Z  INFO modification.prepare: cindral_core::modification: close time.busy=1.96s time.idle=5.10µs
+edit_ms: 1967.412; result: Ok(true)
+
+profile-pushpull12-detail.txt
+2026-10-20T12:44:37.823752Z  INFO spatial.build: cindral_core::spatial: enter
+2026-10-20T12:44:37.831009Z  INFO spatial.build: cindral_core::spatial: close time.busy=7.25ms time.idle=7.54µs
+mode: pushpull; fixture: 866 vertices / 1728 edges / 864 faces (n=12); setup 8.455 ms
+2026-10-20T12:44:37.831117Z  INFO modification.prepare: cindral_core::modification: enter
+2026-10-20T12:44:37.831147Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: enter
+2026-10-20T12:44:37.832243Z  INFO modification.prepare:prepare.connected_traversal: cindral_core::modification: close time.busy=1.09ms time.idle=4.82µs
+2026-10-20T12:44:37.832268Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: enter
+2026-10-20T12:44:37.833994Z  INFO modification.prepare:prepare.patch_clone{faces=864 edges=1728}: cindral_core::modification: close time.busy=1.72ms time.idle=4.68µs
+2026-10-20T12:44:37.834017Z  INFO modification.prepare:modification.push_pull: cindral_core::modification: enter
+2026-10-20T12:44:37.834032Z  INFO modification.prepare:modification.push_pull:modification.oriented: cindral_core::modification: enter
+2026-10-20T12:44:37.847237Z  INFO modification.prepare:modification.push_pull:modification.oriented: cindral_core::modification: close time.busy=13.2ms time.idle=5.66µs
+2026-10-20T12:44:37.870731Z  INFO modification.prepare:modification.push_pull:modification.surfaces: cindral_core::modification: enter
+2026-10-20T12:44:37.870957Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.insert_segments{polygons=1732}: cindral_core::modification: enter
+2026-10-20T12:44:39.693838Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.insert_segments{polygons=1732}: cindral_core::modification: close time.busy=1.82s time.idle=8.52µs
+2026-10-20T12:44:39.693917Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.seam_scan{edges=2600}: cindral_core::modification: enter
+2026-10-20T12:44:39.865154Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.seam_scan{edges=2600}: cindral_core::modification: close time.busy=171ms time.idle=7.05µs
+2026-10-20T12:44:39.865247Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.heal: cindral_core::modification: enter
+2026-10-20T12:44:39.866602Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.heal: cindral_core::modification: close time.busy=1.35ms time.idle=4.68µs
+2026-10-20T12:44:39.866639Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.rebuild_faces: cindral_core::modification: enter
+2026-10-20T12:44:39.866756Z  INFO modification.prepare:modification.push_pull:modification.surfaces:surfaces.rebuild_faces: cindral_core::modification: close time.busy=113µs time.idle=5.31µs
+2026-10-20T12:44:39.868808Z  INFO modification.prepare:modification.push_pull:modification.surfaces: cindral_core::modification: close time.busy=2.00s time.idle=7.05µs
+2026-10-20T12:44:39.868924Z  INFO modification.prepare:modification.push_pull: cindral_core::modification: close time.busy=2.03s time.idle=4.82µs
+2026-10-20T12:44:39.868948Z  INFO modification.prepare:model.validate: cindral_core::model: enter
+2026-10-20T12:44:39.868967Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=21}: cindral_core::model: enter
+2026-10-20T12:44:39.869007Z  INFO modification.prepare:model.validate:validate.edge_pairs{edges=21}: cindral_core::model: close time.busy=37.9µs time.idle=4.61µs
+2026-10-20T12:44:39.869020Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: enter
+2026-10-20T12:44:39.869064Z  INFO modification.prepare:model.validate:validate.faces: cindral_core::model: close time.busy=42.1µs time.idle=4.68µs
+2026-10-20T12:44:39.869079Z  INFO modification.prepare:model.validate: cindral_core::model: close time.busy=127µs time.idle=7.54µs
+2026-10-20T12:44:39.869120Z  INFO modification.prepare: cindral_core::modification: close time.busy=2.04s time.idle=7.47µs
+edit_ms: 2045.644; result: Ok(true)

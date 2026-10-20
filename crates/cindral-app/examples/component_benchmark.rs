@@ -21,6 +21,16 @@ fn wait(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), String> {
     Ok(())
 }
 fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
+    if let Ok(segments) = std::env::var("CINDRAL_CONNECTED_SEGMENTS") {
+        let segments = segments.parse::<usize>().map_err(|e| e.to_string())?;
+        let mode = std::env::var("CINDRAL_CONNECTED_MODE").unwrap_or_else(|_| "pushpull".into());
+        let mut renderer =
+            cindral_render::scene::SceneRenderer::new(&render.device, render.target_format, 1);
+        return cindral_app::organization_benchmark::run_connected(segments, &mode, |update| {
+            renderer.apply_update(&render.device, &render.queue, update);
+            wait(&render.device, &render.queue)
+        });
+    }
     let workload = cindral_app::organization_benchmark::run_cpu().map_err(|e| e.to_string())?;
     let info = render.adapter.get_info();
     println!(

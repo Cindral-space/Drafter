@@ -14,6 +14,9 @@ pub(crate) struct SceneCache {
     meshes: BTreeMap<DefinitionId, MeshCache>,
     occurrences: Vec<Occurrence>,
     initialized: bool,
+    baselines: BTreeMap<DefinitionId, cindral_core::DVec3>,
+    placements: BTreeMap<DefinitionId, cindral_core::DVec3>,
+    revision: Option<u64>,
 }
 fn style(doc: &DocumentHistory, _id: FaceId, face: &Face) -> FaceStyle {
     if let Some(material) = face.material.and_then(|id| doc.materials().get(&id)) {
@@ -51,6 +54,10 @@ impl SceneCache {
     }
     pub(crate) fn sync(&mut self, doc: &DocumentHistory) -> Result<SceneUpdate, KernelError> {
         let changes = doc.document_changes();
+        if self.initialized && self.revision == Some(changes.revision) {
+            return Ok(SceneUpdate::default());
+        }
+        let mut translated = false;
         let instances = !self.initialized || changes.instances;
         if instances {
             self.occurrences = doc.occurrences()?;
@@ -65,6 +72,8 @@ impl SceneCache {
             .collect::<Vec<_>>();
         for id in &removed {
             self.meshes.remove(id);
+            self.baselines.remove(id);
+            self.placements.remove(id);
         }
         update.removed = removed;
         for id in &visible {
@@ -75,13 +84,21 @@ impl SceneCache {
                 let (cache, mesh) =
                     MeshCache::rebuild_styled(model, &|face_id, face| style(doc, face_id, face))?;
                 entry.insert(cache);
+                self.baselines.insert(*id, model.translation_offset());
+                self.placements.insert(*id, cindral_core::DVec3::ZERO);
                 update.geometry.push(DefinitionUpdate {
                     definition: *id,
                     mesh: Arc::new(mesh),
                 });
                 continue;
             }
+            let offset =
+                model.translation_offset() - self.baselines.get(id).copied().unwrap_or_default();
+            translated |= self.placements.insert(*id, offset) != Some(offset);
             let dirty = changes.geometry.get(id);
+            if dirty.is_some_and(|d| d.rigid_translation) && !changes.appearance {
+                continue;
+            }
             if dirty.is_some() || changes.appearance {
                 let mut faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
                 let edges = dirty
@@ -99,10 +116,11 @@ impl SceneCache {
                     .meshes
                     .get_mut(id)
                     .ok_or(KernelError::MissingEntity)?
-                    .update_styled(
+                    .update_styled_in_frame(
                         model,
                         &faces.into_iter().collect::<Vec<_>>(),
                         &edges,
+                        offset,
                         &|face_id, face| style(doc, face_id, face),
                     )?;
                 update.geometry.push(DefinitionUpdate {
@@ -111,10 +129,17 @@ impl SceneCache {
                 });
             }
         }
-        if instances || changes.appearance {
+        if instances || changes.appearance || translated {
             let mut batches: BTreeMap<DefinitionId, Vec<InstanceData>> = BTreeMap::new();
             for item in &self.occurrences {
-                let world = item.world.as_mat4();
+                let world = (item.world
+                    * glam::DMat4::from_translation(
+                        self.placements
+                            .get(&item.definition)
+                            .copied()
+                            .unwrap_or_default(),
+                    ))
+                .as_mat4();
                 if !world.is_finite() {
                     return Err(KernelError::InvalidPosition);
                 }
@@ -146,6 +171,7 @@ impl SceneCache {
             );
         }
         self.initialized = true;
+        self.revision = Some(changes.revision);
         Ok(update)
     }
 }
@@ -276,5 +302,56 @@ mod tests {
             .geometry
             .iter()
             .any(|g| g.definition == node.definition && g.mesh.reset));
+    }
+    #[test]
+    fn raw_translation_keeps_mesh_and_later_face_edits_use_the_same_render_frame() {
+        let mut doc = DocumentHistory::new();
+        doc.execute(Command::AddPolyline {
+            points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+            closed: true,
+        })
+        .unwrap();
+        let mut cache = SceneCache::default();
+        cache.sync(&doc).unwrap();
+        let vertices = doc.model().vertices().keys().copied().collect();
+        doc.preview(Command::Transform {
+            vertices,
+            matrix: glam::DMat4::from_translation(DVec3::X * 3.),
+            copy: false,
+        })
+        .unwrap();
+        let update = cache.sync(&doc).unwrap();
+        assert!(update.geometry.is_empty());
+        let batch = update.batches.unwrap();
+        assert_eq!(batch[0].instances[0].model[3][0], 3.);
+        assert_eq!(doc.model().bounds().unwrap().0.x, 3.);
+        doc.commit_preview().unwrap();
+        doc.execute(Command::AddEdge {
+            start: DVec3::X * 3.,
+            end: DVec3::new(4., 1., 0.),
+        })
+        .unwrap();
+        let update = cache.sync(&doc).unwrap();
+        assert!(update.geometry.iter().all(|g| !g.mesh.reset));
+        let moved_vertices = update
+            .geometry
+            .iter()
+            .flat_map(|g| &g.mesh.face_writes)
+            .flat_map(|w| {
+                w.bytes
+                    .as_chunks::<{ std::mem::size_of::<cindral_render::mesh::FaceVertex>() }>()
+                    .0
+                    .iter()
+            });
+        for v in moved_vertices {
+            let x = f32::from_ne_bytes(v[..4].try_into().unwrap());
+            assert!((0.0..=1.).contains(&x));
+        }
+        doc.undo().unwrap();
+        cache.sync(&doc).unwrap();
+        doc.undo().unwrap();
+        let update = cache.sync(&doc).unwrap();
+        assert!(update.geometry.is_empty());
+        assert_eq!(update.batches.unwrap()[0].instances[0].model[3][0], 0.);
     }
 }

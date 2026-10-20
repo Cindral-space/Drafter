@@ -1,0 +1,32 @@
+Building release connected_benchmark...
+   Compiling cindral-core v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-core)
+    Finished `release` profile [optimized] target(s) in 23.04s
+Running pushpull n=60...
+mode pushpull; segments 60; vertices 21602; edges 43200; faces 21600; setup_ms 154.339
+preview_cold_ms 1.858; preview_mean_ms 1.793; preview_p95_ms 2.077; preview_max_ms 2.337; commit_ms 0.006; undo_ms 0.078; redo_ms 0.079; full_validation_ms 347.864
+preview_budget_ms 16.000; commit_budget_ms 100.000; budget_pass true
+Running move n=60...
+mode move; segments 60; vertices 21602; edges 43200; faces 21600; setup_ms 148.701
+preview_cold_ms 4.602; preview_mean_ms 1.136; preview_p95_ms 1.554; preview_max_ms 4.602; commit_ms 0.006; undo_ms 3.675; redo_ms 2.541; full_validation_ms 386.375
+preview_budget_ms 16.000; commit_budget_ms 100.000; budget_pass true
+Running pushpull n=100...
+mode pushpull; segments 100; vertices 60002; edges 120000; faces 60000; setup_ms 438.273
+preview_cold_ms 5.877; preview_mean_ms 5.565; preview_p95_ms 7.227; preview_max_ms 7.495; commit_ms 0.006; undo_ms 0.100; redo_ms 0.095; full_validation_ms 1007.443
+preview_budget_ms 44.444; commit_budget_ms 277.778; budget_pass true
+Running move n=100...
+mode move; segments 100; vertices 60002; edges 120000; faces 60000; setup_ms 528.637
+preview_cold_ms 16.249; preview_mean_ms 2.838; preview_p95_ms 3.470; preview_max_ms 16.249; commit_ms 0.006; undo_ms 7.483; redo_ms 6.145; full_validation_ms 1331.971
+preview_budget_ms 44.444; commit_budget_ms 277.778; budget_pass true
+All connected performance benchmarks completed successfully.
+
+GPU-completed move60
+connected GPU-completed move n60 faces21600: cold 5.864 ms; steady mean 3.471 ms; max 5.864 ms; commit 0.004 ms
+
+GPU-completed pushpull60
+connected GPU-completed pushpull n60 faces21604: cold 3.043 ms; steady mean 2.536 ms; max 3.709 ms; commit 0.005 ms
+
+GPU-completed move100
+connected GPU-completed move n100 faces60000: cold 16.569 ms; steady mean 7.291 ms; max 16.569 ms; commit 0.004 ms
+
+GPU-completed pushpull100
+connected GPU-completed pushpull n100 faces60004: cold 6.400 ms; steady mean 6.571 ms; max 10.380 ms; commit 0.009 ms

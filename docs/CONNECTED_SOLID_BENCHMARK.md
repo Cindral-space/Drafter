@@ -21,7 +21,7 @@ The deadline includes setup and startup. Thus each edit remained unfinished afte
 
 Placing the same solid inside a group exercises a different operation: it changes a local matrix without touching its topology. Three runs measured placement preview **0.004–0.007 ms**, commit **0.004–0.007 ms** and undo **0.004–0.008 ms**, excluding initial mesh preparation, scene batching and GPU upload. These are from the final [component workload](COMPONENT_BENCHMARK.md), which also contains the connected-group fixture. Fast matrix placement does not repair the raw geometry-edit bottleneck.
 
-The remaining cost is dense connected-shell Boolean reconstruction and topology validation/index updates for raw transformations. The follow-up plan in [architecture](ARCHITECTURE.md#next-incremental-work-after-the-connected-solid-measurement) targets adjacency/face broad-phase indexes, preservation of untouched shell regions, affine whole-shell fast paths, and bounded/cancellable work. The current synchronous raw edit can stall the UI on this workload; it is a documented limitation, not an interactive-performance pass.
+The remaining cost is dense connected-shell Boolean reconstruction and topology validation/index updates for raw transformations. The follow-up plan in [architecture](ARCHITECTURE.md#next-incremental-work-after-the-connected-solid-measurement) targets adjacency/face broad-phase indexes, preservation of untouched shell regions, affine whole-shell fast paths, and bounded/cancellable work. At the M5 baseline, synchronous raw edits stalled the UI on this workload. The optimized measurements below supersede that baseline for the tested commands.
 
 ## Profiling diagnosis before algorithm changes
 
@@ -41,3 +41,48 @@ Instrumentation-only baseline `44c674c`, release, tracing enter/close spans (`CI
 | Push/pull, n12: surface reconstruction | 1.92 s of 1,967.412 ms total edit | Dominant completed sample; legacy code reinserts all polygon edges, scans seams against all polygons, heals and rebuilds globally |
 
 The spatial cache exists, but raw validation does not use it for pair rejection; extrusion discards locality by expanding the candidate cavity to the full connected shell. History already stores deltas, not snapshots, but building those deltas first copies/diffs the whole selected shell. Source-derived additional suspects inside reconstruction (not yet individually timed in this table) are linear vertex welding, all-edge segment intersections, seam polygon scans and global healing. These are distinguished from measured timings rather than assumed to be the bottleneck. Detailed reconstruction spans are being collected. Argon High/high is reviewing the measurements and redesign in a separate worktree; the rejected High/max effort combination performed no analysis and was corrected.
+
+### Detailed reconstruction profile and reviewed redesign
+
+The extra 864-face trace measured **1.82 s segment reinsertion**, **171 ms seam scan**, **1.35 ms healing** and **0.113 ms face rebuilding**. Thus global healing was not the main cost in that sample. Argon High/high reviewed the traces and proposed translated index frames, exact original-value restoration, direct face-edge orientation lookup, spatial reconstruction/deduplication and guarded local extrusion. The integrator's reviewed design and equivalence semantics are summarized in [CONNECTED_PROFILE_ANALYSIS.md](CONNECTED_PROFILE_ANALYSIS.md).
+
+## Optimized raw edit regression — 2026-10-20
+
+Release, same machine; 31 previews from the same initial model, including a cold first update, followed by one commit, exact-data undo/redo checks and untimed full model/index validation. No container transform substitutes for the raw geometry command. The first update captures translation originals and dirty IDs; steady updates reuse them. The face extrusion changes only the cap/walls while preserving unchanged subdivision topology. Support-plane and interior-pocket guards choose the local path; other cases use the spatially improved general Boolean implementation.
+
+| Raw kernel workload | Cold preview ms | Steady mean ms | Preview max ms | Commit ms |
+| --- | ---: | ---: | ---: | ---: |
+| Push/pull, 21,600 faces | 1.858 | 1.793 | 2.337 | 0.006 |
+| Move, 21,600 faces | 4.602 | 1.136 | 4.602 | 0.006 |
+| Push/pull, 60,000 faces | 5.877 | 5.565 | 7.495 | 0.006 |
+| Move, 60,000 faces | 16.249 | 2.838 | 16.249 | 0.006 |
+
+Both requested 21,600-face targets pass, including the cold preview. The 2.78× face-count increase gives 3.10× steady push/pull time and 2.50× steady Move time: approximately linear, rather than the previous quadratic loops. Cold Move at 60,000 faces is slightly above 16 ms; the 16 ms target is for 21,600 faces. Full diagnostic validation remains outside interactive updates: 348–386 ms at 21,600 faces and 1,007–1,332 ms at 60,000 faces in these runs. Load validation still performs this diagnostic work.
+
+[Raw kernel report](benchmarks/2026-10-20-connected-optimized.txt). The regression runner builds the release binary, sets `CINDRAL_ENFORCE_BUDGET=1`, and runs each workload in a separate **10-second process timeout**:
+
+```sh
+scripts/check-connected-performance.sh
+```
+
+It fails on timeout, geometry/history validation error, a preview ≥16 ms or commit ≥100 ms at 21,600 faces. For the 60,000-face scaling cases it allows budgets proportional to face count (44.444 / 277.778 ms), and prints all actual times. Run on an otherwise idle machine; absolute budgets are sensitive to CPU/desktop contention. `timeout` is the GNU utility; Windows users can run the release example with their process-timeout harness.
+
+The native completed-upload workload additionally includes `DocumentHistory`, definition mesh caching and GPU completion, using the production renderer's geometry/matrix update path:
+
+```sh
+cargo build --release -p cindral-app --features kernel-benchmark --example component_benchmark
+WGPU_BACKEND=gl CINDRAL_CONNECTED_SEGMENTS=60 CINDRAL_CONNECTED_MODE=move \
+  CINDRAL_ENFORCE_BUDGET=1 timeout 15s target/release/examples/component_benchmark
+# Repeat with mode pushpull and segments 100.
+```
+
+These measurements exclude initial mesh/GPU setup, picking, inference, UI layout, rendering and presentation. They are completed update-upload latency, not an achieved editor FPS guarantee. Exact undo/cancel and boundary equivalence tests run with `cargo test -p cindral-core --features bench-fixtures --test connected_equivalence`; existing hole/tunnel/material regressions remain enabled.
+
+| Completed raw update + GPU upload | Cold ms | Steady mean ms | Max ms | Commit ms |
+| --- | ---: | ---: | ---: | ---: |
+| Move, 21,600 faces | 5.864 | 3.471 | 5.864 | 0.004 |
+| Push/pull, 21,600 faces | 3.043 | 2.536 | 3.709 | 0.005 |
+| Move, 60,000 faces | 16.569 | 7.291 | 16.569 | 0.004 |
+| Push/pull, 60,000 faces | 6.400 | 6.571 | 10.380 | 0.009 |
+
+These completed-update runs pass the 21,600-face targets and the proportional scaling budgets. The 60,000-face cold Move update is slightly above 16 ms; steady updates are below it. No claim is made that every complex Boolean or full presented frame meets this budget.

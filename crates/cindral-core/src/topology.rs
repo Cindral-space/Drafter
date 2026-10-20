@@ -20,21 +20,29 @@ impl Model {
         }
         let mut vertices = [a, b];
         vertices.sort();
-        if self.edges.values().any(|e| e.vertices == vertices) {
+        let indexed = self.faces.is_empty() && self.spatial.is_some();
+        if if indexed {
+            self.spatial.as_ref().is_some_and(|s| s.has_edge(vertices))
+        } else {
+            self.edges.values().any(|e| e.vertices == vertices)
+        } {
             return Ok(());
         }
         let id = match preferred {
             Some(id) => id,
             None => EdgeId::from_raw(self.allocate()?),
         };
-        self.edges.insert(
-            id,
-            Edge {
-                vertices,
-                soft: style.0,
-                smooth: style.1,
-            },
-        );
+        let edge = Edge {
+            vertices,
+            soft: style.0,
+            smooth: style.1,
+        };
+        if indexed {
+            let mut index = self.spatial.take().ok_or(KernelError::MissingEntity)?;
+            index.add_edge(id, &edge, self)?;
+            self.spatial = Some(index);
+        }
+        self.edges.insert(id, edge);
         Ok(())
     }
 
@@ -52,11 +60,20 @@ impl Model {
         let start = self.position(a)?;
         let end = self.position(b)?;
         let mut cuts = vec![a, b];
-        let edges: Vec<_> = self
-            .edges
-            .iter()
-            .map(|(id, edge)| (*id, edge.clone()))
-            .collect();
+        let indexed = self.faces.is_empty() && self.spatial.is_some();
+        let edges: Vec<_> = if indexed {
+            let bounds =
+                crate::spatial::envelope([start, end]).ok_or(KernelError::MissingEntity)?;
+            self.spatial
+                .as_ref()
+                .ok_or(KernelError::MissingEntity)?
+                .query_edges(bounds)
+                .iter()
+                .filter_map(|id| self.edges.get(id).map(|e| (*id, e.clone())))
+                .collect()
+        } else {
+            self.edges.iter().map(|(id, e)| (*id, e.clone())).collect()
+        };
         for (id, edge) in edges {
             let c = self.position(edge.vertices[0])?;
             let d = self.position(edge.vertices[1])?;
@@ -69,6 +86,11 @@ impl Model {
             }
             self.sort_along(&mut edge_cuts, c, d);
             if edge_cuts.len() > 2 {
+                if indexed {
+                    let mut index = self.spatial.take().ok_or(KernelError::MissingEntity)?;
+                    index.remove_edge(id, &edge, self)?;
+                    self.spatial = Some(index);
+                }
                 self.edges.remove(&id);
                 for (index, pair) in edge_cuts.windows(2).enumerate() {
                     self.add_edge_ids(

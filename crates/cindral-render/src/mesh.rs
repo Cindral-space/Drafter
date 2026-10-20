@@ -237,6 +237,18 @@ impl MeshCache {
         edges: &[EdgeId],
         style_fn: &impl Fn(FaceId, &Face) -> FaceStyle,
     ) -> Result<MeshUpdate, KernelError> {
+        self.update_styled_in_frame(model, faces, edges, DVec3::ZERO, style_fn)
+    }
+
+    /// Update dirty geometry in a translated mesh frame without rebuilding untouched slots.
+    pub fn update_styled_in_frame(
+        &mut self,
+        model: &Model,
+        faces: &[FaceId],
+        edges: &[EdgeId],
+        offset: DVec3,
+        style_fn: &impl Fn(FaceId, &Face) -> FaceStyle,
+    ) -> Result<MeshUpdate, KernelError> {
         enum PreparedFace {
             Remove(FaceId),
             Unchanged,
@@ -266,7 +278,7 @@ impl MeshCache {
                 None => prepared_faces.push(PreparedFace::Remove(face_id)),
                 Some(face) => {
                     let style = style_fn(face_id, face);
-                    let signature = build_face_signature(model, face, style)?;
+                    let signature = build_face_signature_in_frame(model, face, style, offset)?;
                     if self
                         .face_slots
                         .get(&face_id)
@@ -274,7 +286,8 @@ impl MeshCache {
                     {
                         prepared_faces.push(PreparedFace::Unchanged);
                     } else {
-                        let vertices = build_face_triangles(model, face_id, face, style)?;
+                        let vertices =
+                            build_face_triangles_in_frame(model, face_id, face, style, offset)?;
                         if vertices.is_empty() {
                             prepared_faces.push(PreparedFace::Remove(face_id));
                         } else {
@@ -299,7 +312,7 @@ impl MeshCache {
                 None => prepared_edges.push(PreparedEdge::Remove(edge_id)),
                 Some(edge) if edge.soft => prepared_edges.push(PreparedEdge::Remove(edge_id)),
                 Some(edge) => {
-                    let vertices = build_edge_vertices(model, edge.vertices)?;
+                    let vertices = build_edge_vertices_in_frame(model, edge.vertices, offset)?;
                     if self
                         .edge_slots
                         .get(&edge_id)
@@ -521,6 +534,14 @@ fn build_face_signature(
     face: &Face,
     style: FaceStyle,
 ) -> Result<FaceSignature, KernelError> {
+    build_face_signature_in_frame(model, face, style, DVec3::ZERO)
+}
+fn build_face_signature_in_frame(
+    model: &Model,
+    face: &Face,
+    style: FaceStyle,
+    offset: DVec3,
+) -> Result<FaceSignature, KernelError> {
     if !face.plane.normal.is_finite() || !face.plane.distance.is_finite() {
         return Err(KernelError::InvalidPosition);
     }
@@ -532,7 +553,7 @@ fn build_face_signature(
             if !v.position.is_finite() {
                 return Err(KernelError::InvalidPosition);
             }
-            Ok(v.position)
+            Ok(v.position - offset)
         })
         .collect::<Result<Vec<_>, KernelError>>()?;
     let holes = face
@@ -545,7 +566,7 @@ fn build_face_signature(
                     if !v.position.is_finite() {
                         return Err(KernelError::InvalidPosition);
                     }
-                    Ok(v.position)
+                    Ok(v.position - offset)
                 })
                 .collect::<Result<Vec<_>, KernelError>>()
         })
@@ -554,7 +575,7 @@ fn build_face_signature(
         color: style.color,
         explicit_material: style.explicit_material,
         normal: face.plane.normal,
-        distance: face.plane.distance,
+        distance: face.plane.distance - face.plane.normal.dot(offset),
         outer,
         holes,
     })
@@ -566,6 +587,15 @@ fn build_face_triangles(
     face: &Face,
     style: FaceStyle,
 ) -> Result<Vec<FaceVertex>, KernelError> {
+    build_face_triangles_in_frame(model, face_id, face, style, DVec3::ZERO)
+}
+fn build_face_triangles_in_frame(
+    model: &Model,
+    face_id: FaceId,
+    face: &Face,
+    style: FaceStyle,
+    offset: DVec3,
+) -> Result<Vec<FaceVertex>, KernelError> {
     let tris = model.triangulate(face_id)?;
     let normal = face.plane.normal.as_vec3();
     let Some(normal) = normal.try_normalize() else {
@@ -575,7 +605,7 @@ fn build_face_triangles(
     let mut vertices = Vec::with_capacity(tris.len() * 3);
     for tri in tris {
         for p in tri {
-            let pos = p.as_vec3();
+            let pos = (p - offset).as_vec3();
             if !pos.is_finite() {
                 return Err(KernelError::InvalidPosition);
             }
@@ -594,17 +624,26 @@ fn build_edge_vertices(
     model: &Model,
     endpoints: [cindral_core::VertexId; 2],
 ) -> Result<[EdgeVertex; 2], KernelError> {
-    let a = model
+    build_edge_vertices_in_frame(model, endpoints, DVec3::ZERO)
+}
+fn build_edge_vertices_in_frame(
+    model: &Model,
+    endpoints: [cindral_core::VertexId; 2],
+    offset: DVec3,
+) -> Result<[EdgeVertex; 2], KernelError> {
+    let a = (model
         .vertices()
         .get(&endpoints[0])
         .ok_or(KernelError::MissingEntity)?
         .position
+        - offset)
         .as_vec3();
-    let b = model
+    let b = (model
         .vertices()
         .get(&endpoints[1])
         .ok_or(KernelError::MissingEntity)?
         .position
+        - offset)
         .as_vec3();
     if !a.is_finite() || !b.is_finite() {
         return Err(KernelError::InvalidPosition);

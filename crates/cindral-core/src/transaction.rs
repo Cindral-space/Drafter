@@ -10,6 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct ChangeSet {
     /// Monotonic document revision of this change.
     pub revision: u64,
+    /// Only a topology-preserving whole-definition translation changed positions.
+    pub rigid_translation: bool,
     /// Added, changed or removed vertices.
     pub vertices: BTreeSet<VertexId>,
     /// Added, changed or removed edges.
@@ -24,6 +26,7 @@ pub(crate) struct ValueChange<T> {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct Delta {
+    translation: Option<crate::translation::Translation>,
     vertices: BTreeMap<VertexId, ValueChange<Vertex>>,
     edges: BTreeMap<EdgeId, ValueChange<Edge>>,
     faces: BTreeMap<FaceId, ValueChange<Face>>,
@@ -136,6 +139,42 @@ impl Delta {
         command: &Command,
         high_water: u64,
     ) -> Result<Self, KernelError> {
+        if fast_paths_enabled() {
+            model.ensure_spatial()?;
+            if let Some((before, after)) =
+                crate::local_extrusion::prepare(model, command, high_water)?
+            {
+                return Ok(Self::between(&before, &after, model.next_id));
+            }
+            if let Some(translation) = crate::translation::Translation::prepare(model, command)? {
+                return Ok(Self {
+                    translation: Some(translation),
+                    vertices: BTreeMap::new(),
+                    edges: BTreeMap::new(),
+                    faces: BTreeMap::new(),
+                    before_next: model.next_id,
+                    after_next: high_water.max(model.next_id),
+                });
+            }
+        }
+        Self::prepare_entities(model, command, high_water)
+    }
+    pub fn replace_translation(
+        &mut self,
+        model: &mut Model,
+        command: &Command,
+    ) -> Result<Option<bool>, KernelError> {
+        if let Some(translation) = &mut self.translation {
+            translation.replace(model, command)
+        } else {
+            Ok(None)
+        }
+    }
+    fn prepare_entities(
+        model: &mut Model,
+        command: &Command,
+        high_water: u64,
+    ) -> Result<Self, KernelError> {
         if let Command::Batch(commands) = command {
             fn depth(command: &Command, level: usize) -> Result<(), KernelError> {
                 if level > 64 {
@@ -153,7 +192,7 @@ impl Delta {
             let mut deltas: Vec<Self> = Vec::new();
             let mut next = high_water;
             for c in commands {
-                match Self::prepare(model, c, next) {
+                match Self::prepare_entities(model, c, next) {
                     Ok(delta) => {
                         delta.apply(model, true)?;
                         next = delta.next_id();
@@ -171,6 +210,7 @@ impl Delta {
                 d.apply(model, false)?;
             }
             let mut combined = Self {
+                translation: None,
                 vertices: BTreeMap::new(),
                 edges: BTreeMap::new(),
                 faces: BTreeMap::new(),
@@ -464,6 +504,7 @@ impl Delta {
             }
         }
         Self {
+            translation: None,
             vertices,
             edges,
             faces,
@@ -473,20 +514,44 @@ impl Delta {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.vertices.is_empty() && self.edges.is_empty() && self.faces.is_empty()
+        self.translation
+            .as_ref()
+            .is_none_or(|t| t.offset == DVec3::ZERO)
+            && self.vertices.is_empty()
+            && self.edges.is_empty()
+            && self.faces.is_empty()
     }
     pub fn next_id(&self) -> u64 {
         self.after_next
     }
     pub fn changes(&self, revision: u64) -> ChangeSet {
+        if let Some(t) = &self.translation {
+            return ChangeSet {
+                revision,
+                rigid_translation: true,
+                vertices: t.vertices.iter().map(|(id, _)| *id).collect(),
+                edges: t.edges.iter().copied().collect(),
+                faces: t.planes.iter().map(|(id, _)| *id).collect(),
+            };
+        }
         ChangeSet {
             revision,
+            rigid_translation: false,
             vertices: self.vertices.keys().copied().collect(),
             edges: self.edges.keys().copied().collect(),
             faces: self.faces.keys().copied().collect(),
         }
     }
     pub fn apply(&self, model: &mut Model, forward: bool) -> Result<(), KernelError> {
+        if let Some(t) = &self.translation {
+            t.apply(model, forward)?;
+            model.next_id = if forward {
+                self.after_next
+            } else {
+                self.before_next
+            };
+            return Ok(());
+        }
         model.ensure_spatial()?;
         let mut spatial = model.spatial.take().ok_or(KernelError::MissingEntity)?;
         // Remove index entries while all old endpoints still exist.
@@ -566,6 +631,17 @@ pub(crate) fn contains_face(model: &Model, face: &Face, point: DVec3) -> Result<
         }
     }
     Ok(true)
+}
+
+fn fast_paths_enabled() -> bool {
+    #[cfg(feature = "bench-fixtures")]
+    {
+        !crate::benchmark::reference_enabled()
+    }
+    #[cfg(not(feature = "bench-fixtures"))]
+    {
+        true
+    }
 }
 
 #[cfg(test)]

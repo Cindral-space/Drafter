@@ -114,6 +114,24 @@ pub fn add_test_solid(history: &mut History) -> Result<crate::FaceId, KernelErro
         .ok_or(KernelError::MissingEntity)
 }
 
+/// Execute the retained reference algorithm for small-model equivalence tests.
+/// This benchmark-only API must never be used for interactive large models.
+pub fn reference_execute(history: &mut History, command: Command) -> Result<bool, KernelError> {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            REFERENCE.with(|r| r.set(self.0));
+        }
+    }
+    let previous = REFERENCE.with(|r| r.replace(true));
+    let _reset = Reset(previous);
+    history.execute(command)
+}
+thread_local! {static REFERENCE: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};}
+pub(crate) fn reference_enabled() -> bool {
+    REFERENCE.with(|r| r.get())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -126,10 +144,4 @@ mod tests {
         assert_eq!(f.history.model().faces().len(), 9);
         f.history.model().validate().unwrap();
     }
-}
-
-/// Execute the retained reference algorithm for small-model equivalence tests.
-/// This benchmark-only API must never be used for interactive large models.
-pub fn reference_execute(history: &mut History, command: Command) -> Result<bool, KernelError> {
-    history.execute(command)
 }

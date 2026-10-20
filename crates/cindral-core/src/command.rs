@@ -221,6 +221,13 @@ impl History {
     /// Replace a provisional edit using the same local delta path as a committed command.
     /// No undo entry is recorded until `commit_preview`; cancellation restores the starting geometry.
     pub fn preview(&mut self, command: Command) -> Result<bool, KernelError> {
+        if let Some(delta) = &mut self.preview {
+            if let Some(changed) = delta.replace_translation(&mut self.model, &command)? {
+                self.revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
+                self.changes.revision = self.revision;
+                return Ok(changed);
+            }
+        }
         let mut dirty = crate::ChangeSet::default();
         if let Some(old) = self.preview.take() {
             old.apply(&mut self.model, false)?;
@@ -234,10 +241,15 @@ impl History {
                 if changed {
                     delta.apply(&mut self.model, true)?;
                 }
-                let new = delta.changes(self.revision);
-                dirty.vertices.extend(new.vertices);
-                dirty.edges.extend(new.edges);
-                dirty.faces.extend(new.faces);
+                let mut new = delta.changes(self.revision);
+                if dirty.vertices.is_empty() && dirty.edges.is_empty() && dirty.faces.is_empty() {
+                    dirty = new;
+                } else {
+                    dirty.rigid_translation &= new.rigid_translation;
+                    dirty.vertices.append(&mut new.vertices);
+                    dirty.edges.append(&mut new.edges);
+                    dirty.faces.append(&mut new.faces);
+                }
                 self.revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
                 dirty.revision = self.revision;
                 self.changes = dirty;

@@ -332,7 +332,14 @@ fn oriented(m: &Model) -> Result<OrientedBoundary, KernelError> {
         let mut component = Vec::new();
         while let Some(id) = queue.pop() {
             component.push(id);
-            for incident in usage.values() {
+            let face = &m.faces[&id];
+            for (a, b) in std::iter::once(&face.outer)
+                .chain(face.holes.iter())
+                .flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)))
+            {
+                let mut pair = [*a, *b];
+                pair.sort();
+                let incident = usage.get(&pair).ok_or(KernelError::MissingEntity)?;
                 if let Some((_, direction)) = incident.iter().find(|(f, _)| *f == id) {
                     for (other, other_direction) in incident {
                         if *other == id {
@@ -455,23 +462,48 @@ fn surfaces(
     drop(insertion_span);
     let seam_span = tracing::info_span!("surfaces.seam_scan", edges = result.edges.len()).entered();
     // Split edges first, then remove boundaries shared by coplanar convex pieces.
+    let segment_tree = rstar::RTree::bulk_load(
+        polygons
+            .iter()
+            .enumerate()
+            .flat_map(|(i, p)| {
+                p.vertices
+                    .iter()
+                    .zip(p.vertices.iter().cycle().skip(1))
+                    .map(move |(a, b)| {
+                        rstar::primitives::GeomWithData::new(
+                            rstar::primitives::Line::new(a.to_array(), b.to_array()),
+                            i,
+                        )
+                    })
+            })
+            .collect(),
+    );
     let mut seams = Vec::new();
     for (id, e) in &result.edges {
         let a = result.position(e.vertices[0])?;
         let b = result.position(e.vertices[1])?;
         let midpoint = (a + b) * 0.5;
-        let mut normals = Vec::new();
-        for p in &polygons {
-            if p.vertices
-                .iter()
-                .zip(p.vertices.iter().cycle().skip(1))
-                .any(|(c, d)| crate::geometry::on_segment(midpoint, *c, *d))
-            {
-                if let Some(n) = polygon_normal(p) {
-                    normals.push(n);
+        let bounds = crate::spatial::expanded(rstar::AABB::from_point(midpoint.to_array()));
+        let candidates = segment_tree
+            .locate_in_envelope_intersecting(&bounds)
+            .map(|p| p.data)
+            .collect::<BTreeSet<_>>();
+        let normals = candidates
+            .into_iter()
+            .filter_map(|i| {
+                let p = &polygons[i];
+                if p.vertices
+                    .iter()
+                    .zip(p.vertices.iter().cycle().skip(1))
+                    .any(|(c, d)| crate::geometry::on_segment(midpoint, *c, *d))
+                {
+                    polygon_normal(p)
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .collect::<Vec<_>>();
         if normals.len() >= 2
             && normals
                 .iter()
@@ -480,6 +512,8 @@ fn surfaces(
             seams.push(*id);
         }
     }
+    // Reconstruction mutates topology below; the temporary construction index is no longer needed.
+    result.spatial = None;
     for id in seams {
         result.edges.remove(&id);
     }

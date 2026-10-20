@@ -682,6 +682,7 @@ fn triangulate_polygon(poly: &Polygon) -> Vec<Polygon> {
 /// Removes duplicate polygons and decomposes any non-convex fragments into convex pieces.
 fn clean_and_filter_polygons(polygons: Vec<Polygon>) -> Vec<Polygon> {
     let mut cleaned = Vec::with_capacity(polygons.len());
+    let mut centers = rstar::RTree::<rstar::primitives::GeomWithData<[f64; 3], usize>>::new();
     for p in polygons {
         if let Some(poly) = Polygon::new(p.vertices) {
             let convex_pieces = if poly.is_convex() {
@@ -691,14 +692,22 @@ fn clean_and_filter_polygons(polygons: Vec<Polygon>) -> Vec<Polygon> {
             };
 
             for piece in convex_pieces {
-                let mut is_dup = false;
-                for existing in &cleaned {
-                    if is_same_polygon(&piece, existing) {
-                        is_dup = true;
-                        break;
-                    }
-                }
+                let origin = piece.vertices[0];
+                let center = origin
+                    + piece.vertices.iter().map(|p| *p - origin).sum::<DVec3>()
+                        / piece.vertices.len() as f64;
+                let bounds = rstar::AABB::from_corners(
+                    (center - DVec3::splat(TOLERANCE * 4.)).to_array(),
+                    (center + DVec3::splat(TOLERANCE * 4.)).to_array(),
+                );
+                let is_dup = centers
+                    .locate_in_envelope_intersecting(&bounds)
+                    .any(|item| is_same_polygon(&piece, &cleaned[item.data]));
                 if !is_dup {
+                    centers.insert(rstar::primitives::GeomWithData::new(
+                        center.to_array(),
+                        cleaned.len(),
+                    ));
                     cleaned.push(piece);
                 }
             }

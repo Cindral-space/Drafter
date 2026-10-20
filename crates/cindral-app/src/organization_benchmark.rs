@@ -174,3 +174,71 @@ pub fn run_cpu() -> Result<Workload, KernelError> {
         placement,
     })
 }
+
+/// Measure raw connected edits through document history, CPU mesh cache and a completed GPU consumer.
+/// The consumer is invoked once for setup and once per live update; drawing/picking/UI are excluded.
+pub fn run_connected(
+    segments: usize,
+    mode: &str,
+    mut upload: impl FnMut(&SceneUpdate) -> Result<(), String>,
+) -> Result<(), String> {
+    fn run(
+        segments: usize,
+        mode: &str,
+        upload: &mut impl FnMut(&SceneUpdate) -> Result<(), String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (fixture, face) = cindral_core::connected_fixture::connected_solid(segments)?;
+        let mut data = DocumentHistory::new().to_data();
+        data.definitions
+            .get_mut(&DefinitionId(0))
+            .ok_or("missing root")?
+            .geometry = fixture.model().to_data();
+        let mut app = crate::DrafterApp {
+            history: DocumentHistory::benchmark_from_data(data)?,
+            ..Default::default()
+        };
+        app.refresh_mesh();
+        if let Some(initial) = app.pending.take() {
+            upload(&initial)?;
+        }
+        let vertices = app.model().vertices().keys().copied().collect::<Vec<_>>();
+        let mut samples = Vec::new();
+        for i in 0..31 {
+            let start = Instant::now();
+            let distance = 0.1 + i as f64 * 0.001;
+            let command = if mode == "pushpull" {
+                Command::PushPull { face, distance }
+            } else if mode == "move" {
+                Command::Transform {
+                    vertices: vertices.clone(),
+                    matrix: DMat4::from_translation(DVec3::Z * distance),
+                    copy: false,
+                }
+            } else {
+                return Err("unknown connected mode".into());
+            };
+            app.preview(command)?;
+            if let Some(update) = app.pending.take() {
+                upload(&update)?;
+            }
+            samples.push(elapsed(start));
+        }
+        let cold = samples[0];
+        let max = samples.iter().copied().fold(0., f64::max);
+        let start = Instant::now();
+        app.commit_preview()?;
+        let commit = elapsed(start);
+        if app.document().undo_depth() != 1 {
+            return Err("connected preview committed multiple entries".into());
+        }
+        println!("connected GPU-completed {mode} n{segments} faces{}: cold {cold:.3} ms; steady mean {:.3} ms; max {max:.3} ms; commit {commit:.3} ms",app.model().faces().len(),samples[1..].iter().sum::<f64>()/30.);
+        let scale = ((segments as f64 / 60.).powi(2)).max(1.);
+        if std::env::var_os("CINDRAL_ENFORCE_BUDGET").is_some()
+            && (max >= 16. * scale || commit >= 100. * scale)
+        {
+            return Err("completed GPU update exceeded connected budget".into());
+        }
+        Ok(())
+    }
+    run(segments, mode, &mut upload).map_err(|e| e.to_string())
+}

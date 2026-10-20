@@ -655,6 +655,11 @@ impl DocumentHistory {
     ) {
         for (id, old) in std::mem::take(&mut self.pending_cancel) {
             let changes = geometry.entry(id).or_default();
+            changes.rigid_translation = old.rigid_translation
+                && (changes.rigid_translation
+                    || (changes.vertices.is_empty()
+                        && changes.edges.is_empty()
+                        && changes.faces.is_empty()));
             changes.vertices.extend(old.vertices);
             changes.edges.extend(old.edges);
             changes.faces.extend(old.faces);
@@ -1515,6 +1520,7 @@ impl DocumentHistory {
         }
         for (id, model) in created {
             let changes = ChangeSet {
+                rigid_translation: false,
                 revision: 0,
                 vertices: model.vertices.keys().copied().collect(),
                 edges: model.edges.keys().copied().collect(),

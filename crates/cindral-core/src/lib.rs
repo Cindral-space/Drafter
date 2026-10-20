@@ -75,3 +75,7 @@ pub mod benchmark;
 /// Deterministic connected-solid benchmark fixtures.
 #[cfg(feature = "bench-fixtures")]
 pub mod connected_fixture;
+
+mod translation;
+
+mod local_extrusion;
