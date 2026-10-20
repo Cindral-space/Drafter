@@ -9,7 +9,7 @@ use std::{
 };
 struct AutosaveJob {
     generation: u64,
-    revision: u64,
+    revision: (u64, u64),
     receiver: mpsc::Receiver<Result<PathBuf, String>>,
 }
 pub(crate) struct FileState {
@@ -20,7 +20,7 @@ pub(crate) struct FileState {
     snapshot: PathBuf,
     generation: u64,
     last_time: Instant,
-    last_revision: Option<u64>,
+    pub(crate) last_revision: Option<(u64, u64)>,
     interval: Duration,
     job: Option<AutosaveJob>,
     candidates: Vec<PathBuf>,
@@ -110,15 +110,20 @@ impl DrafterApp {
         self.refresh_mesh();
         Ok(())
     }
+    fn file_revision(&self) -> (u64, u64) {
+        (self.history.revision(), self.presentation_serial)
+    }
     /// Snapshot serializable file values, with encoded assets and no runtime history/caches.
     pub fn file_values(&self) -> DraftBundle {
         DraftBundle {
             document: self.history.to_data(),
             textures: self.files.textures.clone(),
+            presentation: self.presentation.clone(),
         }
     }
     fn meaningful(&self) -> bool {
-        self.history.undo_depth() != 0
+        self.presentation != cindral_core::Presentation::default()
+            || self.history.undo_depth() != 0
             || self.history.redo_depth() != 0
             || !self.history.tags().is_empty()
             || !self.history.materials().is_empty()
@@ -149,6 +154,9 @@ impl DrafterApp {
     fn apply_file(&mut self, bundle: DraftBundle, path: Option<PathBuf>) -> cindral_io::Result<()> {
         self.set_document_data(bundle.document)?;
         self.files.textures = bundle.textures;
+        self.presentation = bundle.presentation;
+        self.presentation_ui = Default::default();
+        self.presentation_serial = self.presentation_serial.wrapping_add(1);
         self.reset_file_target(path);
         self.sync_file_textures()?;
         self.files.fit = true;
@@ -157,7 +165,7 @@ impl DrafterApp {
             || "Recovered/imported draft · Save As to keep it".into(),
             |p| format!("Opened {}", p.display()),
         );
-        self.files.last_revision = self.files.path.as_ref().map(|_| self.history.revision());
+        self.files.last_revision = self.files.path.as_ref().map(|_| self.file_revision());
         self.error = None;
         Ok(())
     }
@@ -175,7 +183,7 @@ impl DrafterApp {
         self.tool.cancel();
         cindral_io::save_draft(path, &self.file_values())?;
         self.files.path = Some(path.to_owned());
-        self.files.last_revision = Some(self.history.revision());
+        self.files.last_revision = Some(self.file_revision());
         self.files.status = format!("Saved {}", path.display());
         if self.files.job.is_none() && self.files.snapshot.exists() {
             if let Err(e) = std::fs::remove_file(&self.files.snapshot) {
@@ -383,14 +391,14 @@ impl DrafterApp {
             && !busy
             && self.meaningful()
             && self.files.last_time.elapsed() >= self.files.interval
-            && self.files.last_revision != Some(self.history.revision())
+            && self.files.last_revision != Some(self.file_revision())
         {
             self.files.last_time = Instant::now();
             let bundle = self.file_values();
             let path = self.files.snapshot.clone();
             let directory = self.files.directory.clone();
             let generation = self.files.generation;
-            let revision = self.history.revision();
+            let revision = self.file_revision();
             let (sender, receiver) = mpsc::channel();
             let spawned = std::thread::Builder::new()
                 .name("cindral-autosave".into())
@@ -525,6 +533,25 @@ mod tests {
         assert_eq!(app.file_values(), expected);
     }
     #[test]
+    fn old_autosave_completion_does_not_clean_new_style_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        editor.files.interval = Duration::MAX;
+        let old_revision = editor.file_revision();
+        let (sender, receiver) = mpsc::channel();
+        editor.files.job = Some(AutosaveJob { generation: editor.files.generation, revision: old_revision, receiver });
+        editor.set_view_style(cindral_core::ViewStyle { mode: cindral_core::StyleMode::XRay, ..Default::default() });
+        sender.send(Ok(editor.files.snapshot.clone())).unwrap();
+        editor.autosave_tick(&egui::Context::default());
+        assert_ne!(editor.files.last_revision, Some(editor.file_revision()));
+        let path = directory.path().join("style.cdraft");
+        editor.save_path(&path).unwrap();
+        let mut loaded = app(directory.path());
+        loaded.open_path(&path).unwrap();
+        assert_eq!(loaded.view_style().mode, cindral_core::StyleMode::XRay);
+    }
+
+    #[test]
     fn outgoing_backup_uses_a_different_path_from_an_inflight_autosave() {
         let directory = tempfile::tempdir().unwrap();
         let mut editor = app(directory.path());
@@ -532,7 +559,7 @@ mod tests {
         let (_sender, receiver) = mpsc::channel();
         editor.files.job = Some(AutosaveJob {
             generation: 0,
-            revision: 0,
+            revision: (0, 0),
             receiver,
         });
         editor.backup_current().unwrap();

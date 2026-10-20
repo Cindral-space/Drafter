@@ -11,6 +11,7 @@ struct Capture {
     output: std::path::PathBuf,
     frames: usize,
     incremental: bool,
+    styles: bool,
     modify_face: Option<cindral_core::FaceId>,
 }
 
@@ -47,9 +48,15 @@ impl eframe::App for Capture {
                 self.app.select_connected(cindral_tools::Hit::Face(face));
             }
         }
+        if self.styles {
+            let modes = [cindral_core::StyleMode::Shaded, cindral_core::StyleMode::Wireframe, cindral_core::StyleMode::HiddenLine, cindral_core::StyleMode::XRay, cindral_core::StyleMode::Textured];
+            if let Some(mode) = modes.get(self.frames) {
+                self.app.set_view_style(cindral_core::ViewStyle { mode: *mode, profiles: true, soft_edges: true, smooth_edges: true, sky: Some([68, 96, 125]), ground: Some([47, 54, 43]), ..Default::default() });
+            }
+        }
         self.app.update(ctx, frame);
         self.frames += 1;
-        if self.frames == if self.modify_face.is_some() { 6 } else { 3 } {
+        if self.frames == if self.styles { 7 } else if self.modify_face.is_some() { 6 } else { 3 } {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         let capture = ctx.input(|input| {
@@ -125,6 +132,7 @@ fn main() -> eframe::Result {
                 output,
                 frames: 0,
                 incremental,
+                styles: std::env::args().any(|arg| arg == "--styles"),
                 modify_face,
             }))
         }),

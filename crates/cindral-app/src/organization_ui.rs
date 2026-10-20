@@ -76,6 +76,9 @@ impl DrafterApp {
         let history = History::from_data(data)?;
         let removed = self.scene.definitions();
         self.history = history;
+        self.presentation = Default::default();
+        self.presentation_ui = Default::default();
+        self.presentation_serial = self.presentation_serial.wrapping_add(1);
         self.scene = scene_cache::SceneCache::default();
         self.pending = Some(Arc::new(SceneUpdate {
             removed,

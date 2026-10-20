@@ -8,6 +8,7 @@ use cindral_render::{
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
 mod files_ui;
+mod presentation_ui;
 mod modify_ui;
 mod organization_ui;
 mod scene_cache;
@@ -18,6 +19,9 @@ use std::sync::Arc;
 /// Editor state; geometry changes are committed only through core commands.
 pub struct DrafterApp {
     files: files_ui::FileState,
+    presentation: cindral_core::Presentation,
+    presentation_ui: presentation_ui::PresentationUi,
+    presentation_serial: u64,
     camera: Camera,
     modifying: bool,
     modify: ModifySession,
@@ -45,6 +49,9 @@ impl Default for DrafterApp {
     fn default() -> Self {
         Self {
             files: files_ui::FileState::default(),
+            presentation: Default::default(),
+            presentation_ui: Default::default(),
+            presentation_serial: 0,
             camera: Camera::default(),
             modifying: false,
             modify: ModifySession::new(ModifyKind::Select),
@@ -224,6 +231,29 @@ impl DrafterApp {
             Err(error) => self.error = Some(error.to_string()),
         }
     }
+    /// Current viewport appearance, independent of document geometry.
+    pub fn view_style(&self) -> &cindral_core::ViewStyle { &self.presentation.style }
+
+    /// Change viewport appearance without rebuilding geometry or instance buffers.
+    pub fn set_view_style(&mut self, style: cindral_core::ViewStyle) {
+        if self.presentation.style != style {
+            self.presentation.style = style;
+            self.presentation_changed();
+        }
+    }
+
+    fn paint_environment(&self, ui: &egui::Ui, rect: egui::Rect) {
+        let style = &self.presentation.style;
+        // With Z up and no camera roll, the infinite ground horizon is horizontal.
+        let horizon = if self.camera.projection == Projection::Orthographic {
+            if self.camera.pitch >= 0. { rect.top() } else { rect.bottom() }
+        } else {
+            rect.center().y - (self.camera.pitch.sin() / self.camera.pitch.cos().max(1e-6)) / (cindral_render::camera::FOV_Y * 0.5).tan() * rect.height() * 0.5
+        }.clamp(rect.top(), rect.bottom());
+        if let Some(rgb) = style.sky { ui.painter().rect_filled(egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), horizon)), 0., Color32::from_rgb(rgb[0], rgb[1], rgb[2])); }
+        if let Some(rgb) = style.ground { ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(rect.left(), horizon), rect.max), 0., Color32::from_rgb(rgb[0], rgb[1], rgb[2])); }
+    }
+
     fn viewport_input(&mut self, response: &egui::Response) {
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
@@ -450,6 +480,8 @@ fn snap_label(kind: SnapKind) -> &'static str {
 }
 impl eframe::App for DrafterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.transition_tick(ctx);
+        let camera_at_tick = (self.camera.target, self.camera.distance, self.camera.yaw, self.camera.pitch, self.camera.projection);
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 self.file_menu(ui);
@@ -504,6 +536,7 @@ impl eframe::App for DrafterApp {
         });
         self.recovery_window(ctx);
         self.autosave_tick(ctx);
+        self.presentation_panel(ctx);
         self.organization_panel(ctx);
         egui::SidePanel::left("navigation")
             .exact_width(174.)
@@ -639,7 +672,7 @@ impl eframe::App for DrafterApp {
                 }
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::from_rgb(17, 22, 29)))
+            .frame(egui::Frame::NONE.fill(Color32::from_rgb(self.presentation.style.background[0], self.presentation.style.background[1], self.presentation.style.background[2])))
             .show(ctx, |ui| {
                 let (rect, response) =
                     ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
@@ -651,7 +684,9 @@ impl eframe::App for DrafterApp {
                     self.extents(aspect);
                     self.files.fit = false;
                 }
+                self.paint_environment(ui, rect);
                 self.viewport_input(&response);
+                if camera_at_tick != (self.camera.target, self.camera.distance, self.camera.yaw, self.camera.pitch, self.camera.projection) { self.cancel_scene_transition(); }
                 let matrix = self.camera.view_projection(aspect);
                 ui.painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
@@ -670,6 +705,7 @@ impl eframe::App for DrafterApp {
                                 (rect.height() * ctx.pixels_per_point()).round() as u32,
                             ],
                             update: self.pending.take(),
+                            style: self.presentation.style.clone(),
                         },
                     ));
                 let view = View {
@@ -994,3 +1030,24 @@ mod axis_input_test {
 
 #[cfg(feature = "kernel-benchmark")]
 pub mod organization_benchmark;
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+    #[test]
+    fn switching_every_style_keeps_geometry_and_instances_clean() {
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline { points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y], closed: true }).unwrap();
+        app.pending.take();
+        let revision = app.history.revision();
+        let before = app.history.to_data();
+        for mode in [cindral_core::StyleMode::Shaded, cindral_core::StyleMode::Textured, cindral_core::StyleMode::Wireframe, cindral_core::StyleMode::HiddenLine, cindral_core::StyleMode::XRay] {
+            app.set_view_style(cindral_core::ViewStyle { mode, profiles: true, soft_edges: true, smooth_edges: true, background: [240, 240, 240], sky: Some([100, 140, 200]), ground: Some([100, 110, 80]) });
+            assert!(app.pending.is_none());
+            let delta = app.scene.sync(&app.history).unwrap();
+            assert!(delta.geometry.is_empty() && delta.batches.is_none());
+            assert_eq!(app.history.revision(), revision);
+        }
+        assert_eq!(app.history.to_data(), before);
+    }
+}
