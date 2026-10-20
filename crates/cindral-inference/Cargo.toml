@@ -6,3 +6,7 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cindral-core = { path = "../cindral-core" }
+glam = "0.30"

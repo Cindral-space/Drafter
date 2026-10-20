@@ -6,3 +6,9 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cindral-core = { path = "../cindral-core" }
+cindral-inference = { path = "../cindral-inference" }
+glam = "0.30"
+thiserror = "2"

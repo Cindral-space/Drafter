@@ -374,6 +374,10 @@ dependencies = [
 [[package]]
 name = "cindral-inference"
 version = "0.1.0"
+dependencies = [
+ "cindral-core",
+ "glam",
+]
 
 [[package]]
 name = "cindral-io"
@@ -392,6 +396,12 @@ dependencies = [
 [[package]]
 name = "cindral-tools"
 version = "0.1.0"
+dependencies = [
+ "cindral-core",
+ "cindral-inference",
+ "glam",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "clipboard-win"
