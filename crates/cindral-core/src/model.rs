@@ -132,6 +132,13 @@ impl Model {
         })
     }
 
+    /// Boundary edge identities for a face, including inner loops.
+    pub fn face_edges(&self, id: FaceId) -> Vec<EdgeId> {
+        if let Some(spatial) = &self.spatial { return spatial.face_edges.get(&id).into_iter().flatten().copied().collect(); }
+        let Some(face) = self.faces.get(&id) else { return Vec::new(); };
+        std::iter::once(&face.outer).chain(face.holes.iter()).flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len())).filter_map(|(a,b)| self.incident_edges(*a).find(|(_, edge)| edge.vertices.contains(b)).map(|(id, _)| id)).collect()
+    }
+
     /// Incident faces of an edge, using the maintained adjacency index.
     pub fn edge_faces(&self, id: EdgeId) -> impl Iterator<Item = (FaceId, &Face)> {
         let indexed = self.spatial.as_ref().map(|s| s.edge_faces.get(&id).into_iter().flatten());

@@ -145,6 +145,7 @@ struct FaceSlot {
     active_tris: usize,
     /// Snapshot of the face geometry used to skip unchanged re-triangulation.
     signature: FaceSignature,
+    boundary_edges: Vec<EdgeId>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +201,7 @@ impl MeshCache {
                     capacity_tris,
                     active_tris,
                     signature,
+                    boundary_edges: model.face_edges(face_id),
                 },
             );
         }
@@ -324,9 +326,17 @@ impl MeshCache {
             }
         }
 
+        // Face adjacency can change while an edge's endpoint IDs stay unchanged.
+        // Include old and new boundaries so cached profile normals remain correct.
+        let mut dirty_edges: BTreeSet<_> = edges.iter().copied().collect();
+        for id in faces {
+            if let Some(slot) = self.face_slots.get(id) { dirty_edges.extend(slot.boundary_edges.iter().copied()); }
+            dirty_edges.extend(model.face_edges(*id));
+        }
+        let edges: Vec<_> = dirty_edges.into_iter().collect();
         let mut seen_edges = BTreeSet::new();
         let mut prepared_edges = Vec::with_capacity(edges.len());
-        for &edge_id in edges {
+        for &edge_id in &edges {
             if !seen_edges.insert(edge_id) {
                 continue;
             }
@@ -386,6 +396,7 @@ impl MeshCache {
                                     capacity_tris: existing.capacity_tris,
                                     active_tris,
                                     signature,
+                                    boundary_edges: model.face_edges(id),
                                 },
                             );
                             dirty_face_ranges.push((start_v, prev_end_v));
@@ -413,6 +424,7 @@ impl MeshCache {
                             capacity_tris: needed_cap,
                             active_tris,
                             signature,
+                            boundary_edges: model.face_edges(id),
                         },
                     );
                     dirty_face_ranges.push((start_v, cap_end_v));
@@ -473,6 +485,9 @@ impl MeshCache {
             })
             .collect();
 
+        for id in faces {
+            if let Some(slot) = self.face_slots.get_mut(id) { slot.boundary_edges = model.face_edges(*id); }
+        }
         Ok(MeshUpdate {
             face_writes,
             edge_writes,
@@ -1712,9 +1727,11 @@ mod tests {
         assert_eq!(erase_update.edge_writes.len(), 1);
         let freed_edge_offset = erase_update.edge_writes[0].offset;
         assert_eq!(
-            decode_edge_vertices(&erase_update.edge_writes[0].bytes),
+            &decode_edge_vertices(&erase_update.edge_writes[0].bytes)[..2],
             &[EdgeVertex::zeroed(); 2]
         );
+
+        assert!(decode_edge_vertices(&erase_update.edge_writes[0].bytes)[2..].iter().all(|v| v.normal_a == [0.; 3] && v.normal_b == [0.; 3]));
 
         // Re-close the square; the new face and edge must reuse the freed slots at the same offsets.
         history
@@ -2162,5 +2179,30 @@ mod tests {
         for v in updated_verts {
             assert_eq!(v.material, 14.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use cindral_core::{Command, History};
+    #[test]
+    fn face_adjacency_changes_refresh_existing_profile_edges_and_undo() {
+        let mut history = History::new();
+        let square = |x: f64| Command::AddPolyline { points: vec![DVec3::new(x, 0., 0.), DVec3::new(x + 1., 0., 0.), DVec3::new(x + 1., 1., 0.), DVec3::new(x, 1., 0.)], closed: true };
+        history.execute(square(0.)).unwrap();
+        let shared = *history.model().edges().iter().find(|(_, edge)| edge.vertices.iter().all(|v| history.model().vertices()[v].position.x == 1.)).unwrap().0;
+        let (mut cache, _) = MeshCache::rebuild(history.model()).unwrap();
+        assert!(cache.edge_slots[&shared].vertices[0].color[2] < 0.);
+        history.execute(square(1.)).unwrap();
+        let change = history.changes();
+        cache.update(history.model(), &change.faces.iter().copied().collect::<Vec<_>>(), &change.edges.iter().copied().collect::<Vec<_>>()).unwrap();
+        let edge = cache.edge_slots[&shared].vertices[0];
+        assert!(edge.color[2] > 0., "shared coplanar edge is no longer a boundary profile");
+        assert!(glam::Vec3::from_array(edge.normal_a).dot(glam::Vec3::from_array(edge.normal_b)) > 0.99);
+        history.undo().unwrap();
+        let change = history.changes();
+        cache.update(history.model(), &change.faces.iter().copied().collect::<Vec<_>>(), &change.edges.iter().copied().collect::<Vec<_>>()).unwrap();
+        assert!(cache.edge_slots[&shared].vertices[0].color[2] < 0.);
     }
 }
