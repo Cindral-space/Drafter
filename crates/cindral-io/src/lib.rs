@@ -68,15 +68,29 @@ pub struct ExportSummary {
 }
 /// Validate an untrusted bundle and rebuild independent runtime document state.
 pub fn validate_bundle(bundle: &DraftBundle) -> Result<DocumentHistory> {
-    if bundle.presentation.scenes.len() > 1000 { return Err(IoError::Invalid("too many scenes (maximum 1000)".into())); }
+    if bundle.presentation.scenes.len() > 1000 {
+        return Err(IoError::Invalid("too many scenes (maximum 1000)".into()));
+    }
     for scene in &bundle.presentation.scenes {
         let camera = &scene.camera;
-        if scene.name.trim().is_empty() || scene.name.len() > 512 || scene.name.chars().any(char::is_control)
-            || !camera.target.iter().all(|v| v.is_finite() && v.abs() <= 1e9)
-            || !camera.distance.is_finite() || !(1e-3..=1e6).contains(&camera.distance)
-            || !camera.yaw.is_finite() || !camera.pitch.is_finite() || camera.pitch.abs() > std::f32::consts::FRAC_PI_2
-            || scene.tags.len() > 200_000 || scene.objects.len() > 200_000 {
-            return Err(IoError::Invalid("invalid scene name, camera or visibility limits".into()));
+        if scene.name.trim().is_empty()
+            || scene.name.len() > 512
+            || scene.name.chars().any(char::is_control)
+            || !camera
+                .target
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= 1e9)
+            || !camera.distance.is_finite()
+            || !(1e-3..=1e6).contains(&camera.distance)
+            || !camera.yaw.is_finite()
+            || !camera.pitch.is_finite()
+            || camera.pitch.abs() > std::f32::consts::FRAC_PI_2
+            || scene.tags.len() > 200_000
+            || scene.objects.len() > 200_000
+        {
+            return Err(IoError::Invalid(
+                "invalid scene name, camera or visibility limits".into(),
+            ));
         }
     }
     if bundle.textures.len() > 127 {

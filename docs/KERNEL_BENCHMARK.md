@@ -79,3 +79,12 @@ The reproduction commands above now include the M4 measurements. Native `capture
 The new [5,000-component kernel/renderer workload](COMPONENT_BENCHMARK.md) measures the document/global-history/definition-cache path: shared geometry edit 0.479–0.668 ms, undo 0.041–0.059 ms, redo 0.039–0.041 ms, and dirty mesh preparation 0.050–0.072 ms. Shared edit + mesh + completed GPU upload totals 0.800–1.136 ms across three final quiet runs. One occurrence placement + CPU batching + completed GPU update totals 1.671–2.055 ms. These are below 16 ms for that workload and exclude full UI frame scheduling.
 
 The new [21,600-face connected solid](CONNECTED_SOLID_BENCHMARK.md) changes the assessment for large connected topology: single-face push/pull and raw whole-solid Move both exceeded a 60-second process deadline. Neither meets 16 ms. The earlier disconnected-tile/small-box fixture must not be generalized to connected shells. Matrix-only group placement remains fast, with costs/limits reported separately.
+
+
+## M7a cached profiles regression (2026-10-21)
+
+One final release run of `kernel_gpu_benchmark` on the same Vega11/OpenGL fixture checks the changed mesh path after adding cached edge flags, adjacent-face normals and dirty old/new face boundaries. No concurrent builds/agents ran during measurement. [Raw report](benchmarks/2026-10-21-m7a-kernel-vega11.txt).
+
+The initial local edit prepares 552 bytes in 0.043 ms and completes the partial upload in 0.327 ms. Across 30 isolated-box previews, kernel + mesh + GPU-completed upload averages **1.749 ms**, maximum **1.879 ms**; mesh preparation averages 0.049 ms (maximum0.075 ms). The preview loop records one undo entry. All sampled updates remain below16 ms. Full CPU mesh reconstruction is78.781 ms and is excluded from interactive edits. Edge normals double GPU edge-vertex storage to48 bytes; initial allocated geometry capacity is14,880,000 bytes on this fixture.
+
+This is a single regression run, not a statistical distribution across launches. It excludes picking/inference, scene-navigation metadata transactions, profile drawing, egui and frame scheduling, and does not replace the documented connected-solid limits. An earlier build-contended run predates the final face-adjacency fix and is excluded. Only this affected benchmark was rerun; file/static-render/component benchmarks were not repeated.

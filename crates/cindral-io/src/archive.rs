@@ -83,7 +83,10 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
             manifest.presentation = Default::default();
             manifest.coordinates = Coordinates::default();
         }
-        2 => { manifest.presentation = Default::default(); manifest.archive_version = ARCHIVE_VERSION; }
+        2 => {
+            manifest.presentation = Default::default();
+            manifest.archive_version = ARCHIVE_VERSION;
+        }
         ARCHIVE_VERSION => {}
         other => {
             return Err(IoError::Invalid(format!(
@@ -349,7 +352,7 @@ mod tests {
             archive_version: 99,
             coordinates: Coordinates::default(),
             document: &bundle.document,
-        presentation: &bundle.presentation,
+            presentation: &bundle.presentation,
             textures: Vec::new(),
         })
         .unwrap();

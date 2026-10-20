@@ -134,21 +134,58 @@ impl Model {
 
     /// Boundary edge identities for a face, including inner loops.
     pub fn face_edges(&self, id: FaceId) -> Vec<EdgeId> {
-        if let Some(spatial) = &self.spatial { return spatial.face_edges.get(&id).into_iter().flatten().copied().collect(); }
-        let Some(face) = self.faces.get(&id) else { return Vec::new(); };
-        std::iter::once(&face.outer).chain(face.holes.iter()).flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len())).filter_map(|(a,b)| self.incident_edges(*a).find(|(_, edge)| edge.vertices.contains(b)).map(|(id, _)| id)).collect()
+        if let Some(spatial) = &self.spatial {
+            return spatial
+                .face_edges
+                .get(&id)
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect();
+        }
+        let Some(face) = self.faces.get(&id) else {
+            return Vec::new();
+        };
+        std::iter::once(&face.outer)
+            .chain(face.holes.iter())
+            .flat_map(|ring| {
+                ring.iter()
+                    .zip(ring.iter().cycle().skip(1))
+                    .take(ring.len())
+            })
+            .filter_map(|(a, b)| {
+                self.incident_edges(*a)
+                    .find(|(_, edge)| edge.vertices.contains(b))
+                    .map(|(id, _)| id)
+            })
+            .collect()
     }
 
     /// Incident faces of an edge, using the maintained adjacency index.
     pub fn edge_faces(&self, id: EdgeId) -> impl Iterator<Item = (FaceId, &Face)> {
-        let indexed = self.spatial.as_ref().map(|s| s.edge_faces.get(&id).into_iter().flatten());
+        let indexed = self
+            .spatial
+            .as_ref()
+            .map(|s| s.edge_faces.get(&id).into_iter().flatten());
         let edge = self.edges.get(&id);
         let mut indexed = indexed;
         let mut scan = self.faces.iter();
         std::iter::from_fn(move || {
-            if let Some(ids) = &mut indexed { return ids.find_map(|id| self.faces.get(id).map(|face| (*id, face))); }
+            if let Some(ids) = &mut indexed {
+                return ids.find_map(|id| self.faces.get(id).map(|face| (*id, face)));
+            }
             let edge = edge?;
-            scan.find(|(_, face)| std::iter::once(&face.outer).chain(face.holes.iter()).any(|ring| ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len()).any(|(a,b)| edge.vertices.contains(a) && edge.vertices.contains(b)))).map(|(id, face)| (*id, face))
+            scan.find(|(_, face)| {
+                std::iter::once(&face.outer)
+                    .chain(face.holes.iter())
+                    .any(|ring| {
+                        ring.iter()
+                            .zip(ring.iter().cycle().skip(1))
+                            .take(ring.len())
+                            .any(|(a, b)| edge.vertices.contains(a) && edge.vertices.contains(b))
+                    })
+            })
+            .map(|(id, face)| (*id, face))
         })
     }
 

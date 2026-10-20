@@ -467,8 +467,16 @@ impl SceneRenderer {
                     offset: 12,
                     shader_location: 1,
                 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 24, shader_location: 2 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 36, shader_location: 3 },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 24,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 36,
+                    shader_location: 3,
+                },
             ],
         };
 
@@ -614,45 +622,59 @@ impl SceneRenderer {
                 cache: None,
             });
 
-        let make_edge_pipeline = |overlay: bool, entry: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Cindral scene edge pipeline"),
-            layout: Some(&scene_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &scene_shader,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                buffers: &[edge_vertex_layout.clone(), instance_layout.clone()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &scene_shader,
-                entry_point: Some("fs_edge"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: OFFSCREEN_COLOR_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: OFFSCREEN_DEPTH_FORMAT,
-                depth_write_enabled: !overlay,
-                depth_compare: if overlay { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual },
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let make_edge_pipeline = |overlay: bool, entry: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Cindral scene edge pipeline"),
+                layout: Some(&scene_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &scene_shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    buffers: &[edge_vertex_layout.clone(), instance_layout.clone()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &scene_shader,
+                    entry_point: Some("fs_edge"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: OFFSCREEN_COLOR_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: OFFSCREEN_DEPTH_FORMAT,
+                    depth_write_enabled: !overlay,
+                    depth_compare: if overlay {
+                        wgpu::CompareFunction::Always
+                    } else {
+                        wgpu::CompareFunction::LessEqual
+                    },
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
 
         let edge_pipeline = make_edge_pipeline(false, "vs_edge");
         let overlay_edge_pipeline = make_edge_pipeline(true, "vs_edge");
-        let profile_pipelines = ["vs_profile_left", "vs_profile_right", "vs_profile_up", "vs_profile_down"].iter().map(|entry| make_edge_pipeline(false, entry)).collect();
+        let profile_pipelines = [
+            "vs_profile_left",
+            "vs_profile_right",
+            "vs_profile_up",
+            "vs_profile_down",
+        ]
+        .iter()
+        .map(|entry| make_edge_pipeline(false, entry))
+        .collect();
 
         let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Cindral scene composite shader"),
@@ -924,15 +946,34 @@ impl SceneRenderer {
 
     fn write_style(&self, queue: &wgpu::Queue, size: [u32; 2]) {
         use cindral_core::StyleMode;
-        let mode = match self.style.mode { StyleMode::Shaded => 0., StyleMode::Textured => 1., StyleMode::Wireframe => 2., StyleMode::HiddenLine => 3., StyleMode::XRay => 4. };
-        let values = [mode, u8::from(self.style.soft_edges) as f32, u8::from(self.style.smooth_edges) as f32, u8::from(self.style.profiles) as f32,
-            self.style.background[0] as f32 / 255., self.style.background[1] as f32 / 255., self.style.background[2] as f32 / 255., 1., 2. / size[0].max(1) as f32, 2. / size[1].max(1) as f32, 0., 0.];
+        let mode = match self.style.mode {
+            StyleMode::Shaded => 0.,
+            StyleMode::Textured => 1.,
+            StyleMode::Wireframe => 2.,
+            StyleMode::HiddenLine => 3.,
+            StyleMode::XRay => 4.,
+        };
+        let values = [
+            mode,
+            u8::from(self.style.soft_edges) as f32,
+            u8::from(self.style.smooth_edges) as f32,
+            u8::from(self.style.profiles) as f32,
+            self.style.background[0] as f32 / 255.,
+            self.style.background[1] as f32 / 255.,
+            self.style.background[2] as f32 / 255.,
+            1.,
+            2. / size[0].max(1) as f32,
+            2. / size[1].max(1) as f32,
+            0.,
+            0.,
+        ];
         queue.write_buffer(&self.uniform, 64, bytemuck::cast_slice(&values));
     }
 
     fn write_view_origin(&self, queue: &wgpu::Queue, matrix: [[f32; 4]; 4]) {
         // Homogeneous eye for perspective; a view direction (w=0) for orthographic.
-        let origin = glam::Mat4::from_cols_array_2d(&matrix).inverse() * glam::Vec4::new(0., 0., 1., 0.);
+        let origin =
+            glam::Mat4::from_cols_array_2d(&matrix).inverse() * glam::Vec4::new(0., 0., 1., 0.);
         queue.write_buffer(&self.uniform, 112, bytemuck::cast_slice(&origin.to_array()));
     }
 
@@ -1007,7 +1048,10 @@ impl SceneRenderer {
             // 1. Opaque face pass (depth writes enabled)
             pass.set_pipeline(&self.opaque_face_pipeline);
             for state in self.definitions.values() {
-                if self.style.mode != cindral_core::StyleMode::Wireframe && state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
+                if self.style.mode != cindral_core::StyleMode::Wireframe
+                    && state.geometry.face_vertices() > 0
+                    && state.instances.instance_count > 0
+                {
                     pass.set_vertex_buffer(0, state.geometry.face_buffer().slice(..));
                     pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
                     pass.draw(
@@ -1019,7 +1063,16 @@ impl SceneRenderer {
             }
 
             // 2. Edge pass (depth writes enabled)
-            pass.set_pipeline(if matches!(self.style.mode, cindral_core::StyleMode::Wireframe | cindral_core::StyleMode::XRay) { &self.overlay_edge_pipeline } else { &self.edge_pipeline });
+            pass.set_pipeline(
+                if matches!(
+                    self.style.mode,
+                    cindral_core::StyleMode::Wireframe | cindral_core::StyleMode::XRay
+                ) {
+                    &self.overlay_edge_pipeline
+                } else {
+                    &self.edge_pipeline
+                },
+            );
             for state in self.definitions.values() {
                 if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0 {
                     pass.set_vertex_buffer(0, state.geometry.edge_buffer().slice(..));
@@ -1037,10 +1090,14 @@ impl SceneRenderer {
                 for pipeline in &self.profile_pipelines {
                     pass.set_pipeline(pipeline);
                     for state in self.definitions.values() {
-                        if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0 {
+                        if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0
+                        {
                             pass.set_vertex_buffer(0, state.geometry.edge_buffer().slice(..));
                             pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
-                            pass.draw(0..state.geometry.edge_vertices(), 0..state.instances.instance_count);
+                            pass.draw(
+                                0..state.geometry.edge_vertices(),
+                                0..state.instances.instance_count,
+                            );
                             draw_calls += 1;
                         }
                     }
@@ -1050,7 +1107,10 @@ impl SceneRenderer {
             // 3. Transparent face pass (depth writes disabled, premultiplied alpha blending)
             pass.set_pipeline(&self.transparent_face_pipeline);
             for state in self.definitions.values() {
-                if self.style.mode != cindral_core::StyleMode::Wireframe && state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
+                if self.style.mode != cindral_core::StyleMode::Wireframe
+                    && state.geometry.face_vertices() > 0
+                    && state.instances.instance_count > 0
+                {
                     pass.set_vertex_buffer(0, state.geometry.face_buffer().slice(..));
                     pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
                     pass.draw(

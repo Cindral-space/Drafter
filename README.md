@@ -23,7 +23,8 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M4: modification tools
 - [x] M5: organization
 - [x] M6: files and export
-- [ ] M7: presentation
+- [x] M7a: Styles and Scenes
+- [ ] M7b: section planes and shadows
 
 ## Run the viewport
 

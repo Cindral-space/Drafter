@@ -1,0 +1,13 @@
+M7a final release kernel_gpu_benchmark; WGPU_BACKEND=opengl
+No concurrent builds or agents during measurement.
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 78.781; bytes 7440324
+full_gpu_buffer_ms: 2.461; allocated 14880648
+partial_cpu_mesh_ms: 0.043; bytes 552; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.327; allocated 14880000
+m4_fixture: 50014 edges / 20007 faces; isolated closed box
+m4_kernel_ms: mean 1.136; max 1.254; samples 30
+m4_mesh_ms: mean 0.049; max 0.075; samples 30
+m4_gpu_completed_ms: mean 0.552; max 0.660; samples 30
+m4_total_update_ms: mean 1.749; max 1.879; samples 30
+m4_preview_undo_entries: 1

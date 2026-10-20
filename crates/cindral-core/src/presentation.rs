@@ -35,7 +35,17 @@ pub struct ViewStyle {
     pub ground: Option<[u8; 3]>,
 }
 impl Default for ViewStyle {
-    fn default() -> Self { Self { mode: StyleMode::Textured, profiles: false, soft_edges: false, smooth_edges: false, background: [17,22,29], sky: None, ground: None } }
+    fn default() -> Self {
+        Self {
+            mode: StyleMode::Textured,
+            profiles: false,
+            soft_edges: false,
+            smooth_edges: false,
+            background: [17, 22, 29],
+            sky: None,
+            ground: None,
+        }
+    }
 }
 /// Camera values in meters/radians, Z up.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -2,7 +2,7 @@
 
 ## Status
 
-M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kernel, pure inference and drawing, modify tools, nested organization/instancing, and native files/recovery/textures/import/export. Measured static 500k-triangle, component, kernel and connected-solid benchmarks distinguish their workloads and limits. M7 presentation features remain planned. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kernel, pure inference and drawing, modify tools, nested organization/instancing, and native files/recovery/textures/import/export. Measured static 500k-triangle, component, kernel and connected-solid benchmarks distinguish their workloads and limits. M7a implements Styles and Scenes; M7b section planes and shadows remain planned. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -152,3 +152,14 @@ Source PNG/JPEG bytes are embedded once and reused across materials/instances. R
 OBJ/STL flatten visible transformed occurrences; glTF retains nested placements, shared definition geometry and shared accessors across material variants. Native/OBJ/STL coordinates are metres/right-handed Z-up; glTF gets a single Y-up root conversion. OBJ import builds welded DTO geometry directly rather than executing a global topology rebuild per face. Native face normals/planar UVs replace arbitrary imported authored normal/UV seams; general nonplanar OBJ polygons are rejected. OBJ sidecars are individually atomic, not a multi-file transaction.
 
 M6 final IO means: 21,600-face save/load 412.748/536.676 ms;60,000-face 1079.619/1482.567 ms;5,000-instance 14.457/39.187 ms. These include full file-boundary validation, not GPU meshing or the app's second reconstruction. [File benchmark](FILE_BENCHMARK.md) records methods, sizes and raw repetitions. The strict connected kernel runner still passes; completed GPU update maxima 4.501/5.247 ms at 21,600 faces and 7.624/14.887 ms at60,000 faces (push/pull/Move), with commits 0.003–0.007 ms. The 5,000-instance render regression averages 1.556 ms (p95 1.736 ms). These workloads do not imply a full-editor frame-rate guarantee.
+
+
+## M7a Styles and Scenes
+
+Core presentation DTOs are separate from topology: `ViewStyle`, `SceneCamera`, `SavedScene` and `Presentation`. Scenes capture camera, tag visibility, explicit per-definition/instance hidden flags and a style. Capture reads graph metadata without copying geometry. `RestoreVisibility` restores flags as one metadata transaction, skips deleted IDs and retains flags on objects added after capture. Shared-definition children retain consistent visibility across occurrences. Visibility restoration uses the existing incremental instance/cache path and global undo timeline.
+
+Styles are Shaded, Textured, Wireframe, Hidden Line and X-ray. Uniforms select texture sampling, face shading/occlusion and edge behavior; prebuilt pipelines handle depth-tested or overlaid edges. Soft/smooth attributes remain in persistent edge slots. Cached adjacent-face normals identify view-dependent silhouettes; boundary and silhouette profiles expand existing lines by one physical pixel in each screen direction. These controls never rebuild geometry or instance buffers. Edge vertices now include adjacent normals, increasing edge storage from 24 to 48 bytes per vertex. Background, optional sky and optional ground colors are drawn behind the grid/model, with a Z-up camera horizon; they do not introduce geometry or shadows.
+
+The Styles/Scenes UI supports named scene capture, update, rename and delete. Camera transitions last 0.25 seconds and can be skipped. Presentation values persist in archive v3 while topology remains schema1. v1/v2 files migrate with default presentation. Presentation edits participate in autosave through a separate revision, including protection against stale background completion. Runtime transition state is excluded from archives. M7b section planes and shadows are outside this milestone.
+
+M7a validation: 241 all-feature workspace tests plus one doctest, formatting and strict all-target/all-feature Clippy pass. Native OpenGL exercises all five styles. The changed mesh path measures 1.749 ms mean / 1.879 ms maximum for kernel + dirty mesh + completed upload on the existing local-edit fixture; see [the measured workload and limits](KERNEL_BENCHMARK.md#m7a-cached-profiles-regression-2026-10-21). This does not establish full editor frame latency.

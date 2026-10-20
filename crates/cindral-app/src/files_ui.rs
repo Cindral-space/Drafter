@@ -539,8 +539,15 @@ mod tests {
         editor.files.interval = Duration::MAX;
         let old_revision = editor.file_revision();
         let (sender, receiver) = mpsc::channel();
-        editor.files.job = Some(AutosaveJob { generation: editor.files.generation, revision: old_revision, receiver });
-        editor.set_view_style(cindral_core::ViewStyle { mode: cindral_core::StyleMode::XRay, ..Default::default() });
+        editor.files.job = Some(AutosaveJob {
+            generation: editor.files.generation,
+            revision: old_revision,
+            receiver,
+        });
+        editor.set_view_style(cindral_core::ViewStyle {
+            mode: cindral_core::StyleMode::XRay,
+            ..Default::default()
+        });
         sender.send(Ok(editor.files.snapshot.clone())).unwrap();
         editor.autosave_tick(&egui::Context::default());
         assert_ne!(editor.files.last_revision, Some(editor.file_revision()));

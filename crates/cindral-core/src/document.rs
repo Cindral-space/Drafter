@@ -635,11 +635,33 @@ impl DocumentHistory {
         self.graph.definitions.get(&id).map(|d| &d.instances)
     }
     /// Capture presentation and visibility without cloning geometry or traversing occurrences.
-    pub fn capture_scene(&self, name: String, camera: crate::SceneCamera, style: crate::ViewStyle) -> crate::SavedScene {
+    pub fn capture_scene(
+        &self,
+        name: String,
+        camera: crate::SceneCamera,
+        style: crate::ViewStyle,
+    ) -> crate::SavedScene {
         crate::SavedScene {
-            name, camera, style,
-            tags: self.graph.tags.iter().map(|(id, tag)| (*id, tag.visible)).collect(),
-            objects: self.graph.definitions.iter().flat_map(|(owner, definition)| definition.instances.iter().map(move |(id, instance)| ((*owner, *id), instance.hidden))).collect(),
+            name,
+            camera,
+            style,
+            tags: self
+                .graph
+                .tags
+                .iter()
+                .map(|(id, tag)| (*id, tag.visible))
+                .collect(),
+            objects: self
+                .graph
+                .definitions
+                .iter()
+                .flat_map(|(owner, definition)| {
+                    definition
+                        .instances
+                        .iter()
+                        .map(move |(id, instance)| ((*owner, *id), instance.hidden))
+                })
+                .collect(),
         }
     }
 
@@ -1451,10 +1473,18 @@ impl DocumentHistory {
             }
             OrganizationCommand::RestoreVisibility { tags, objects } => {
                 for (id, visible) in tags {
-                    if let Some(tag) = after.tags.get_mut(&id) { tag.visible = visible; }
+                    if let Some(tag) = after.tags.get_mut(&id) {
+                        tag.visible = visible;
+                    }
                 }
                 for ((owner, id), hidden) in objects {
-                    if let Some(instance) = after.definitions.get_mut(&owner).and_then(|d| d.instances.get_mut(&id)) { instance.hidden = hidden; }
+                    if let Some(instance) = after
+                        .definitions
+                        .get_mut(&owner)
+                        .and_then(|d| d.instances.get_mut(&id))
+                    {
+                        instance.hidden = hidden;
+                    }
                 }
             }
             OrganizationCommand::CreateMaterial(material) => {
