@@ -485,6 +485,11 @@ impl ModifySession {
         &self.guides
     }
 
+    /// Exchange local construction guides when the editor changes definition context.
+    pub fn replace_guides(&mut self, guides: Vec<Guide>) -> Vec<Guide> {
+        std::mem::replace(&mut self.guides, guides)
+    }
+
     /// The most recent numerical measurement (distance in meters, angle in degrees, or scale factor).
     pub fn measurement(&self) -> Option<f64> {
         self.measurement

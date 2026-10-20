@@ -27,3 +27,6 @@ mod tests {
         assert_eq!(super::CRATE_NAME, "cindral-tools");
     }
 }
+
+mod scene;
+pub use scene::{local_query, pick_instances, InstanceHit, PickInstance};

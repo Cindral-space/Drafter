@@ -21,7 +21,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M2: geometry kernel
 - [x] M3: drawing and inference
 - [x] M4: modification tools
-- [ ] M5: organization
+- [x] M5: organization
 - [ ] M6: files and export
 - [ ] M7: presentation
 
@@ -92,3 +92,11 @@ WGPU_BACKEND=opengl cargo run -p cindral-app --example capture_viewport -- /tmp/
 ```
 
 See [kernel benchmark](docs/KERNEL_BENCHMARK.md) for measured update costs and [architecture](docs/ARCHITECTURE.md) for solid/sweep limits.
+
+## Organization (M5)
+
+Select connected geometry and use **Group selection** or **Component** in the Outliner. Components share a definition; **Unique** breaks the selected link. Double-click a container to edit it, and use Escape, Exit, or click outside to leave. Tools and snaps use that context's local geometry; surrounding instances are dimmed. Global undo/redo reverts shared edits across every instance.
+
+The Outliner supports rename, hide, duplicate and drag-to-reparent. Tags control container visibility; loose geometry remains untagged. Create RGB/opacity materials in the sidebar, select one for Paint Bucket or **Paint selected**; texture slots are stored as values for M6. Use Move/Copy, Rotate and Scale on containers for live matrix previews and one release commit.
+
+See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid limitations](docs/CONNECTED_SOLID_BENCHMARK.md). Reproduce the native organization capture with `--organization` on the `capture_viewport` example. Schema version 1 DTOs are ready; `.cdraft` encoding/export remains M6.

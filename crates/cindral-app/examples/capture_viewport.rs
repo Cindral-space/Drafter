@@ -107,7 +107,9 @@ fn main() -> eframe::Result {
             } else {
                 None
             };
-            if incremental {
+            if std::env::args().any(|arg| arg == "--organization") {
+                seed_organization(&mut app)?;
+            } else if incremental {
                 let mut tool = cindral_tools::ToolSession::new(cindral_tools::ToolKind::Rectangle);
                 tool.click(cindral_core::DVec3::new(-3., -2., 0.))?;
                 if let Some(command) = tool.measure("4m,3m")? {
@@ -190,4 +192,115 @@ fn seed_modify(
     })?;
     app.select_connected(cindral_tools::Hit::Face(face));
     Ok(face)
+}
+
+fn seed_organization(
+    app: &mut cindral_app::DrafterApp,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use cindral_core::{Command, DVec3 as V, DefinitionKind, Material, OrganizationCommand as Org};
+    use glam::DMat4;
+    app.execute(Command::AddPolyline {
+        points: vec![
+            V::new(-1., -1., 0.),
+            V::new(1., -1., 0.),
+            V::new(1., 1., 0.),
+            V::new(-1., 1., 0.),
+        ],
+        closed: true,
+    })?;
+    let face = *app.model().faces().keys().next().ok_or("missing face")?;
+    app.execute(Command::PushPull { face, distance: 2. })?;
+    app.select_connected(cindral_tools::Hit::Face(face));
+    let first = app.create_container(DefinitionKind::Component)?;
+    let definition = app
+        .document()
+        .instance(&first)
+        .ok_or("missing component")?
+        .definition;
+    app.organize(Org::Rename {
+        path: first.clone(),
+        name: "Shared block".into(),
+    })?;
+    app.organize(Org::CreateTag("Structure".into()))?;
+    let tag = *app.document().tags().keys().next().ok_or("missing tag")?;
+    app.organize(Org::AssignTag {
+        path: first.clone(),
+        tag: Some(tag),
+    })?;
+    app.organize(Org::CreateMaterial(Material {
+        name: "Amber".into(),
+        color: [0.85, 0.4, 0.12],
+        opacity: 1.,
+        texture: None,
+    }))?;
+    let amber = *app
+        .document()
+        .materials()
+        .keys()
+        .next_back()
+        .ok_or("missing material")?;
+    app.organize(Org::PaintInstance {
+        path: first.clone(),
+        material: Some(amber),
+    })?;
+    app.organize(Org::CreateMaterial(Material {
+        name: "Glass".into(),
+        color: [0.1, 0.6, 0.8],
+        opacity: 0.4,
+        texture: Some("glass-slot".into()),
+    }))?;
+    let glass = *app
+        .document()
+        .materials()
+        .keys()
+        .next_back()
+        .ok_or("missing material")?;
+    for (name, transform) in [
+        ("Glass copy", DMat4::from_translation(V::new(3., 0., 1.))),
+        (
+            "Mirrored copy",
+            DMat4::from_translation(V::new(0., 3., 1.)) * DMat4::from_scale(V::new(-1., 0.7, 1.5)),
+        ),
+    ] {
+        app.organize(Org::AddInstance {
+            definition,
+            name: name.into(),
+            transform,
+        })?;
+        let id = *app
+            .document()
+            .instances(cindral_core::DefinitionId(0))
+            .and_then(|m| m.keys().next_back())
+            .ok_or("missing copy")?;
+        app.organize(Org::PaintInstance {
+            path: vec![id],
+            material: Some(glass),
+        })?;
+    }
+    app.execute(Command::AddPolyline {
+        points: vec![
+            V::new(-4., 0., 0.),
+            V::new(-3., 0., 0.),
+            V::new(-3., 1., 0.),
+            V::new(-4., 1., 0.),
+        ],
+        closed: true,
+    })?;
+    let face = *app
+        .model()
+        .faces()
+        .keys()
+        .next()
+        .ok_or("missing group face")?;
+    app.select_connected(cindral_tools::Hit::Face(face));
+    let group = app.create_container(DefinitionKind::Group)?;
+    app.enter_context(group)?;
+    app.organize(Org::AddInstance {
+        definition,
+        name: "Nested block".into(),
+        transform: DMat4::from_translation(V::Z),
+    })?;
+    app.exit_context()?;
+    app.enter_context(first)?;
+    Ok(())
 }

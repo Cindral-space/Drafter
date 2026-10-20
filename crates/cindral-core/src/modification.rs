@@ -15,7 +15,7 @@ pub(crate) fn prepare(
     let mut edges = BTreeSet::new();
     let mut expand = false;
     match command {
-        Command::PaintFace { faces: ids, .. } => {
+        Command::PaintFace { faces: ids, .. } | Command::SetFaceMaterial { faces: ids, .. } => {
             faces.extend(ids);
         }
         Command::PushPull { face, distance } => {
@@ -134,13 +134,20 @@ pub(crate) fn prepare(
             matrix,
             copy,
         } => transform(&mut after, vertices, *matrix, *copy)?,
-        Command::PaintFace { faces, color } => {
+        Command::SetFaceMaterial { faces, material } => {
             for id in faces {
                 after
                     .faces
                     .get_mut(id)
                     .ok_or(KernelError::MissingEntity)?
-                    .color = *color;
+                    .material = *material;
+            }
+        }
+        Command::PaintFace { faces, color } => {
+            for id in faces {
+                let face = after.faces.get_mut(id).ok_or(KernelError::MissingEntity)?;
+                face.color = *color;
+                face.material = None;
             }
         }
         Command::PushPull { face, distance } => push_pull(&mut after, *face, *distance)?,
@@ -163,7 +170,7 @@ fn validate_matrix(m: glam::DMat4) -> Result<(), KernelError> {
     }
     Ok(())
 }
-fn transform(
+pub(crate) fn transform(
     m: &mut Model,
     ids: &[VertexId],
     matrix: glam::DMat4,
@@ -414,6 +421,7 @@ fn surfaces(
     m: &mut Model,
     polygons: Vec<crate::csg::Polygon>,
     color: [u8; 4],
+    material: Option<crate::MaterialId>,
 ) -> Result<(), KernelError> {
     let next = m.next_id;
     let old = m.clone();
@@ -481,6 +489,7 @@ fn surfaces(
     result.vertices.retain(|id, _| used.contains(id));
     for f in result.faces.values_mut() {
         f.color = color;
+        f.material = material;
         // Preserve colors of surviving old surfaces by an interior sample.
         let sample = f
             .outer
@@ -493,6 +502,7 @@ fn surfaces(
                 && crate::transaction::contains_face(&old, oldf, sample).unwrap_or(false)
         }) {
             f.color = previous.color;
+            f.material = previous.material;
         }
     }
     // Keep intentional loose drawing/path edges that were only spatial context.
@@ -601,7 +611,7 @@ fn push_pull(m: &mut Model, face: FaceId, distance: f64) -> Result<(), KernelErr
         }
         polygons
     };
-    surfaces(m, polygons, f.color)?;
+    surfaces(m, polygons, f.color, f.material)?;
     if closed && !m.faces.is_empty() && edge_usage(m).values().any(|f| f.len() != 2) {
         return Err(invalid("extrusion would open a closed solid"));
     }
@@ -697,7 +707,7 @@ fn follow_me(m: &mut Model, face: FaceId, path: &[DVec3]) -> Result<(), KernelEr
             }
         }
     }
-    surfaces(m, polygons, source.color)
+    surfaces(m, polygons, source.color, source.material)
 }
 
 pub(crate) fn offset_command(

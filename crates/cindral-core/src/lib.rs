@@ -71,3 +71,7 @@ pub enum KernelError {
 /// Deterministic model construction for performance experiments only.
 #[cfg(feature = "bench-fixtures")]
 pub mod benchmark;
+
+/// Deterministic connected-solid benchmark fixtures.
+#[cfg(feature = "bench-fixtures")]
+pub mod connected_fixture;

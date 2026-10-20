@@ -1,0 +1,111 @@
+M5 release, native Wayland, WGPU_BACKEND=gl. Final runs after compilation and tests finished.
+
+RUN 1
+5000-component document setup: 6.927 ms
+5000 occurrence traversal + initial mesh/instance preparation: 2.023 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.479 ms
+single-definition dirty mesh preparation: 0.050 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.059 ms
+shared edit redo: 0.039 ms
+one instance transform preview: 0.007 ms; instance batch preparation: 1.295 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.058 ms; hit: true
+21600-face connected group placement preview: 0.005 ms
+connected group placement commit: 0.004 ms
+connected group placement undo: 0.008 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 2.137 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 1.472 ms; p95 2.010 ms; draw calls 3
+shared edit GPU update + wait: 0.271 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 0.369 ms; geometry definitions: 0; matrix batches: 2
+
+RUN 2
+5000-component document setup: 7.493 ms
+5000 occurrence traversal + initial mesh/instance preparation: 3.449 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.668 ms
+single-definition dirty mesh preparation: 0.072 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.042 ms
+shared edit redo: 0.041 ms
+one instance transform preview: 0.007 ms; instance batch preparation: 1.499 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.548 ms; hit: true
+21600-face connected group placement preview: 0.007 ms
+connected group placement commit: 0.007 ms
+connected group placement undo: 0.004 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 2.099 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 1.592 ms; p95 1.698 ms; draw calls 3
+shared edit GPU update + wait: 0.370 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 0.446 ms; geometry definitions: 0; matrix batches: 2
+
+RUN 3
+5000-component document setup: 5.564 ms
+5000 occurrence traversal + initial mesh/instance preparation: 1.920 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.488 ms
+single-definition dirty mesh preparation: 0.050 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.041 ms
+shared edit redo: 0.039 ms
+one instance transform preview: 0.007 ms; instance batch preparation: 1.277 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.035 ms; hit: true
+21600-face connected group placement preview: 0.004 ms
+connected group placement commit: 0.007 ms
+connected group placement undo: 0.004 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 1.785 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 1.556 ms; p95 1.711 ms; draw calls 3
+shared edit GPU update + wait: 0.598 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 0.771 ms; geometry definitions: 0; matrix batches: 2
+
+Earlier exploratory runs overlapped compilation/checks; these are retained for context, not the final quiescent measurements. Partial instance uploads were added before final runs.
+
+EXPLORATORY 1
+5000-component document setup: 28.492 ms
+5000 occurrence traversal + initial mesh/instance preparation: 8.242 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 1.810 ms
+single-definition dirty mesh preparation: 0.117 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.084 ms
+shared edit redo: 0.053 ms
+one instance transform preview: 0.009 ms; instance batch preparation: 3.462 ms; geometry uploads: 0
+5000 occurrence transformed pick: 3.462 ms; hit: true
+21600-face connected group placement preview: 0.005 ms
+connected group placement commit: 0.012 ms
+connected group placement undo: 0.005 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 2.633 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 3.512 ms; p95 8.188 ms; draw calls 3
+shared edit GPU update + wait: 0.520 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 7.244 ms; geometry definitions: 0; matrix batches: 2
+
+EXPLORATORY 2
+5000-component document setup: 30.600 ms
+5000 occurrence traversal + initial mesh/instance preparation: 3.487 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.745 ms
+single-definition dirty mesh preparation: 0.115 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.059 ms
+shared edit redo: 0.045 ms
+one instance transform preview: 0.010 ms; instance batch preparation: 3.108 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.849 ms; hit: true
+21600-face connected group placement preview: 0.007 ms
+connected group placement commit: 0.007 ms
+connected group placement undo: 0.007 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 2.674 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 3.579 ms; p95 7.988 ms; draw calls 3
+shared edit GPU update + wait: 2.183 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 3.751 ms; geometry definitions: 0; matrix batches: 2
+
+EXPLORATORY 3
+5000-component document setup: 27.468 ms
+5000 occurrence traversal + initial mesh/instance preparation: 8.794 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.801 ms
+single-definition dirty mesh preparation: 0.114 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.087 ms
+shared edit redo: 0.059 ms
+one instance transform preview: 0.010 ms; instance batch preparation: 2.804 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.673 ms; hit: true
+21600-face connected group placement preview: 0.003 ms
+connected group placement commit: 0.010 ms
+connected group placement undo: 0.007 ms
+Adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) (Gl/Other)
+initial GPU geometry + 5000 matrices upload and wait: 2.578 ms; allocated bytes: 1605088
+5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean 2.798 ms; p95 4.889 ms; draw calls 3
+shared edit GPU update + wait: 20.354 ms; geometry definitions: 1; matrix batches: 0
+one placement GPU update + wait: 10.488 ms; geometry definitions: 0; matrix batches: 2

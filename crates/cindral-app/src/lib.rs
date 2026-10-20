@@ -1,13 +1,15 @@
 //! Native editor, pure drawing/inference routing, and cached GPU geometry.
-use cindral_core::{Command, DVec3, History};
+use cindral_core::{Command, DVec3, DocumentHistory as History};
 use cindral_inference::{Axis, DrawingPlane, Engine, Query, Ray, Snap, SnapEntity, SnapKind, View};
 use cindral_render::{
     camera::{Camera, Projection, StandardView},
     grid::{GridCallback, GridRenderer},
-    mesh::{MeshCache, MeshUpdate, ModelCallback, ModelRenderer},
+    scene::{SceneCallback, SceneRenderer, SceneUpdate},
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
 mod modify_ui;
+mod organization_ui;
+mod scene_cache;
 use eframe::egui::{self, Color32, Key, PointerButton, RichText};
 use glam::Vec2;
 use std::sync::Arc;
@@ -23,6 +25,8 @@ pub struct DrafterApp {
     drag_axis: DVec3,
     paint_color: [u8; 4],
     last_tape: Option<f64>,
+    guide_definition: cindral_core::DefinitionId,
+    guide_cache: std::collections::BTreeMap<cindral_core::DefinitionId, Vec<cindral_tools::Guide>>,
     history: History,
     engine: Engine,
     tool: ToolSession,
@@ -30,8 +34,9 @@ pub struct DrafterApp {
     snap: Option<Snap>,
     measurement: String,
     error: Option<String>,
-    mesh: Option<MeshCache>,
-    pending: Option<Arc<MeshUpdate>>,
+    scene: scene_cache::SceneCache,
+    organization: organization_ui::OrganizationUi,
+    pending: Option<Arc<SceneUpdate>>,
     work_plane: DrawingPlane,
 }
 impl Default for DrafterApp {
@@ -46,6 +51,8 @@ impl Default for DrafterApp {
             drag_axis: DVec3::Z,
             paint_color: [210, 130, 75, 255],
             last_tape: None,
+            guide_definition: cindral_core::DefinitionId(0),
+            guide_cache: Default::default(),
             history: History::new(),
             engine: Engine::default(),
             tool: ToolSession::new(ToolKind::Line),
@@ -53,7 +60,8 @@ impl Default for DrafterApp {
             snap: None,
             measurement: String::new(),
             error: None,
-            mesh: None,
+            scene: scene_cache::SceneCache::default(),
+            organization: organization_ui::OrganizationUi::default(),
             pending: None,
             work_plane: DrawingPlane::default(),
         }
@@ -74,7 +82,7 @@ impl DrafterApp {
             render.target_format,
             4,
         ));
-        renderer.callback_resources.insert(ModelRenderer::new(
+        renderer.callback_resources.insert(SceneRenderer::new(
             &render.device,
             render.target_format,
             4,
@@ -89,10 +97,9 @@ impl DrafterApp {
     }
     fn extents(&mut self, aspect: f32) {
         let (min, max) = self
-            .history
-            .model()
-            .bounds()
-            .unwrap_or((DVec3::splat(-10.0), DVec3::splat(10.0)));
+            .selected_world_bounds(&[])
+            .or_else(|| self.history.model().bounds())
+            .unwrap_or((DVec3::splat(-10.), DVec3::splat(10.)));
         self.camera
             .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
     }
@@ -100,6 +107,7 @@ impl DrafterApp {
         if let Ok(true) = self.history.cancel_preview() {
             self.refresh_mesh();
         }
+        self.organization.drag = None;
         self.modify.cancel();
         self.modifying = false;
         self.tool.set_kind(kind);
@@ -111,33 +119,16 @@ impl DrafterApp {
         self.snap = None;
     }
     fn refresh_mesh(&mut self) {
-        let result = if let Some(cache) = &mut self.mesh {
-            let changes = self.history.changes();
-            cache.update(
-                self.history.model(),
-                &changes.faces.iter().copied().collect::<Vec<_>>(),
-                &changes.edges.iter().copied().collect::<Vec<_>>(),
-            )
-        } else {
-            MeshCache::rebuild(self.history.model()).map(|(cache, update)| {
-                self.mesh = Some(cache);
-                update
-            })
-        };
-        match result {
-            Ok(update) => {
-                if update.reset {
-                    self.pending = Some(Arc::new(update));
-                } else if let Some(pending) = &mut self.pending {
-                    let pending = Arc::make_mut(pending);
-                    pending.face_writes.extend(update.face_writes);
-                    pending.edge_writes.extend(update.edge_writes);
-                    pending.face_vertices = update.face_vertices;
-                    pending.edge_vertices = update.edge_vertices;
-                } else {
-                    self.pending = Some(Arc::new(update));
-                }
-            }
+        let active = self.history.active_definition();
+        if self.guide_definition != active {
+            let guides = self.guide_cache.remove(&active).unwrap_or_default();
+            let previous = self.modify.replace_guides(guides);
+            self.guide_cache.insert(self.guide_definition, previous);
+            self.guide_definition = active;
+            self.last_tape = None;
+        }
+        match self.scene.sync(&self.history) {
+            Ok(update) => scene_cache::merge(&mut self.pending, update),
             Err(error) => self.error = Some(error.to_string()),
         }
     }
@@ -191,6 +182,8 @@ impl DrafterApp {
             self.refresh_mesh();
         }
         self.modify.cancel();
+        self.organization.drag = None;
+        self.selection.clear();
         self.selection_start = None;
         let result = if redo {
             self.history.redo()
@@ -208,6 +201,9 @@ impl DrafterApp {
         }
     }
     fn apply_measurement(&mut self) {
+        if self.instance_measurement() {
+            return;
+        }
         if self.modifying {
             self.modify_measurement();
             return;
@@ -237,6 +233,9 @@ impl DrafterApp {
             } else {
                 self.camera.orbit(Vec2::new(delta.x, delta.y));
             }
+        }
+        if self.organization_pointer(response) {
+            return;
         }
         if !response.hovered() {
             if self.modifying && (self.modify.active() || self.selection_start.is_some()) {
@@ -329,7 +328,8 @@ impl DrafterApp {
                 self.camera.zoom(i.smooth_scroll_delta.y, cursor, aspect);
                 let (origin, direction) = self.camera.ray(cursor, aspect);
                 let view = View {
-                    matrix: self.camera.view_projection(aspect).as_dmat4(),
+                    matrix: self.camera.view_projection(aspect).as_dmat4()
+                        * self.history.world_transform(),
                     size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
                 };
                 let mut query = Query::new(
@@ -338,8 +338,16 @@ impl DrafterApp {
                         (position.y - rect.top()) as f64,
                     ),
                     Ray {
-                        origin: origin.as_dvec3(),
-                        direction: direction.as_dvec3(),
+                        origin: self
+                            .history
+                            .world_transform()
+                            .inverse()
+                            .transform_point3(origin.as_dvec3()),
+                        direction: self
+                            .history
+                            .world_transform()
+                            .inverse()
+                            .transform_vector3(direction.as_dvec3()),
                     },
                     view,
                 );
@@ -489,6 +497,7 @@ impl eframe::App for DrafterApp {
             if let Some(error)=&self.error {ui.colored_label(Color32::LIGHT_RED,error);}
             else {ui.label("MMB orbit · Shift+MMB pan · Scroll zoom · Arrows lock X/Y/Z · Esc cancel · Type a value, Enter");}
         });
+        self.organization_panel(ctx);
         egui::SidePanel::left("navigation")
             .exact_width(174.)
             .resizable(false)
@@ -643,7 +652,7 @@ impl eframe::App for DrafterApp {
                 ui.painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
                         rect,
-                        ModelCallback {
+                        SceneCallback {
                             view_projection: matrix.to_cols_array_2d(),
                             size: [
                                 (rect.width() * ctx.pixels_per_point()).round() as u32,
@@ -653,7 +662,7 @@ impl eframe::App for DrafterApp {
                         },
                     ));
                 let view = View {
-                    matrix: matrix.as_dmat4(),
+                    matrix: matrix.as_dmat4() * self.history.world_transform(),
                     size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
                 };
                 let screen = |point| {
@@ -661,6 +670,7 @@ impl eframe::App for DrafterApp {
                         .map(|p| rect.min + egui::vec2(p.x as f32, p.y as f32))
                 };
                 self.modify_overlay(ui, rect, view);
+                self.organization_overlay(ui, rect);
                 let preview = self.tool.preview();
                 for segment in preview.windows(2) {
                     if let (Some(a), Some(b)) = (screen(segment[0]), screen(segment[1])) {
@@ -893,7 +903,10 @@ mod drawing_tests {
         assert_eq!(app.model().edges().len(), 4);
         let face = *app.model().faces().keys().next().unwrap();
         assert!((app.model().face_area(face).unwrap() - 6.).abs() < 1e-4);
-        assert!(app.pending.as_ref().is_some_and(|update| update.reset));
+        assert!(app
+            .pending
+            .as_ref()
+            .is_some_and(|update| update.geometry.iter().any(|g| g.mesh.reset)));
         let modifiers = egui::Modifiers {
             command: true,
             ctrl: true,
@@ -967,3 +980,6 @@ mod axis_input_test {
         assert!(snap.position.x.abs() < 1e-7 && snap.position.y.abs() < 1e-7);
     }
 }
+
+#[cfg(feature = "kernel-benchmark")]
+pub mod organization_benchmark;

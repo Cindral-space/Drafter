@@ -67,6 +67,13 @@ pub enum Command {
         /// RGBA display color.
         color: [u8; 4],
     },
+    /// Assign an optional document material without changing face topology.
+    SetFaceMaterial {
+        /// Target face IDs.
+        faces: Vec<FaceId>,
+        /// Optional document material identity.
+        material: Option<crate::MaterialId>,
+    },
     /// Execute several mutations as one transaction and one history entry.
     Batch(Vec<Command>),
 }
@@ -81,7 +88,8 @@ impl Command {
             | Self::Transform { .. }
             | Self::Offset { .. }
             | Self::FollowMe { .. }
-            | Self::PaintFace { .. } => Err(KernelError::InvalidTopology(
+            | Self::PaintFace { .. }
+            | Self::SetFaceMaterial { .. } => Err(KernelError::InvalidTopology(
                 "explicit surface edit requires a prepared transaction".into(),
             )),
             Self::AddEdge { start, end } => {
@@ -263,6 +271,31 @@ impl History {
             return Ok(false);
         }
         self.high_water = self.high_water.max(delta.next_id());
+        self.undo.push(Entry { delta });
+        self.redo.clear();
+        Ok(true)
+    }
+    pub(crate) fn from_model(mut model: Model) -> Result<Self, KernelError> {
+        model.ensure_spatial()?;
+        Ok(Self {
+            high_water: model.next_id,
+            model,
+            ..Self::default()
+        })
+    }
+    pub(crate) fn replace_model(&mut self, mut model: Model) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
+        model.spatial = None;
+        model.next_id = model.next_id.max(self.high_water);
+        model.validate()?;
+        let delta = crate::transaction::Delta::between(&self.model, &model, self.model.next_id);
+        if delta.is_empty() {
+            return Ok(false);
+        }
+        delta.apply(&mut self.model, true)?;
+        self.high_water = self.high_water.max(delta.next_id());
+        self.revision += 1;
+        self.changes = delta.changes(self.revision);
         self.undo.push(Entry { delta });
         self.redo.clear();
         Ok(true)

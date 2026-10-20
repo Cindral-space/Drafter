@@ -2,5 +2,13 @@
 
 pub mod camera;
 pub mod grid;
-
 pub mod mesh;
+pub mod scene;
+
+pub use mesh::{
+    EdgeVertex, FaceStyle, FaceVertex, GeometryBuffers, MeshCache, MeshUpdate, ModelCallback,
+    ModelRenderer, FACE_COLOR,
+};
+pub use scene::{
+    DefinitionUpdate, InstanceBatch, InstanceData, SceneCallback, SceneRenderer, SceneUpdate,
+};

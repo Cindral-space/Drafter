@@ -10,7 +10,8 @@ impl DrafterApp {
         self.tool.cancel();
         self.measurement.clear();
     }
-    fn cancel_modify(&mut self) {
+    pub(crate) fn cancel_modify(&mut self) {
+        self.organization.drag = None;
         match self.history.cancel_preview() {
             Ok(true) => self.refresh_mesh(),
             Err(e) => self.error = Some(e.to_string()),
@@ -73,7 +74,8 @@ impl DrafterApp {
             matrix: self
                 .camera
                 .view_projection(rect.width() / rect.height().max(1.))
-                .as_dmat4(),
+                .as_dmat4()
+                * self.history.world_transform(),
             size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
         };
         let keyboard_free = !response.ctx.wants_keyboard_input();
@@ -145,8 +147,16 @@ impl DrafterApp {
         );
         let (origin, direction) = self.camera.ray(ndc, rect.width() / rect.height());
         let ray = Ray {
-            origin: origin.as_dvec3(),
-            direction: direction.as_dvec3(),
+            origin: self
+                .history
+                .world_transform()
+                .inverse()
+                .transform_point3(origin.as_dvec3()),
+            direction: self
+                .history
+                .world_transform()
+                .inverse()
+                .transform_vector3(direction.as_dvec3()),
         };
         let hit = cindral_tools::pick(self.history.model(), ray, view, cursor, 10.);
         let mut query = Query::new(cursor, ray, view);

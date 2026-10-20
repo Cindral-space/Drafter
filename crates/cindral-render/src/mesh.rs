@@ -16,8 +16,26 @@ use bytemuck::{Pod, Zeroable};
 use cindral_core::{DVec3, EdgeId, Face, FaceId, KernelError, Model};
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, ScreenDescriptor};
 
-/// Default flat neutral RGB material color for model faces.
-pub const FACE_COLOR: [f32; 3] = [0.58, 0.63, 0.69];
+/// Default flat neutral RGBA material color for model faces.
+pub const FACE_COLOR: [f32; 4] = [0.58, 0.63, 0.69, 1.0];
+
+/// Material style for a triangulated model face.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceStyle {
+    /// Flat linear RGBA display color.
+    pub color: [f32; 4],
+    /// True when the face has an explicit material assignment overriding inherited container materials.
+    pub explicit_material: bool,
+}
+
+impl Default for FaceStyle {
+    fn default() -> Self {
+        Self {
+            color: FACE_COLOR,
+            explicit_material: false,
+        }
+    }
+}
 
 /// Default linear RGB color for visible (non-soft) model edges.
 pub const EDGE_COLOR: [f32; 3] = [0.92, 0.94, 0.97];
@@ -39,8 +57,10 @@ pub struct FaceVertex {
     pub position: [f32; 3],
     /// Unit supporting-plane normal.
     pub normal: [f32; 3],
-    /// Flat linear RGB material color.
-    pub color: [f32; 3],
+    /// Flat linear RGBA material color.
+    pub color: [f32; 4],
+    /// Explicit material flag (1.0 = explicit face material, 0.0 = inherited container material).
+    pub material: f32,
 }
 
 /// Interleaved GPU vertex for non-soft model edges.
@@ -82,7 +102,8 @@ pub struct MeshUpdate {
 
 #[derive(Clone, Debug, PartialEq)]
 struct FaceSignature {
-    color: [u8; 4],
+    color: [f32; 4],
+    explicit_material: bool,
     normal: DVec3,
     distance: f64,
     outer: Vec<DVec3>,
@@ -125,14 +146,18 @@ pub struct MeshCache {
 }
 
 impl MeshCache {
-    /// Triangulates all model faces and extracts all non-soft edges once,
+    /// Triangulates all model faces and extracts all non-soft edges once using a custom face style closure,
     /// returning a populated cache and a full [`MeshUpdate`] (`reset = true`).
-    pub fn rebuild(model: &Model) -> Result<(Self, MeshUpdate), KernelError> {
+    pub fn rebuild_styled(
+        model: &Model,
+        style_fn: &impl Fn(FaceId, &Face) -> FaceStyle,
+    ) -> Result<(Self, MeshUpdate), KernelError> {
         let mut cache = Self::default();
 
         for (&face_id, face) in model.faces() {
-            let signature = build_face_signature(model, face)?;
-            let triangles = build_face_triangles(model, face_id, face)?;
+            let style = style_fn(face_id, face);
+            let signature = build_face_signature(model, face, style)?;
+            let triangles = build_face_triangles(model, face_id, face, style)?;
             if triangles.is_empty() {
                 continue;
             }
@@ -198,16 +223,19 @@ impl MeshCache {
         Ok((cache, update))
     }
 
-    /// Incrementally updates only the supplied `faces` and `edges` IDs.
-    ///
-    /// Missing IDs (or edges marked `soft`) release their slots and zero the
-    /// underlying vertices as degenerate geometry. Unchanged slots are never
-    /// re-triangulated or rewritten. Never traverses the full [`Model`].
-    pub fn update(
+    /// Triangulates all model faces and extracts all non-soft edges once,
+    /// returning a populated cache and a full [`MeshUpdate`] (`reset = true`).
+    pub fn rebuild(model: &Model) -> Result<(Self, MeshUpdate), KernelError> {
+        Self::rebuild_styled(model, &default_face_style)
+    }
+
+    /// Incrementally updates only the supplied `faces` and `edges` IDs using a custom face style closure.
+    pub fn update_styled(
         &mut self,
         model: &Model,
         faces: &[FaceId],
         edges: &[EdgeId],
+        style_fn: &impl Fn(FaceId, &Face) -> FaceStyle,
     ) -> Result<MeshUpdate, KernelError> {
         enum PreparedFace {
             Remove(FaceId),
@@ -237,7 +265,8 @@ impl MeshCache {
             match model.faces().get(&face_id) {
                 None => prepared_faces.push(PreparedFace::Remove(face_id)),
                 Some(face) => {
-                    let signature = build_face_signature(model, face)?;
+                    let style = style_fn(face_id, face);
+                    let signature = build_face_signature(model, face, style)?;
                     if self
                         .face_slots
                         .get(&face_id)
@@ -245,7 +274,7 @@ impl MeshCache {
                     {
                         prepared_faces.push(PreparedFace::Unchanged);
                     } else {
-                        let vertices = build_face_triangles(model, face_id, face)?;
+                        let vertices = build_face_triangles(model, face_id, face, style)?;
                         if vertices.is_empty() {
                             prepared_faces.push(PreparedFace::Remove(face_id));
                         } else {
@@ -419,6 +448,20 @@ impl MeshCache {
         })
     }
 
+    /// Incrementally updates only the supplied `faces` and `edges` IDs.
+    ///
+    /// Missing IDs (or edges marked `soft`) release their slots and zero the
+    /// underlying vertices as degenerate geometry. Unchanged slots are never
+    /// re-triangulated or rewritten. Never traverses the full [`Model`].
+    pub fn update(
+        &mut self,
+        model: &Model,
+        faces: &[FaceId],
+        edges: &[EdgeId],
+    ) -> Result<MeshUpdate, KernelError> {
+        self.update_styled(model, faces, edges, &default_face_style)
+    }
+
     fn free_face_slot(&mut self, start_tri: usize, capacity_tris: usize) {
         self.free_face_slots
             .entry(capacity_tris)
@@ -457,7 +500,27 @@ impl MeshCache {
     }
 }
 
-fn build_face_signature(model: &Model, face: &Face) -> Result<FaceSignature, KernelError> {
+fn default_face_style(_id: FaceId, face: &Face) -> FaceStyle {
+    FaceStyle {
+        color: if face.color == [160, 177, 193, 255] {
+            FACE_COLOR
+        } else {
+            [
+                face.color[0] as f32 / 255.0,
+                face.color[1] as f32 / 255.0,
+                face.color[2] as f32 / 255.0,
+                face.color[3] as f32 / 255.0,
+            ]
+        },
+        explicit_material: face.material.is_some(),
+    }
+}
+
+fn build_face_signature(
+    model: &Model,
+    face: &Face,
+    style: FaceStyle,
+) -> Result<FaceSignature, KernelError> {
     if !face.plane.normal.is_finite() || !face.plane.distance.is_finite() {
         return Err(KernelError::InvalidPosition);
     }
@@ -488,7 +551,8 @@ fn build_face_signature(model: &Model, face: &Face) -> Result<FaceSignature, Ker
         })
         .collect::<Result<Vec<_>, KernelError>>()?;
     Ok(FaceSignature {
-        color: face.color,
+        color: style.color,
+        explicit_material: style.explicit_material,
         normal: face.plane.normal,
         distance: face.plane.distance,
         outer,
@@ -500,6 +564,7 @@ fn build_face_triangles(
     model: &Model,
     face_id: FaceId,
     face: &Face,
+    style: FaceStyle,
 ) -> Result<Vec<FaceVertex>, KernelError> {
     let tris = model.triangulate(face_id)?;
     let normal = face.plane.normal.as_vec3();
@@ -517,15 +582,8 @@ fn build_face_triangles(
             vertices.push(FaceVertex {
                 position: pos.to_array(),
                 normal: normal_arr,
-                color: if face.color == [160, 177, 193, 255] {
-                    FACE_COLOR
-                } else {
-                    [
-                        face.color[0] as f32 / 255.,
-                        face.color[1] as f32 / 255.,
-                        face.color[2] as f32 / 255.,
-                    ]
-                },
+                color: style.color,
+                material: if style.explicit_material { 1.0 } else { 0.0 },
             });
         }
     }
@@ -728,6 +786,16 @@ impl GeometryBuffers {
     pub fn edge_vertices(&self) -> u32 {
         self.edge_vertices
     }
+
+    /// Read-only reference to the persistent face GPU buffer.
+    pub fn face_buffer(&self) -> &wgpu::Buffer {
+        &self.face_buffer
+    }
+
+    /// Read-only reference to the persistent edge GPU buffer.
+    pub fn edge_buffer(&self) -> &wgpu::Buffer {
+        &self.edge_buffer
+    }
 }
 
 fn create_geometry_buffer(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
@@ -836,7 +904,8 @@ impl ModelRenderer {
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x3,
                         1 => Float32x3,
-                        2 => Float32x3
+                        2 => Float32x4,
+                        3 => Float32
                     ],
                 }],
             },
@@ -1882,5 +1951,89 @@ mod tests {
             .filter(|pair| pair[0] != EdgeVertex::zeroed())
             .count();
         assert_eq!(active_edges_2, 12);
+    }
+
+    #[test]
+    fn face_vertex_layout_and_zeroed_slot_normal_distinction() {
+        assert_eq!(std::mem::size_of::<FaceVertex>(), 44);
+        assert_eq!(FACE_VERTEX_BYTES, 44);
+
+        let zeroed = FaceVertex::zeroed();
+        assert_eq!(zeroed.position, [0.0; 3]);
+        assert_eq!(zeroed.normal, [0.0; 3]);
+        assert_eq!(zeroed.color, [0.0; 4]);
+        assert_eq!(zeroed.material, 0.0);
+
+        // Zeroed slot detection uses dot(normal, normal) == 0.0
+        let zero_normal_sq =
+            zeroed.normal[0].powi(2) + zeroed.normal[1].powi(2) + zeroed.normal[2].powi(2);
+        assert_eq!(zero_normal_sq, 0.0);
+
+        // A black face is valid: normal is unit length, color is black [0, 0, 0, 1]
+        let black_face = FaceVertex {
+            position: [1.0, 2.0, 3.0],
+            normal: [0.0, 0.0, 1.0],
+            color: [0.0, 0.0, 0.0, 1.0],
+            material: 1.0,
+        };
+        let black_normal_sq = black_face.normal[0].powi(2)
+            + black_face.normal[1].powi(2)
+            + black_face.normal[2].powi(2);
+        assert!((black_normal_sq - 1.0).abs() < 1e-6);
+        assert!(black_normal_sq > 0.5);
+    }
+
+    #[test]
+    fn styled_rebuild_and_update_with_explicit_material_and_color() {
+        let mut history = History::new();
+        history
+            .execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::new(0.0, 0.0, 0.0),
+                    DVec3::new(2.0, 0.0, 0.0),
+                    DVec3::new(2.0, 2.0, 0.0),
+                    DVec3::new(0.0, 2.0, 0.0),
+                ],
+                closed: true,
+            })
+            .unwrap();
+        let face_id = *history.model().faces().keys().next().unwrap();
+
+        // 1. Rebuild with styled face: custom blue color and explicit material = true
+        let custom_style = FaceStyle {
+            color: [0.1, 0.2, 0.9, 0.8],
+            explicit_material: true,
+        };
+        let (mut cache, init) =
+            MeshCache::rebuild_styled(history.model(), &|_id, _f| custom_style).unwrap();
+        assert_eq!(init.face_vertices, 6);
+        let verts = decode_face_vertices(&init.face_writes[0].bytes);
+        assert_eq!(verts.len(), 6);
+        for v in verts {
+            assert_eq!(v.color, [0.1, 0.2, 0.9, 0.8]);
+            assert_eq!(v.material, 1.0);
+        }
+
+        // 2. Calling update_styled with same style is a no-op
+        let noop = cache
+            .update_styled(history.model(), &[face_id], &[], &|_id, _f| custom_style)
+            .unwrap();
+        assert!(noop.face_writes.is_empty());
+
+        // 3. Calling update_styled with changed style forces re-triangulation/update of the slot
+        let new_style = FaceStyle {
+            color: [0.9, 0.1, 0.1, 1.0],
+            explicit_material: false,
+        };
+        let delta = cache
+            .update_styled(history.model(), &[face_id], &[], &|_id, _f| new_style)
+            .unwrap();
+        assert_eq!(delta.face_writes.len(), 1);
+        let updated_verts = decode_face_vertices(&delta.face_writes[0].bytes);
+        assert_eq!(updated_verts.len(), 6);
+        for v in updated_verts {
+            assert_eq!(v.color, [0.9, 0.1, 0.1, 1.0]);
+            assert_eq!(v.material, 0.0);
+        }
     }
 }

@@ -25,3 +25,7 @@ required-features = ["bench-fixtures"]
 
 [dependencies.rstar]
 version = "0.12"
+
+[[example]]
+name="connected_benchmark"
+required-features=["bench-fixtures"]

@@ -73,3 +73,9 @@ Move/rotate/scale are individual successful previews of all box vertices, follow
 These times exclude inference candidate scans, picking, egui, actual drawing and frame scheduling. They establish update cost, not full-editor frame rate. Push/pull evaluates affected connected shells for Boolean operations; a very large connected solid may exceed 16 ms even though untouched boundary IDs and GPU ranges are retained. That workload remains unmeasured. Conservative complexity limits abort the operation rather than commit incomplete Boolean output. The earlier static 500k-triangle raster baseline is independent.
 
 The reproduction commands above now include the M4 measurements. Native `capture_viewport --modify` additionally exercises preview, cancel, committed through-hole, face painting and selection rendering; its screenshot is visual validation rather than a timing sample.
+
+## M5 organization rerun
+
+The new [5,000-component kernel/renderer workload](COMPONENT_BENCHMARK.md) measures the document/global-history/definition-cache path: shared geometry edit 0.479–0.668 ms, undo 0.041–0.059 ms, redo 0.039–0.041 ms, and dirty mesh preparation 0.050–0.072 ms. Shared edit + mesh + completed GPU upload totals 0.800–1.136 ms across three final quiet runs. One occurrence placement + CPU batching + completed GPU update totals 1.671–2.055 ms. These are below 16 ms for that workload and exclude full UI frame scheduling.
+
+The new [21,600-face connected solid](CONNECTED_SOLID_BENCHMARK.md) changes the assessment for large connected topology: single-face push/pull and raw whole-solid Move both exceeded a 60-second process deadline. Neither meets 16 ms. The earlier disconnected-tile/small-box fixture must not be generalized to connected shells. Matrix-only group placement remains fast, with costs/limits reported separately.

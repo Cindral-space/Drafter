@@ -53,3 +53,7 @@ Native Wayland; release build with stable Rust 1.98.1; wgpu 27 OpenGL backend. A
 The static one-draw baseline stays below the 16.67 ms reference in these runs. These are encode/submit/completion wall times for the offscreen mesh, **not achieved full-editor frame rates**. UI, presentation, picking, per-group draw calls, rebuilds, textured materials, and component instancing still need representative end-to-end benchmarks as those features arrive. No 60 fps editor guarantee follows from these measurements.
 
 [Raw reports](benchmarks/2026-10-20-vega11-opengl.txt) include adapter details, counts, memory, coverage, throughput and timing. The benchmark's five CPU mesh/statistics tests are included in `cargo test --workspace` through the example target's `test = true` setting.
+
+## M5 component scene
+
+The production instanced renderer now has a separate [5,000-component benchmark](COMPONENT_BENCHMARK.md): one box definition, 60,000 submitted triangles, three instanced draws, mean offscreen frames 1.472–1.592 ms and p95 1.698–2.010 ms across three final runs. It measures partial geometry/matrix uploads separately and retains the same distinction between offscreen submissions and full editor FPS. The original 500,000-triangle static baseline above is unchanged.

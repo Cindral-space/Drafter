@@ -1,0 +1,9 @@
+Release binaries, separate timeout 60s per process. Timeouts include printed setup time.
+
+PUSHPULL
+mode: pushpull; fixture: 21602 vertices / 43200 edges / 21600 faces (n=60); setup 357.578 ms
+process_exit_status: 124
+
+RAW VERTEX MOVE
+mode: move; fixture: 21602 vertices / 43200 edges / 21600 faces (n=60); setup 278.358 ms
+process_exit_status: 124

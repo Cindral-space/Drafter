@@ -88,7 +88,8 @@ impl Selection {
             | Command::Transform { .. }
             | Command::Offset { .. }
             | Command::FollowMe { .. }
-            | Command::PaintFace { .. } => {
+            | Command::PaintFace { .. }
+            | Command::SetFaceMaterial { .. } => {
                 return Err(KernelError::InvalidTopology(
                     "explicit surface edit requires a prepared transaction".into(),
                 ))
@@ -227,6 +228,7 @@ impl Delta {
                 | Command::Transform { .. }
                 | Command::FollowMe { .. }
                 | Command::PaintFace { .. }
+                | Command::SetFaceMaterial { .. }
         ) {
             model.ensure_spatial()?;
             let (before, after) = crate::modification::prepare(model, command, high_water)?;
@@ -400,10 +402,36 @@ impl Delta {
         for id in artificial {
             after.faces.remove(&id);
         }
+        // New split/healed regions inherit the material/color of their old containing
+        // surface. Use a triangulated interior sample so concave rings and holes work.
+        let mut styles = Vec::new();
+        for (id, face) in &after.faces {
+            if before.faces.contains_key(id) {
+                continue;
+            }
+            if let Some([a, b, c]) = after.triangulate(*id)?.first() {
+                let sample = (*a + *b + *c) / 3.;
+                for previous in before.faces.values() {
+                    if previous.plane.normal.cross(face.plane.normal).length() <= crate::TOLERANCE
+                        && previous.plane.signed_distance(sample).abs() <= crate::TOLERANCE
+                        && contains_face(&before, previous, sample)?
+                    {
+                        styles.push((*id, previous.color, previous.material));
+                        break;
+                    }
+                }
+            }
+        }
+        for (id, color, material) in styles {
+            if let Some(face) = after.faces.get_mut(&id) {
+                face.color = color;
+                face.material = material;
+            }
+        }
         after.validate()?;
         Ok(Self::between(&before, &after, model.next_id))
     }
-    fn between(before: &Model, after: &Model, before_next: u64) -> Self {
+    pub(crate) fn between(before: &Model, after: &Model, before_next: u64) -> Self {
         let vertices = difference(&before.vertices, &after.vertices);
         let moved: BTreeSet<_> = vertices.keys().copied().collect();
         let mut edges = difference(&before.edges, &after.edges);

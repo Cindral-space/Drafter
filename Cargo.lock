@@ -412,6 +412,7 @@ dependencies = [
  "cindral-core",
  "cindral-inference",
  "glam",
+ "proptest",
  "thiserror 2.0.21",
 ]
 

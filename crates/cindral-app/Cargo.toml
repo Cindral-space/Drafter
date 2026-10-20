@@ -33,3 +33,7 @@ kernel-benchmark = ["cindral-core/bench-fixtures"]
 [[example]]
 name = "kernel_gpu_benchmark"
 required-features = ["kernel-benchmark"]
+
+[[example]]
+name = "component_benchmark"
+required-features = ["kernel-benchmark"]
