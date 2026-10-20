@@ -132,6 +132,13 @@ impl Model {
         })
     }
 
+    /// Number of incident faces, using the maintained topology index when available.
+    pub fn edge_face_count(&self, id: EdgeId) -> usize {
+        if let Some(spatial) = &self.spatial { return spatial.edge_faces.get(&id).map_or(0, BTreeSet::len); }
+        let Some(edge) = self.edges.get(&id) else { return 0; };
+        self.faces.values().filter(|face| std::iter::once(&face.outer).chain(face.holes.iter()).any(|ring| ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len()).any(|(a,b)| (*a == edge.vertices[0] && *b == edge.vertices[1]) || (*b == edge.vertices[0] && *a == edge.vertices[1])))).count()
+    }
+
     /// Axis-aligned model bounds, or `None` for an empty model.
     pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
         self.vertices

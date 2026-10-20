@@ -249,6 +249,9 @@ pub struct SceneRenderer {
     opaque_face_pipeline: wgpu::RenderPipeline,
     transparent_face_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
+    overlay_edge_pipeline: wgpu::RenderPipeline,
+    profile_pipelines: Vec<wgpu::RenderPipeline>,
+    style: cindral_core::ViewStyle,
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     composite_sampler: wgpu::Sampler,
@@ -320,7 +323,7 @@ impl SceneRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cindral scene camera uniform"),
-            size: 64,
+            size: 112,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -330,7 +333,7 @@ impl SceneRenderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -609,14 +612,14 @@ impl SceneRenderer {
                 cache: None,
             });
 
-        let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let make_edge_pipeline = |overlay: bool, entry: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Cindral scene edge pipeline"),
             layout: Some(&scene_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &scene_shader,
-                entry_point: Some("vs_edge"),
+                entry_point: Some(entry),
                 compilation_options: Default::default(),
-                buffers: &[edge_vertex_layout, instance_layout],
+                buffers: &[edge_vertex_layout.clone(), instance_layout.clone()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader,
@@ -635,8 +638,8 @@ impl SceneRenderer {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: OFFSCREEN_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write_enabled: !overlay,
+                depth_compare: if overlay { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual },
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -644,6 +647,10 @@ impl SceneRenderer {
             multiview: None,
             cache: None,
         });
+
+        let edge_pipeline = make_edge_pipeline(false, "vs_edge");
+        let overlay_edge_pipeline = make_edge_pipeline(true, "vs_edge");
+        let profile_pipelines = ["vs_profile_left", "vs_profile_right", "vs_profile_up", "vs_profile_down"].iter().map(|entry| make_edge_pipeline(false, entry)).collect();
 
         let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Cindral scene composite shader"),
@@ -732,6 +739,9 @@ impl SceneRenderer {
             opaque_face_pipeline,
             transparent_face_pipeline,
             edge_pipeline,
+            overlay_edge_pipeline,
+            profile_pipelines,
+            style: Default::default(),
             composite_pipeline,
             composite_layout,
             composite_sampler,
@@ -905,6 +915,19 @@ impl SceneRenderer {
         true
     }
 
+    /// Change presentation without touching geometry or instance buffers.
+    pub fn set_style(&mut self, style: cindral_core::ViewStyle) {
+        self.style = style;
+    }
+
+    fn write_style(&self, queue: &wgpu::Queue, size: [u32; 2]) {
+        use cindral_core::StyleMode;
+        let mode = match self.style.mode { StyleMode::Shaded => 0., StyleMode::Textured => 1., StyleMode::Wireframe => 2., StyleMode::HiddenLine => 3., StyleMode::XRay => 4. };
+        let values = [mode, u8::from(self.style.soft_edges) as f32, u8::from(self.style.smooth_edges) as f32, u8::from(self.style.profiles) as f32,
+            self.style.background[0] as f32 / 255., self.style.background[1] as f32 / 255., self.style.background[2] as f32 / 255., 1., 2. / size[0].max(1) as f32, 2. / size[1].max(1) as f32, 0., 0.];
+        queue.write_buffer(&self.uniform, 64, bytemuck::cast_slice(&values));
+    }
+
     /// Encode the offscreen scene pass independently of egui (also used by benchmarks).
     pub fn render(
         &mut self,
@@ -938,6 +961,7 @@ impl SceneRenderer {
             self.default_texture_initialized = true;
         }
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&view_projection));
+        self.write_style(queue, size);
         if self.ensure_target_size(device, size) {
             self.render_offscreen(encoder);
         }
@@ -974,7 +998,7 @@ impl SceneRenderer {
             // 1. Opaque face pass (depth writes enabled)
             pass.set_pipeline(&self.opaque_face_pipeline);
             for state in self.definitions.values() {
-                if state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
+                if self.style.mode != cindral_core::StyleMode::Wireframe && state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
                     pass.set_vertex_buffer(0, state.geometry.face_buffer().slice(..));
                     pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
                     pass.draw(
@@ -986,7 +1010,7 @@ impl SceneRenderer {
             }
 
             // 2. Edge pass (depth writes enabled)
-            pass.set_pipeline(&self.edge_pipeline);
+            pass.set_pipeline(if matches!(self.style.mode, cindral_core::StyleMode::Wireframe | cindral_core::StyleMode::XRay) { &self.overlay_edge_pipeline } else { &self.edge_pipeline });
             for state in self.definitions.values() {
                 if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0 {
                     pass.set_vertex_buffer(0, state.geometry.edge_buffer().slice(..));
@@ -999,10 +1023,25 @@ impl SceneRenderer {
                 }
             }
 
+            // Boundary profiles expand existing line vertices in clip space; no mesh uploads.
+            if self.style.profiles {
+                for pipeline in &self.profile_pipelines {
+                    pass.set_pipeline(pipeline);
+                    for state in self.definitions.values() {
+                        if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0 {
+                            pass.set_vertex_buffer(0, state.geometry.edge_buffer().slice(..));
+                            pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
+                            pass.draw(0..state.geometry.edge_vertices(), 0..state.instances.instance_count);
+                            draw_calls += 1;
+                        }
+                    }
+                }
+            }
+
             // 3. Transparent face pass (depth writes disabled, premultiplied alpha blending)
             pass.set_pipeline(&self.transparent_face_pipeline);
             for state in self.definitions.values() {
-                if state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
+                if self.style.mode != cindral_core::StyleMode::Wireframe && state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
                     pass.set_vertex_buffer(0, state.geometry.face_buffer().slice(..));
                     pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
                     pass.draw(
@@ -1083,6 +1122,8 @@ pub struct SceneCallback {
     pub size: [u32; 2],
     /// Optional pending scene update to upload during `prepare`.
     pub update: Option<Arc<SceneUpdate>>,
+    /// Uniform-only viewport appearance.
+    pub style: cindral_core::ViewStyle,
 }
 
 impl CallbackTrait for SceneCallback {
@@ -1100,6 +1141,8 @@ impl CallbackTrait for SceneCallback {
         if let Some(update) = &self.update {
             renderer.apply_update_once(device, queue, update);
         }
+        renderer.set_style(self.style.clone());
+        renderer.write_style(queue, self.size);
         queue.write_buffer(
             &renderer.uniform,
             0,

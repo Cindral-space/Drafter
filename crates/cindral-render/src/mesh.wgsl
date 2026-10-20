@@ -26,7 +26,7 @@ fn vs_face(
     }
     out.position = camera.view_projection * vec4<f32>(position, 1.0);
     out.normal = normal;
-    out.color = color;
+    out.color = abs(color);
     return out;
 }
 
@@ -51,13 +51,13 @@ fn vs_edge(
     @location(1) color: vec3<f32>,
 ) -> EdgeOutput {
     var out: EdgeOutput;
-    if dot(color, color) == 0.0 {
+    if dot(color, color) == 0.0 || color.x < 0.0 || color.y < 0.0 {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         out.color = vec3<f32>(0.0, 0.0, 0.0);
         return out;
     }
     out.position = camera.view_projection * vec4<f32>(position, 1.0);
-    out.color = color;
+    out.color = abs(color);
     return out;
 }
 

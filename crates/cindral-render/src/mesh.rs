@@ -1,6 +1,6 @@
 //! Cached model mesh generation, incremental GPU buffer updates, and offscreen compositing.
 //!
-//! [`MeshCache`] converts topological [`Model`] faces and non-soft edges into
+//! [`MeshCache`] converts topological [`Model`] faces and edges with cached visibility flags into
 //! contiguous triangle and line vertex arrays with power-of-two/fixed-capacity
 //! slot reuse. Unchanged entities are never re-triangulated or re-uploaded.
 //! [`GeometryBuffers`] maintains persistent `wgpu` vertex buffers with at least
@@ -57,7 +57,7 @@ impl Default for FaceStyle {
     }
 }
 
-/// Default linear RGB color for visible (non-soft) model edges.
+/// Default linear RGB color for model edges.
 pub const EDGE_COLOR: [f32; 3] = [0.92, 0.94, 0.97];
 
 /// Offscreen color target format (transparent RGBA).
@@ -89,7 +89,7 @@ pub struct FaceVertex {
 pub struct EdgeVertex {
     /// World-space endpoint position in meters.
     pub position: [f32; 3],
-    /// Linear RGB line color.
+    /// RGB magnitudes; negative R/G encode soft/smooth, negative B a boundary profile.
     pub color: [f32; 3],
 }
 
@@ -153,7 +153,7 @@ struct EdgeSlot {
 
 /// CPU-side slot-allocated mesh cache for a [`Model`].
 ///
-/// Faces are stored in power-of-two triangle slots and non-soft edges in
+/// Faces are stored in power-of-two triangle slots and edges with cached visibility flags in
 /// fixed-capacity 1-segment slots. Removed or inactive slots are zeroed out as
 /// degenerate geometry and reused on subsequent allocations.
 #[derive(Clone, Debug, Default)]
@@ -167,7 +167,7 @@ pub struct MeshCache {
 }
 
 impl MeshCache {
-    /// Triangulates all model faces and extracts all non-soft edges once using a custom face style closure,
+    /// Triangulates all model faces and extracts all edges with cached visibility flags once using a custom face style closure,
     /// returning a populated cache and a full [`MeshUpdate`] (`reset = true`).
     pub fn rebuild_styled(
         model: &Model,
@@ -201,10 +201,7 @@ impl MeshCache {
         }
 
         for (&edge_id, edge) in model.edges() {
-            if edge.soft {
-                continue;
-            }
-            let vertices = build_edge_vertices(model, edge.vertices)?;
+            let vertices = styled_edge_vertices(model, edge_id, edge, DVec3::ZERO)?;
             let slot = cache.edge_data.len() / 2;
             cache.edge_data.extend_from_slice(&vertices);
             cache
@@ -244,7 +241,7 @@ impl MeshCache {
         Ok((cache, update))
     }
 
-    /// Triangulates all model faces and extracts all non-soft edges once,
+    /// Triangulates all model faces and extracts all edges with cached visibility flags once,
     /// returning a populated cache and a full [`MeshUpdate`] (`reset = true`).
     pub fn rebuild(model: &Model) -> Result<(Self, MeshUpdate), KernelError> {
         Self::rebuild_styled(model, &default_face_style)
@@ -331,9 +328,8 @@ impl MeshCache {
             }
             match model.edges().get(&edge_id) {
                 None => prepared_edges.push(PreparedEdge::Remove(edge_id)),
-                Some(edge) if edge.soft => prepared_edges.push(PreparedEdge::Remove(edge_id)),
                 Some(edge) => {
-                    let vertices = build_edge_vertices_in_frame(model, edge.vertices, offset)?;
+                    let vertices = styled_edge_vertices(model, edge_id, edge, offset)?;
                     if self
                         .edge_slots
                         .get(&edge_id)
@@ -484,7 +480,7 @@ impl MeshCache {
 
     /// Incrementally updates only the supplied `faces` and `edges` IDs.
     ///
-    /// Missing IDs (or edges marked `soft`) release their slots and zero the
+    /// Missing IDs release their slots and zero the
     /// underlying vertices as degenerate geometry. Unchanged slots are never
     /// re-triangulated or rewritten. Never traverses the full [`Model`].
     pub fn update(
@@ -645,11 +641,15 @@ fn build_face_triangles_in_frame(
     Ok(vertices)
 }
 
-fn build_edge_vertices(
-    model: &Model,
-    endpoints: [cindral_core::VertexId; 2],
-) -> Result<[EdgeVertex; 2], KernelError> {
-    build_edge_vertices_in_frame(model, endpoints, DVec3::ZERO)
+fn styled_edge_vertices(model: &Model, id: EdgeId, edge: &cindral_core::Edge, offset: DVec3) -> Result<[EdgeVertex; 2], KernelError> {
+    let mut vertices = build_edge_vertices_in_frame(model, edge.vertices, offset)?;
+    for vertex in &mut vertices {
+        // Signs encode immutable edge attributes; zero remains the free-slot sentinel.
+        if edge.soft { vertex.color[0] = -vertex.color[0]; }
+        if edge.smooth { vertex.color[1] = -vertex.color[1]; }
+        if model.edge_face_count(id) < 2 { vertex.color[2] = -vertex.color[2]; }
+    }
+    Ok(vertices)
 }
 fn build_edge_vertices_in_frame(
     model: &Model,
@@ -1470,7 +1470,7 @@ mod tests {
     }
 
     #[test]
-    fn soft_edges_excluded_on_rebuild_and_toggled_incrementally() {
+    fn soft_edges_retained_and_attributes_updated_incrementally() {
         let mut history = History::new();
         history
             .execute(Command::AddPolyline {
@@ -1513,11 +1513,11 @@ mod tests {
             .unwrap();
 
         let (mut cache, init) = MeshCache::rebuild(history.model()).unwrap();
-        // 4 non-soft perimeter edges -> 8 edge vertices; 2 triangle faces -> 6 face vertices.
-        assert_eq!(init.edge_vertices, 8);
+        // Soft edges remain cached; the shader controls visibility without mesh changes.
+        assert_eq!(init.edge_vertices, 10);
         assert_eq!(init.face_vertices, 6);
 
-        // Mark one perimeter edge soft and update incrementally.
+        // Mark one perimeter edge soft and update only its encoded attributes.
         let perimeter_id = *history
             .model()
             .edges()
@@ -1540,9 +1540,9 @@ mod tests {
         assert_eq!(soft_update.edge_writes.len(), 1);
         let freed_offset = soft_update.edge_writes[0].offset;
         let zeroed = decode_edge_vertices(&soft_update.edge_writes[0].bytes);
-        assert_eq!(zeroed, &[EdgeVertex::zeroed(); 2]);
+        assert!(zeroed.iter().all(|v| v.color[0] < 0.));
 
-        // Un-soften the perimeter edge; it must reuse the exact freed slot offset.
+        // Un-soften the perimeter edge; its existing slot must stay stable.
         history
             .execute(Command::SetEdgeStyle {
                 edges: vec![perimeter_id],
@@ -1553,9 +1553,9 @@ mod tests {
         let unsoft_update = cache.update(history.model(), &[], &[perimeter_id]).unwrap();
         assert_eq!(unsoft_update.edge_writes.len(), 1);
         assert_eq!(unsoft_update.edge_writes[0].offset, freed_offset);
-        assert_eq!(unsoft_update.edge_vertices, 8);
+        assert_eq!(unsoft_update.edge_vertices, 10);
         let restored = decode_edge_vertices(&unsoft_update.edge_writes[0].bytes);
-        assert!(restored.iter().all(|v| v.color == EDGE_COLOR));
+        assert!(restored.iter().all(|v| v.color[0] > 0. && v.color[1] > 0.));
     }
 
     #[test]
@@ -1809,7 +1809,7 @@ mod tests {
         let edge_verts = decode_edge_vertices(&init.edge_writes[0].bytes);
         assert!(edge_verts
             .iter()
-            .all(|v| v.position.iter().all(|c| c.is_finite()) && v.color == EDGE_COLOR));
+            .all(|v| v.position.iter().all(|c| c.is_finite()) && v.color.map(f32::abs) == EDGE_COLOR));
 
         // Add a tilted triangle in 3D and update incrementally.
         let prev_edges: BTreeSet<EdgeId> = history.model().edges().keys().copied().collect();

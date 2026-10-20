@@ -1,5 +1,8 @@
 struct Camera {
     view_projection: mat4x4<f32>,
+    style: vec4<f32>,
+    background: vec4<f32>,
+    reserved: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -133,8 +136,12 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
     let tex_sample = textureSample(t_materials, s_materials, in.uv, layer_idx);
 
     // Multiplies RGB/alpha into inherited/explicit material selection
-    rgb = rgb * tex_sample.rgb;
-    alpha = alpha * tex_sample.a;
+    if camera.style.x == 1.0 {
+        rgb = rgb * tex_sample.rgb;
+        alpha = alpha * tex_sample.a;
+    }
+    if camera.style.x == 3.0 { return vec4<f32>(camera.background.rgb, 1.0); }
+    if camera.style.x == 4.0 { alpha = 0.22; }
 
     let len2 = dot(in.normal, in.normal);
     let n = select(vec3<f32>(0.0, 0.0, 1.0), in.normal * inverseSqrt(len2), len2 > 1.0e-12);
@@ -170,8 +177,7 @@ struct EdgeOutput {
     @location(0) color: vec3<f32>,
 };
 
-@vertex
-fn vs_edge(
+struct EdgeInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(4) m0: vec4<f32>,
@@ -184,19 +190,59 @@ fn vs_edge(
     @location(11) n3: vec4<f32>,
     @location(12) inst_mat: vec4<f32>,
     @location(13) inst_params: vec4<f32>,
-) -> EdgeOutput {
+};
+
+fn edge_vertex(input: EdgeInput) -> EdgeOutput {
     var out: EdgeOutput;
-    if dot(color, color) == 0.0 {
+    if dot(input.color, input.color) == 0.0 || (input.color.x < 0.0 && camera.style.y < 0.5) || (input.color.y < 0.0 && camera.style.z < 0.5) {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         out.color = vec3<f32>(0.0, 0.0, 0.0);
         return out;
     }
 
-    let model_matrix = mat4x4<f32>(m0, m1, m2, m3);
-    let world_pos = model_matrix * vec4<f32>(position, 1.0);
+    let model_matrix = mat4x4<f32>(input.m0, input.m1, input.m2, input.m3);
+    let world_pos = model_matrix * vec4<f32>(input.position, 1.0);
     out.position = camera.view_projection * world_pos;
-    let dim = inst_params.y;
-    out.color = color * dim;
+    let dim = input.inst_params.y;
+    let profile = input.color.z < 0.0 && camera.style.w > 0.5;
+    let ink = select(vec3<f32>(0.08, 0.09, 0.10), vec3<f32>(0.94, 0.95, 0.98), dot(camera.background.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) < 0.5);
+    let base = ink * select(0.75, 1.0, profile);
+    out.color = base * dim;
+    return out;
+}
+
+@vertex
+fn vs_edge(input: EdgeInput) -> EdgeOutput { return edge_vertex(input); }
+
+@vertex
+fn vs_profile_left(input: EdgeInput) -> EdgeOutput {
+    var out = edge_vertex(input);
+    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    out.position.x += -camera.reserved.x * out.position.w;
+    return out;
+}
+
+@vertex
+fn vs_profile_right(input: EdgeInput) -> EdgeOutput {
+    var out = edge_vertex(input);
+    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    out.position.x += camera.reserved.x * out.position.w;
+    return out;
+}
+
+@vertex
+fn vs_profile_up(input: EdgeInput) -> EdgeOutput {
+    var out = edge_vertex(input);
+    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    out.position.y += camera.reserved.y * out.position.w;
+    return out;
+}
+
+@vertex
+fn vs_profile_down(input: EdgeInput) -> EdgeOutput {
+    var out = edge_vertex(input);
+    if input.color.z >= 0.0 { out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    out.position.y += -camera.reserved.y * out.position.w;
     return out;
 }
 
