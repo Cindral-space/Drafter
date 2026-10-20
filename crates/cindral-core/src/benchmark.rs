@@ -68,7 +68,7 @@ pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError
         }
     }
     Ok(Fixture {
-        history: History::benchmark_seed(model),
+        history: History::benchmark_seed(model)?,
         edit: Command::AddEdge {
             start: DVec3::ZERO,
             end: DVec3::new(1.0, 0.5, 0.0),

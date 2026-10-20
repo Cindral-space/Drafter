@@ -1,5 +1,8 @@
 //! GPU-independent inference inputs and screen-space geometric constraints.
 
+mod engine;
+pub use engine::Engine;
+
 use cindral_core::{EdgeId, FaceId, VertexId, TOLERANCE};
 pub use glam::{DMat4, DVec2, DVec3};
 

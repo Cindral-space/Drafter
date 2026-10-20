@@ -1,0 +1,48 @@
+=== kernel-global-baseline ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 15.067 ms
+edit_ms: 203080.039
+undo_ms: 10.169
+redo_ms: 8.031
+triangulate_all_ms: 18.979 (20001 triangles)
+
+=== kernel-local-1 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 158.274 ms
+edit_ms: 0.131
+undo_ms: 0.021
+redo_ms: 0.017
+triangulate_all_ms: 17.126 (20001 triangles)
+
+=== kernel-local-2 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 153.837 ms
+edit_ms: 0.124
+undo_ms: 0.021
+redo_ms: 0.018
+triangulate_all_ms: 17.056 (20001 triangles)
+
+=== kernel-local-3 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 140.732 ms
+edit_ms: 0.137
+undo_ms: 0.030
+redo_ms: 0.034
+triangulate_all_ms: 17.301 (20001 triangles)
+
+=== kernel-gpu-1 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 71.557; bytes 4560204
+full_gpu_buffer_ms: 7.606; allocated 9120408
+partial_cpu_mesh_ms: 0.040; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 1.630; allocated 9120000
+
+=== kernel-gpu-2 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 73.657; bytes 4560204
+full_gpu_buffer_ms: 5.907; allocated 9120408
+partial_cpu_mesh_ms: 0.040; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.582; allocated 9120000
+
+=== kernel-gpu-3 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 59.720; bytes 4560204
+full_gpu_buffer_ms: 2.065; allocated 9120408
+partial_cpu_mesh_ms: 0.036; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.362; allocated 9120000

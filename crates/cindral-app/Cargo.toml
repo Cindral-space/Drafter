@@ -17,3 +17,19 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [[example]]
 name = "renderer_benchmark"
 test = true
+
+[dependencies.cindral-core]
+path = "../cindral-core"
+
+[dependencies.cindral-inference]
+path = "../cindral-inference"
+
+[dependencies.cindral-tools]
+path = "../cindral-tools"
+
+[features]
+kernel-benchmark = ["cindral-core/bench-fixtures"]
+
+[[example]]
+name = "kernel_gpu_benchmark"
+required-features = ["kernel-benchmark"]

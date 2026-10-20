@@ -2,7 +2,7 @@
 
 ## Status
 
-M0–M2 are implemented: workspace/CI, native GPU grid/axes and camera controls, plus a rendering-independent transactional geometry kernel. A measured static 500k-triangle GPU baseline is also available. Organization and file APIs below remain design intent until their milestones. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0–M3 are implemented: workspace/CI, native GPU grid/axes and camera controls, a rendering-independent transactional geometry kernel, pure inference, five drawing tools and shaded document rendering. A measured static 500k-triangle GPU baseline is also available. Organization and file APIs below remain design intent until their milestones. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -57,13 +57,13 @@ Before M3, a native example (`renderer_benchmark`) measures a static indexed 500
 
 `cindral-core` reexports `DVec3`, `TOLERANCE = 1e-7` meters, `MAX_COORDINATE = 1e6` meters, typed `VertexId`/`EdgeId`/`FaceId` (each `from_raw(u64)` and `value()`), `Vertex { position }`, `Edge { vertices: [VertexId; 2], soft, smooth }`, `Face { outer, holes, plane }`, `Plane { normal, distance }`, `Model`, `Command`, `History`, and `KernelError`.
 
-`History::new()` owns an empty model. `model() -> &Model` is read-only. `execute(Command)`, `undo()` and `redo()` return `Result<bool, KernelError>` (false is no-op). `revision() -> u64`, `undo_depth()` and `redo_depth()` expose history state. All entity creation and attribute changes go through commands; failures preserve model, redo and revision. Undo/redo uses validated snapshots initially. A high-water ID allocator prevents ID reuse after branching edits.
+`History::new()` owns an empty model. `model() -> &Model` is read-only. `execute(Command)`, `undo()` and `redo()` return `Result<bool, KernelError>` (false is no-op). `revision() -> u64`, `undo_depth()` and `redo_depth()` expose history state. All entity creation and attribute changes go through commands; failures preserve model, redo and revision. M2 used validated snapshots; M3 replaces these with validated inverse entity deltas (see below). A high-water ID allocator prevents ID reuse after branching edits.
 
 Commands: `AddEdge { start: DVec3, end: DVec3 }`; `AddPolyline { points: Vec<DVec3>, closed: bool }` (closed input omits repeated endpoint); `EraseEdges(Vec<EdgeId>)`; `SetEdgeStyle { edges: Vec<EdgeId>, soft: bool, smooth: bool }`; `Batch(Vec<Command>)` (one atomic undo step, nesting limited to 64). `Model::vertices()/edges()/faces()` return borrowed BTreeMaps. `bounds()` returns optional min/max, `incident_edges(VertexId)` iterates `(EdgeId, &Edge)`, `face_area(FaceId)` returns square meters, `triangulate(FaceId)` returns world-space `Vec<[DVec3;3]>`, and `validate()` checks topology. These methods return `Result` where lookups/triangulation can fail.
 
 M2 reconstructs bounded planar regions from split 3D edge arrangements using angular half-edge traversal, decomposes walks at bridges/articulations, and assigns nested loops as holes. Every bounded region has a face, so an inner closed loop creates both an annulus and its enclosed face. Supporting planes are derived at non-collinear vertices; existing plane orientation is retained where possible. Faces have a canonical normal, not a closed-solid outward orientation. Erasing edges rebuilds regions and dissolves redundant collinear degree-two vertices unless styles differ. Intersection splits inherit edge styles. Triangulation uses earcutr with all face rings projected relative to the same local origin.
 
-This is a correctness-first kernel: global face rebuilding/full edge-intersection validation is at least quadratic on dense input; history snapshots cost model-sized memory per step. It is independent of the static GPU benchmark. Spatial indexing, incremental topology and compact inverse deltas are future optimization work. Groups/components/tags/material assignment enter at M5; solid extrusion enters at M4, not M2.
+This is a correctness-first kernel: global face rebuilding/full edge-intersection validation is at least quadratic on dense input; history snapshots cost model-sized memory per step. It is independent of the static GPU benchmark. M3 replaces the global edit path and snapshots as described below; this paragraph records the original M2 implementation. Groups/components/tags/material assignment enter at M5; solid extrusion enters at M4, not M2.
 
 ### M2 validation and remaining limits
 
@@ -71,4 +71,26 @@ The core has 34 tests plus a tested public-API documentation example: 26 determi
 
 Adversarial review found and fixed two different predicate problems: shallow-angle intersections were discarded by a fixed angular cutoff, while translated collinear overlaps were missed when rounding perturbed their directions. Plane candidates now use physical altitude, overlap detection checks physical distance before angular intersection division, and persistent proptest seeds retain the translated-overlap failure. Existing plane candidates are deduplicated and face identities compare canonical loops independent of winding to prevent duplicate regions from numerically equivalent candidate planes.
 
-M2 does not introduce draw-tool UI, solid manifold validation, outward solid winding, groups/components, persistence, or large-document editing performance claims. Geometry is validated before command commit; the global arrangement algorithm and snapshot history still require future scalability work. The independent GPU baseline measures one indexed draw with depth/shading, with 1.46–1.63 ms mean and 1.70–2.03 ms p95 on the local Radeon Vega 11/OpenGL release runs; it excludes editor interaction, UI, picking, dirty rebuilds and instancing. M3 has not started.
+M2 does not introduce draw-tool UI, solid manifold validation, outward solid winding, groups/components, persistence, or large-document editing performance claims. Geometry is validated before command commit; M3 addresses local editing scalability below. The independent GPU baseline measures one indexed draw with depth/shading, with 1.46–1.63 ms mean and 1.70–2.03 ms p95 on the local Radeon Vega 11/OpenGL release runs; it excludes editor interaction, UI, picking, dirty rebuilds and instancing. M3 implementation and limits follow below.
+
+## M3 drawing and pure inference
+
+[The frozen interfaces](M3_INTERFACES.md) separate CPU inference (`core`/`glam` only) from rendering. Screen-distance ranking supports endpoints, midpoints, intersections, edges, faces including holes, axes, parallel/perpendicular guides and in-progress arc tangent hints. Arrow keys impose hard axis locks. Existing tessellated arcs have no analytic tangent metadata. Ten inference tests run without a window or GPU.
+
+`ToolSession` owns Line, Rectangle, Circle, Arc and Polygon interaction, previews and typed measurements; it emits ordinary kernel commands. Units include m/cm/mm/in/ft, rectangle dimensions accept a comma-separated pair, and arcs accept signed degrees. Arc interaction uses center/start/end direction. Circle/polygon segment counts are configurable. The app routes pointer/keyboard input, undo/redo, construction planes and camera fitting to model bounds. Drawing failures retain interaction state for correction.
+
+Document faces and edges render through a depth-tested offscreen wgpu pass composed into egui. Mesh slots are retained across edits, free slots become degenerate vertices, and merged dirty byte ranges are uploaded. Buffer growth copies existing geometry; capacity has headroom. Headless synthetic-input tests exercise typed drawing, axis locks and undo/redo; native captures exercise shaded shapes and growth across frames. The draw→push/pull→save→load integration test remains dependent on M4/M6.
+
+## Incremental update plan and M3 implementation
+
+[Kernel measurements](KERNEL_BENCHMARK.md) showed a 203,080 ms global edit and 60–74 ms full CPU mesh rebuild on the requested 50k-edge/20k-face fixture, triggering the pre-M4 optimization requirement. The following steps are implemented:
+
+1. Maintain R-tree bounds and adjacency/face-boundary indices. Prepare a local transaction cavity around command bounds, include affected faces and loose/exterior boundaries, preserve vertices used outside the cavity, then reconstruct and validate only that candidate. Full `Model::validate()` remains available and checks cache consistency. Dirty sets contain changed vertex/edge/face IDs, exposed by `History::changes()` with the revision.
+2. Record before/after entity deltas and allocator state rather than whole-model snapshots. Commit and undo/redo update the indices and dirty sets; high-water IDs and atomic failure behavior remain intact.
+3. Re-triangulate only dirty faces and rebuild only dirty edges in `MeshCache`. Apply range writes to persistent GPU buffers. Camera changes only update transforms, not topology/mesh caches.
+
+Measured local edits are 0.124–0.137 ms and dirty mesh preparation 0.036–0.040 ms on the favorable separated-square fixture. Large transaction cavities still use the conservative arrangement algorithm and may exceed 16 ms. Whole-model inference candidate scans remain unbenchmarked. These results do not establish complete editor frame rate.
+
+Before M4 movement/extrusion, propagate position changes to incident edges/faces and their spatial bounds even when endpoint IDs are unchanged; current commands only add/remove geometry or change edge styles. At M5, partition dirty sets and mesh buffers by group/definition, transform queries to local space, and share definition buffers across component instances. Root face/edge dirty tracking is implemented now; groups do not yet exist. Consider compaction thresholds for fragmented slots after substantial deletion, without returning to a rebuild on every edit.
+
+The existing proptest suite explicitly covers randomized face splitting, erasure merging and vertex healing (`test_rectangle_chord_split_erase_healing`), plus holes, area/Euler invariants, rollback and exact history restoration: 1,152 generated cases per normal run plus persisted regressions. Local transactions additionally compare connected-grid edits against global reconstruction and verify independent geometry remains untouched.

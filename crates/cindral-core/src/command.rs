@@ -35,7 +35,7 @@ pub enum Command {
 }
 
 impl Command {
-    fn apply(&self, model: &mut Model, depth: usize) -> Result<bool, KernelError> {
+    pub(crate) fn apply(&self, model: &mut Model, depth: usize) -> Result<bool, KernelError> {
         if depth > 64 {
             return Err(KernelError::BatchDepth);
         }
@@ -95,13 +95,12 @@ impl Command {
 
 #[derive(Debug, Clone)]
 struct Entry {
-    before: Model,
-    after: Model,
+    delta: crate::transaction::Delta,
 }
 
 /// Transactional model owner and undo/redo history.
 ///
-/// M2 uses validated snapshots for reliable inverses. IDs are never reused within
+/// Edits use locally validated cavities and reversible entity deltas. IDs are never reused within
 /// this history, including after undo followed by a new branch of edits. Revision
 /// increases on successful changes, undo and redo, so render caches can invalidate.
 #[derive(Debug, Clone)]
@@ -111,6 +110,7 @@ pub struct History {
     redo: Vec<Entry>,
     high_water: u64,
     revision: u64,
+    changes: crate::ChangeSet,
 }
 
 impl Default for History {
@@ -121,6 +121,7 @@ impl Default for History {
             redo: Vec::new(),
             high_water: 1,
             revision: 0,
+            changes: crate::ChangeSet::default(),
         }
     }
 }
@@ -149,25 +150,22 @@ impl History {
     /// Validate a candidate mutation and commit it atomically.
     /// Returns `false` for a no-op, which preserves redo history and revision.
     pub fn execute(&mut self, command: Command) -> Result<bool, KernelError> {
-        let mut candidate = self.model.clone();
-        candidate.next_id = self.high_water;
-        if command.apply(&mut candidate, 0)? {
-            candidate.rebuild_faces()?;
-        }
-        candidate.validate()?;
-        if candidate.same_geometry(&self.model) {
+        let delta = crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water)?;
+        if delta.is_empty() {
             return Ok(false);
         }
         let revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
-        self.high_water = self.high_water.max(candidate.next_id);
-        let before = std::mem::replace(&mut self.model, candidate);
-        self.undo.push(Entry {
-            before,
-            after: self.model.clone(),
-        });
+        delta.apply(&mut self.model, true)?;
+        self.high_water = self.high_water.max(delta.next_id());
+        self.changes = delta.changes(revision);
+        self.undo.push(Entry { delta });
         self.redo.clear();
         self.revision = revision;
         Ok(true)
+    }
+    /// Dirty entities from the most recent successful mutation, undo or redo.
+    pub fn changes(&self) -> &crate::ChangeSet {
+        &self.changes
     }
     /// Restore the state before the last successful command.
     pub fn undo(&mut self) -> Result<bool, KernelError> {
@@ -176,7 +174,8 @@ impl History {
         }
         let revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
         if let Some(entry) = self.undo.pop() {
-            self.model = entry.before.clone();
+            entry.delta.apply(&mut self.model, false)?;
+            self.changes = entry.delta.changes(revision);
             self.redo.push(entry);
             self.revision = revision;
         }
@@ -189,7 +188,8 @@ impl History {
         }
         let revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
         if let Some(entry) = self.redo.pop() {
-            self.model = entry.after.clone();
+            entry.delta.apply(&mut self.model, true)?;
+            self.changes = entry.delta.changes(revision);
             self.undo.push(entry);
             self.revision = revision;
         }
@@ -199,11 +199,19 @@ impl History {
 
 #[cfg(feature = "bench-fixtures")]
 impl History {
-    pub(crate) fn benchmark_seed(model: Model) -> Self {
-        Self {
+    pub(crate) fn benchmark_seed(mut model: Model) -> Result<Self, KernelError> {
+        model.ensure_spatial()?;
+        Ok(Self {
             high_water: model.next_id,
             model,
             ..Self::default()
-        }
+        })
+    }
+}
+
+#[cfg(test)]
+impl History {
+    pub(crate) fn highest_test_id(&self) -> u64 {
+        self.high_water
     }
 }

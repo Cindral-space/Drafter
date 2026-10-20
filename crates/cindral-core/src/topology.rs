@@ -100,9 +100,18 @@ impl Model {
     pub(crate) fn heal(&mut self) -> Result<(), KernelError> {
         loop {
             let used: BTreeSet<_> = self.edges.values().flat_map(|e| e.vertices).collect();
-            self.vertices.retain(|id, _| used.contains(id));
+            self.vertices
+                .retain(|id, _| used.contains(id) || self.protected.contains(id));
             let mut merge = None;
             for (vertex, data) in &self.vertices {
+                if self.protected.contains(vertex)
+                    || self
+                        .heal_scope
+                        .as_ref()
+                        .is_some_and(|scope| !scope.contains(vertex))
+                {
+                    continue;
+                }
                 let incident: Vec<_> = self.incident_edges(*vertex).collect();
                 if let [(id_a, a), (id_b, b)] = incident.as_slice() {
                     if (a.soft, a.smooth) != (b.soft, b.smooth) {
@@ -134,6 +143,10 @@ impl Model {
             let Some((vertex, a, b, start, end, style)) = merge else {
                 break;
             };
+            if let Some(scope) = &mut self.heal_scope {
+                scope.insert(start);
+                scope.insert(end);
+            }
             self.edges.remove(&a);
             self.edges.remove(&b);
             self.vertices.remove(&vertex);
@@ -349,8 +362,8 @@ fn canonical_ring(ring: &[VertexId]) -> Vec<VertexId> {
         .collect()
 }
 
-type FaceKey = (Vec<VertexId>, Vec<Vec<VertexId>>);
-fn face_key(face: &Face) -> FaceKey {
+pub(crate) type FaceKey = (Vec<VertexId>, Vec<Vec<VertexId>>);
+pub(crate) fn face_key(face: &Face) -> FaceKey {
     let mut holes: Vec<_> = face
         .holes
         .iter()

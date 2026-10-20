@@ -10,10 +10,18 @@ struct Capture {
     app: cindral_app::DrafterApp,
     output: std::path::PathBuf,
     frames: usize,
+    incremental: bool,
 }
 
 impl eframe::App for Capture {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.incremental && self.frames == 1 {
+            if let Err(error) = seed(&mut self.app) {
+                eprintln!("Incremental capture failed: {error}");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        }
         self.app.update(ctx, frame);
         self.frames += 1;
         if self.frames == 3 {
@@ -67,11 +75,46 @@ fn main() -> eframe::Result {
         "Cindral Drafter · viewport validation",
         options,
         Box::new(move |cc| {
+            let mut app = cindral_app::DrafterApp::new(cc)?;
+            let incremental = std::env::args().any(|arg| arg == "--incremental");
+            if incremental {
+                let mut tool = cindral_tools::ToolSession::new(cindral_tools::ToolKind::Rectangle);
+                tool.click(cindral_core::DVec3::new(-3., -2., 0.))?;
+                if let Some(command) = tool.measure("4m,3m")? {
+                    app.execute(command)?;
+                }
+            } else if std::env::args().any(|arg| arg == "--demo") {
+                seed(&mut app)?;
+            }
             Ok(Box::new(Capture {
-                app: cindral_app::DrafterApp::new(cc)?,
+                app,
                 output,
                 frames: 0,
+                incremental,
             }))
         }),
     )
+}
+
+fn seed(app: &mut cindral_app::DrafterApp) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use cindral_core::DVec3 as V;
+    use cindral_tools::{ToolKind, ToolSession};
+    for (kind, center, measure) in [
+        (ToolKind::Rectangle, V::new(-3., -2., 0.), "4m,3m"),
+        (ToolKind::Circle, V::new(3., 0., 0.), "1.2m"),
+        (ToolKind::Polygon, V::new(0., 3., 0.), "1m"),
+    ] {
+        let mut tool = ToolSession::new(kind);
+        tool.click(center)?;
+        if let Some(command) = tool.measure(measure)? {
+            app.execute(command)?;
+        }
+    }
+    let mut tool = ToolSession::new(ToolKind::Arc);
+    tool.click(V::new(-3., 3., 0.))?;
+    tool.click(V::new(-2., 3., 0.))?;
+    if let Some(command) = tool.measure("130deg")? {
+        app.execute(command)?;
+    }
+    Ok(())
 }

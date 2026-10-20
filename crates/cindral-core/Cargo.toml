@@ -21,3 +21,6 @@ bench-fixtures = []
 [[example]]
 name = "kernel_benchmark"
 required-features = ["bench-fixtures"]
+
+[dependencies.rstar]
+version = "0.12"

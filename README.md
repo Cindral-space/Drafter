@@ -19,7 +19,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M0: workspace and checks
 - [x] M1: viewport
 - [x] M2: geometry kernel
-- [ ] M3: drawing and inference
+- [x] M3: drawing and inference
 - [ ] M4: modification tools
 - [ ] M5: organization
 - [ ] M6: files and export
@@ -42,12 +42,12 @@ WGPU_BACKEND=opengl cargo run -p cindral-app
 | Orbit | Middle mouse drag |
 | Pan | Shift + middle mouse drag |
 | Zoom around cursor | Scroll over viewport |
-| Fit construction area | F or Zoom extents |
+| Fit model / construction area | F or Zoom extents |
 | Isometric / front / right / top | 0 / 1 / 3 / 7 |
 | Toggle projection | 5 |
 | All standard views | View sidebar |
 
-Keyboard shortcuts apply while the pointer is over the viewport. Grid spacing is one meter; until document geometry is introduced, extents fits the central 20 × 20 meter construction area.
+Keyboard shortcuts apply while the pointer is over the viewport. Grid spacing is one meter. Extents fits model bounds, or the central 20 × 20 meter area when empty.
 
 For reproducible native GPU validation, run:
 
@@ -61,7 +61,7 @@ The example captures the rendered window and exits. Use the native display sessi
 
 `cindral-core::History` owns a read-only `Model`. Draw with `Command::AddEdge` or `AddPolyline`, erase with `EraseEdges`, set soft/smooth flags with `SetEdgeStyle`, and combine actions into an atomic `Batch`. `execute`, `undo` and `redo` return `Result<bool, KernelError>`; failed edits preserve both geometry and history. See the core crate's tested example and [architecture](docs/ARCHITECTURE.md) for the public interface.
 
-The kernel welds/splits intersections and overlaps, derives planar regions with holes, triangulates them, and heals erased coplanar boundaries. Coordinates are f64 meters with a shared 1e-7 m tolerance and a supported ±1e6 m coordinate range. The current global topology rebuild and snapshot history favor correctness over large-document editing speed. Drawing UI comes in M3; extrusion and other modification tools come in M4.
+The kernel welds/splits intersections and overlaps, derives planar regions with holes, triangulates them, and heals erased coplanar boundaries. Coordinates are f64 meters with a shared 1e-7 m tolerance and a supported ±1e6 m coordinate range. Local transactions, delta history and dirty mesh uploads handle edits; see [kernel measurements](docs/KERNEL_BENCHMARK.md). Extrusion and other modification tools come in M4.
 
 ## Large-mesh baseline
 
@@ -70,3 +70,9 @@ WGPU_BACKEND=opengl cargo run --release -p cindral-app --example renderer_benchm
 ```
 
 This renders a 500,000-triangle shaded heightfield with depth at 1280×800. See [measured results and limits](docs/RENDERER_BENCHMARK.md). It measures a static GPU workload, not complete editor frame time.
+
+## Drawing (M3)
+
+Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Click successive anchors, or type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The sidebar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
+
+Inference and tools are CPU-only libraries with independent tests. To capture the shaded demo and exercise incremental GPU buffer growth, append `--incremental` after the capture path in the capture example command.

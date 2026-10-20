@@ -58,12 +58,15 @@ pub struct Face {
 }
 
 /// Read-only topology. Mutations are available only through command history.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Model {
     pub(crate) vertices: BTreeMap<VertexId, Vertex>,
     pub(crate) edges: BTreeMap<EdgeId, Edge>,
     pub(crate) faces: BTreeMap<FaceId, Face>,
     pub(crate) next_id: u64,
+    pub(crate) spatial: Option<Box<crate::spatial::Spatial>>,
+    pub(crate) protected: BTreeSet<VertexId>,
+    pub(crate) heal_scope: Option<BTreeSet<VertexId>>,
 }
 
 impl Default for Model {
@@ -73,6 +76,9 @@ impl Default for Model {
             edges: BTreeMap::new(),
             faces: BTreeMap::new(),
             next_id: 1,
+            spatial: None,
+            protected: BTreeSet::new(),
+            heal_scope: None,
         }
     }
 }
@@ -92,11 +98,20 @@ impl Model {
     }
     /// Edges incident to a vertex, in stable ID order.
     pub fn incident_edges(&self, vertex: VertexId) -> impl Iterator<Item = (EdgeId, &Edge)> {
-        self.edges
-            .iter()
-            .filter(move |(_, edge)| edge.vertices.contains(&vertex))
-            .map(|(id, edge)| (*id, edge))
+        let mut indexed = self
+            .spatial
+            .as_ref()
+            .map(|s| s.adjacency.get(&vertex).into_iter().flatten());
+        let mut scan = self.edges.iter();
+        std::iter::from_fn(move || {
+            if let Some(ids) = &mut indexed {
+                return ids.find_map(|id| self.edges.get(id).map(|edge| (*id, edge)));
+            }
+            scan.find(|(_, edge)| edge.vertices.contains(&vertex))
+                .map(|(id, edge)| (*id, edge))
+        })
     }
+
     /// Axis-aligned model bounds, or `None` for an empty model.
     pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
         self.vertices
@@ -282,6 +297,23 @@ impl Model {
             {
                 return Err(invalid("face/triangulation area mismatch"));
             }
+        }
+        if let Some(spatial) = &self.spatial {
+            spatial.validate(self)?;
+        }
+        Ok(())
+    }
+}
+
+impl PartialEq for Model {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_geometry(other) && self.next_id == other.next_id
+    }
+}
+impl Model {
+    pub(crate) fn ensure_spatial(&mut self) -> Result<(), KernelError> {
+        if self.spatial.is_none() {
+            self.spatial = Some(Box::new(crate::spatial::Spatial::build(self)?));
         }
         Ok(())
     }
