@@ -29,3 +29,9 @@
 - Runtime validation: native Wayland + `WGPU_BACKEND=opengl` initializes successfully and renders the custom GPU pipeline. First forcing X11 while EGL selected Wayland caused an incompatible-surface error; corrected the test invocation to use the native display. No source workaround or driver installation was required.
 - Captured the actual 1280×800 GPU output with the `capture_viewport` example; visually verified sidebar, grid, RGB axes and status bar. Raw PPM and converted PNG remain ignored in `.agent-out/`.
 - M1 limitations: construction grid is finite, empty-document extents uses the central 20×20 m area, geometry has no depth pass yet, 500k-triangle performance is unmeasured, and non-Linux runtimes are untested. Next milestone is M2 transactional topology and kernel property tests.
+
+## 2026-10-20 — M2 and large-mesh baseline
+
+- User directive: OpenCode stays disabled for the remainder of the project. Never retry discovery or invoke any OpenCode model. Antigravity is the only delegation provider.
+- Integrator owns kernel data model, topology invariants, command transactions and integration.
+- Task `large-mesh-benchmark`: Antigravity `claude-sonnet-5-5-medium`; branch `agent/agy/large-mesh-benchmark`; isolated worktree. This is a bounded measurement harness using existing eframe/wgpu APIs, so a routine-cost model is appropriate. Ownership: only `crates/cindral-app/examples/renderer_benchmark.rs`, `crates/cindral-app/examples/renderer_benchmark.wgsl`, and `docs/RENDERER_BENCHMARK.md`. No core interfaces are consumed. Outcome pending review and local measurement. Must complete before M3.
