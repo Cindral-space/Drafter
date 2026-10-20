@@ -2,7 +2,7 @@
 use cindral_core::{DocumentData, DocumentHistory};
 use std::{collections::BTreeMap, path::Path};
 /// Current zip-container schema; document topology keeps its independent schema field.
-pub const ARCHIVE_VERSION: u32 = 2;
+pub const ARCHIVE_VERSION: u32 = 3;
 /// Errors from validated file boundaries.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
@@ -44,6 +44,8 @@ pub struct DecodedTexture {
 pub struct DraftBundle {
     /// Versioned geometry and organization values.
     pub document: DocumentData,
+    /// Current style and named camera/visibility/style snapshots.
+    pub presentation: cindral_core::Presentation,
     /// Embedded texture assets keyed by `Material::texture` slots.
     pub textures: BTreeMap<String, TextureAsset>,
 }
@@ -51,6 +53,7 @@ impl Default for DraftBundle {
     fn default() -> Self {
         Self {
             document: DocumentHistory::new().to_data(),
+            presentation: Default::default(),
             textures: BTreeMap::new(),
         }
     }
@@ -65,6 +68,17 @@ pub struct ExportSummary {
 }
 /// Validate an untrusted bundle and rebuild independent runtime document state.
 pub fn validate_bundle(bundle: &DraftBundle) -> Result<DocumentHistory> {
+    if bundle.presentation.scenes.len() > 1000 { return Err(IoError::Invalid("too many scenes (maximum 1000)".into())); }
+    for scene in &bundle.presentation.scenes {
+        let camera = &scene.camera;
+        if scene.name.trim().is_empty() || scene.name.len() > 512 || scene.name.chars().any(char::is_control)
+            || !camera.target.iter().all(|v| v.is_finite() && v.abs() <= 1e9)
+            || !camera.distance.is_finite() || !(1e-3..=1e6).contains(&camera.distance)
+            || !camera.yaw.is_finite() || !camera.pitch.is_finite() || camera.pitch.abs() > std::f32::consts::FRAC_PI_2
+            || scene.tags.len() > 200_000 || scene.objects.len() > 200_000 {
+            return Err(IoError::Invalid("invalid scene name, camera or visibility limits".into()));
+        }
+    }
     if bundle.textures.len() > 127 {
         return Err(IoError::Invalid(
             "at most 127 embedded textures are supported".into(),

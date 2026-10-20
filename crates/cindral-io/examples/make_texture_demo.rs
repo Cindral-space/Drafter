@@ -64,6 +64,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ),
     })?;
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: h.to_data(),
         textures: BTreeMap::from([(key, asset)]),
     };

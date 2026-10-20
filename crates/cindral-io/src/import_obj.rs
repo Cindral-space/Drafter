@@ -866,7 +866,8 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
         materials: document_materials,
     };
 
-    let bundle = DraftBundle { document, textures };
+    let bundle = DraftBundle {
+        presentation: Default::default(), document, textures };
 
     // Validate the bundle using DocumentHistory::from_data (via validate_bundle)
     validate_bundle(&bundle)?;

@@ -54,6 +54,7 @@ fn placed_scene() -> Result<DraftBundle> {
         .collect();
     document.next_id = 5002;
     Ok(DraftBundle {
+        presentation: Default::default(),
         document,
         textures: BTreeMap::new(),
     })

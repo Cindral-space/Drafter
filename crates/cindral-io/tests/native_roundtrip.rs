@@ -94,6 +94,7 @@ fn populated() -> DraftBundle {
     })
     .unwrap();
     DraftBundle {
+        presentation: Default::default(),
         document: doc.to_data(),
         textures: BTreeMap::from([(key, asset)]),
     }

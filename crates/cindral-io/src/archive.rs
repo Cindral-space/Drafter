@@ -41,6 +41,7 @@ struct ManifestRef<'a> {
     archive_version: u32,
     coordinates: Coordinates,
     document: &'a DocumentData,
+    presentation: &'a cindral_core::Presentation,
     textures: Vec<AssetRecord>,
 }
 #[derive(Deserialize)]
@@ -49,6 +50,8 @@ struct Manifest {
     #[serde(default)]
     coordinates: Coordinates,
     document: DocumentData,
+    #[serde(default)]
+    presentation: cindral_core::Presentation,
     #[serde(default)]
     textures: Vec<AssetRecord>,
 }
@@ -76,9 +79,11 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
             }
             // v1 stores document schema1 only. v2 adds native coordinate metadata and
             // embedded-image records; unresolved legacy texture slots remain values.
-            manifest.archive_version = 2;
+            manifest.archive_version = ARCHIVE_VERSION;
+            manifest.presentation = Default::default();
             manifest.coordinates = Coordinates::default();
         }
+        2 => { manifest.presentation = Default::default(); manifest.archive_version = ARCHIVE_VERSION; }
         ARCHIVE_VERSION => {}
         other => {
             return Err(IoError::Invalid(format!(
@@ -118,6 +123,7 @@ pub fn save_draft(path: &Path, bundle: &DraftBundle) -> Result<()> {
         archive_version: ARCHIVE_VERSION,
         coordinates: Coordinates::default(),
         document: &bundle.document,
+        presentation: &bundle.presentation,
         textures,
     };
     let text = ron::ser::to_string(&manifest).map_err(|e| IoError::Invalid(e.to_string()))?;
@@ -256,6 +262,7 @@ pub fn load_draft_report(path: &Path) -> Result<LoadReport> {
         return Err(IoError::Invalid("unexpected native archive entry".into()));
     }
     let bundle = DraftBundle {
+        presentation: manifest.presentation,
         document: manifest.document,
         textures,
     };
@@ -310,7 +317,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
     #[test]
-    fn saved_v1_fixture_migrates_and_resaves_as_v2() {
+    fn saved_v1_fixture_migrates_and_resaves_as_v3() {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-square.cdraft");
         let report = load_draft_report(&fixture).unwrap();
         assert_eq!(report.source_version, 1);
@@ -323,7 +330,7 @@ mod tests {
         let output = dir.path().join("new.cdraft");
         save_draft(&output, &report.bundle).unwrap();
         let saved = load_draft_report(&output).unwrap();
-        assert_eq!(saved.source_version, 2);
+        assert_eq!(saved.source_version, 3);
         assert_eq!(saved.bundle, report.bundle);
     }
     #[test]
@@ -342,6 +349,7 @@ mod tests {
             archive_version: 99,
             coordinates: Coordinates::default(),
             document: &bundle.document,
+        presentation: &bundle.presentation,
             textures: Vec::new(),
         })
         .unwrap();

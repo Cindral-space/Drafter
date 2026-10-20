@@ -52,6 +52,7 @@ fn textured_component_export_import_preserves_placed_surface_area_and_assets() {
     })
     .unwrap();
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: h.to_data(),
         textures: BTreeMap::from([(key, asset.clone())]),
     };

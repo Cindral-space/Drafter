@@ -62,6 +62,7 @@ fn test_stl_binary_structure_and_winding() {
 
     let doc = make_quad_doc(0.0);
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: doc,
         textures: BTreeMap::new(),
     };
@@ -153,6 +154,7 @@ fn test_obj_export_with_mtl_and_textures() {
     textures.insert(tex_key, tex_asset.clone());
 
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: doc,
         textures,
     };
@@ -231,6 +233,7 @@ fn test_gltf_schema_accessors_and_root_conversion() {
     textures.insert(tex_key, tex_asset.clone());
 
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: doc,
         textures,
     };
@@ -349,6 +352,7 @@ fn test_gltf_shared_meshes_for_multiple_instances() {
         .unwrap();
 
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: history.to_data(),
         textures: BTreeMap::new(),
     };
@@ -412,6 +416,7 @@ fn test_hidden_and_tagged_instances_are_excluded() {
     inst.hidden = true;
 
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: doc,
         textures: BTreeMap::new(),
     };
@@ -480,6 +485,7 @@ fn test_mirrored_transforms_preserve_ccw_winding() {
     inst.transform = DMat4::from_scale(DVec3::new(-1.0, 1.0, 1.0));
 
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: doc,
         textures: BTreeMap::new(),
     };
@@ -565,6 +571,7 @@ fn test_face_with_holes_triangulation() {
         .faces
         .retain(|_, face| !face.holes.is_empty());
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document,
         textures: BTreeMap::new(),
     };
@@ -620,6 +627,7 @@ fn test_invalid_bundles_are_rejected() {
         },
     );
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: make_quad_doc(0.0),
         textures,
     };
@@ -664,6 +672,7 @@ fn explicit_face_color_overrides_container_material_in_every_color_format() {
     })
     .unwrap();
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document: h.to_data(),
         textures: BTreeMap::new(),
     };
@@ -702,6 +711,7 @@ fn unsupported_gltf_shear_fails_before_replacing_previous_export() {
         .y_axis
         .x = 0.5;
     let bundle = DraftBundle {
+        presentation: Default::default(),
         document,
         textures: BTreeMap::new(),
     };
