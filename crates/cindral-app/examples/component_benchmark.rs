@@ -53,9 +53,79 @@ fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
             glam::Vec3::new(100., 50., 0.),
             glam::Vec3::Y,
         );
-    let mut times = Vec::new();
-    for i in 0..120 {
+    let bounds = Some([glam::Vec3::ZERO, glam::Vec3::new(199., 99., 1.)]);
+    let geometry_bytes = renderer.allocated_bytes();
+    for enabled in [false, true] {
+        let settings = cindral_core::ShadowSettings {
+            enabled,
+            ..Default::default()
+        };
+        renderer.set_shadows(settings.clone(), bounds);
+        let mut times = Vec::new();
+        let renders = renderer.shadow_renders();
+        for i in 0..120 {
+            let start = Instant::now();
+            let mut encoder = render.device.create_command_encoder(&Default::default());
+            renderer.render(
+                &render.device,
+                &render.queue,
+                &mut encoder,
+                vp.to_cols_array_2d(),
+                [1280, 800],
+            );
+            render.queue.submit([encoder.finish()]);
+            wait(&render.device, &render.queue)?;
+            if i >= 20 {
+                times.push(start.elapsed().as_secs_f64() * 1000.);
+            }
+        }
+        times.sort_by(f64::total_cmp);
+        println!("5000 boxes, shadows {enabled}, {:?}, 1280x800, 20 warmup/100 GPU-completed frames: mean {:.3} ms; p95 {:.3} ms; max {:.3} ms; shadow renders {}",settings.quality,times.iter().sum::<f64>()/100.,times[94],times[99],renderer.shadow_renders()-renders);
+        assert_eq!(
+            renderer.allocated_bytes(),
+            geometry_bytes,
+            "effect toggles retain geometry buffers"
+        );
+        if enabled {
+            assert_eq!(
+                renderer.shadow_renders() - renders,
+                1,
+                "static frames must reuse the map"
+            );
+            let mut adjusted = settings.clone();
+            adjusted.dark = 0.2;
+            adjusted.on_faces = false;
+            adjusted.on_ground = false;
+            renderer.set_shadows(adjusted, bounds);
+            let mut encoder = render.device.create_command_encoder(&Default::default());
+            renderer.render(
+                &render.device,
+                &render.queue,
+                &mut encoder,
+                (vp * glam::Mat4::from_translation(glam::Vec3::X)).to_cols_array_2d(),
+                [1280, 800],
+            );
+            render.queue.submit([encoder.finish()]);
+            wait(&render.device, &render.queue)?;
+            assert_eq!(
+                renderer.shadow_renders() - renders,
+                1,
+                "camera, intensity and receivers must reuse the map"
+            );
+            renderer.set_shadows(settings, bounds);
+        }
+    }
+    // Measure invalidated shadow frames during actual occurrence previews.
+    let mut edit_times = Vec::new();
+    for i in 0..30 {
         let start = Instant::now();
+        let mut update = workload.placement.clone();
+        if let Some(batches) = &mut update.batches {
+            if let Some(first) = batches.iter_mut().find_map(|b| b.instances.first_mut()) {
+                first.model[3][2] = i as f32 * 0.01;
+            }
+        }
+        renderer.apply_update(&render.device, &render.queue, &update);
         let mut encoder = render.device.create_command_encoder(&Default::default());
         renderer.render(
             &render.device,
@@ -66,12 +136,25 @@ fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
         );
         render.queue.submit([encoder.finish()]);
         wait(&render.device, &render.queue)?;
-        if i >= 20 {
-            times.push(start.elapsed().as_secs_f64() * 1000.);
-        }
+        edit_times.push(start.elapsed().as_secs_f64() * 1000.);
     }
-    times.sort_by(f64::total_cmp);
-    println!("5000 boxes / 60000 submitted triangles (opaque+transparent shader passes), 1280x800, 20 warmup/100 measured frames: mean {:.3} ms; p95 {:.3} ms; draw calls {}",times.iter().sum::<f64>()/times.len() as f64,times[94],renderer.draw_calls());
+    println!("30 instance updates + invalidated shadow + color pass + GPU wait: mean {:.3} ms; max {:.3} ms",edit_times.iter().sum::<f64>()/30.,edit_times.iter().copied().fold(0.,f64::max));
+    cindral_app::organization_benchmark::run_section_previews(
+        workload.section_document,
+        |plane, caps| {
+            renderer.set_section(&render.device, &render.queue, Some(plane), &caps);
+            let mut encoder = render.device.create_command_encoder(&Default::default());
+            renderer.render(
+                &render.device,
+                &render.queue,
+                &mut encoder,
+                vp.to_cols_array_2d(),
+                [1280, 800],
+            );
+            render.queue.submit([encoder.finish()]);
+            wait(&render.device, &render.queue)
+        },
+    )?;
     for (label, update) in [
         ("shared edit", &workload.edit),
         ("one placement", &workload.placement),

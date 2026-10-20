@@ -14,7 +14,7 @@ proptest! {
         let world = parent * DMat4::from_scale(DVec3::new(if mirror {-sx} else {sx}, sy, sz));
         let query = Query { ray: Ray{origin: DVec3::new(1.,2.,20.),direction:-DVec3::Z},
             view: View{matrix:DMat4::IDENTITY,size:DVec2::splat(800.)}, cursor:DVec2::splat(400.),
-            plane:DrawingPlane::default(), anchor:None, previous_direction:None, axis_lock:None, tangent:None };
+            plane:DrawingPlane::default(), anchor:None, previous_direction:None, axis_lock:None, tangent:None, section:None };
         let local = local_query(world,&query).unwrap();
         let p = DVec3::new(px,py,pz);
         prop_assert!((local.view.matrix.project_point3(p) - query.view.matrix.project_point3(world.transform_point3(p))).length() < 1e-8);

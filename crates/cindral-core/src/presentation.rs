@@ -121,7 +121,10 @@ pub struct SectionState {
 impl SectionState {
     /// Effective active plane.
     pub fn cut(&self) -> Option<&SectionPlane> {
-        self.enabled.then_some(self.active).flatten().and_then(|i| self.planes.get(i))
+        self.enabled
+            .then_some(self.active)
+            .flatten()
+            .and_then(|i| self.planes.get(i))
     }
 }
 /// Shadow map resolution and filtering cost.
@@ -162,14 +165,29 @@ pub struct ShadowSettings {
     pub on_faces: bool,
     /// Receive shadows on Z=0 ground.
     pub on_ground: bool,
+    /// Cast shadows from model edges; off by default.
+    #[serde(default)]
+    pub from_edges: bool,
     /// Resolution/filter quality.
     pub quality: ShadowQuality,
 }
 impl Default for ShadowSettings {
     fn default() -> Self {
-        Self { enabled: false, year: 2026, month: 6, day: 21, minutes: 720.,
-            utc_offset: 8., latitude: 14.5995, longitude: 120.9842,
-            light: 1., dark: 0.35, on_faces: true, on_ground: true,
-            quality: ShadowQuality::default() }
+        Self {
+            enabled: false,
+            year: 2026,
+            month: 6,
+            day: 21,
+            minutes: 720.,
+            utc_offset: 8.,
+            latitude: 14.5995,
+            longitude: 120.9842,
+            light: 1.,
+            dark: 0.35,
+            on_faces: true,
+            on_ground: true,
+            from_edges: false,
+            quality: ShadowQuality::default(),
+        }
     }
 }

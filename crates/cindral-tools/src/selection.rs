@@ -373,10 +373,17 @@ impl Selection {
 /// Pick nearest visible face along `ray` (holes excluded) or screen-near vertex/edge respecting occlusion.
 #[allow(dead_code)]
 pub fn pick(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: f64) -> Option<Hit> {
-    pick_section(model,ray,view,cursor,radius,None)
+    pick_section(model, ray, view, cursor, radius, None)
 }
 /// Pick only geometry retained by the local section plane.
-pub fn pick_section(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: f64, section: Option<&cindral_core::SectionPlane>) -> Option<Hit> {
+pub fn pick_section(
+    model: &Model,
+    ray: Ray,
+    view: View,
+    cursor: DVec2,
+    radius: f64,
+    section: Option<&cindral_core::SectionPlane>,
+) -> Option<Hit> {
     if !cursor.is_finite()
         || !radius.is_finite()
         || radius < 0.0
@@ -396,7 +403,9 @@ pub fn pick_section(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: 
         let Some((point, t)) = ray_face_intersection(model, face, ray.origin, ray_dir) else {
             continue;
         };
-        if section.is_some_and(|p| !p.retains(point)) {continue;}
+        if section.is_some_and(|p| !p.retains(point)) {
+            continue;
+        }
         if view.project(point).is_none() {
             continue;
         }
@@ -419,7 +428,9 @@ pub fn pick_section(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: 
     let mut best_vertex: Option<(VertexId, f64, f64)> = None;
     for (&vertex_id, vertex) in model.vertices() {
         let pos = vertex.position;
-        if section.is_some_and(|p| !p.retains(pos)) { continue; }
+        if section.is_some_and(|p| !p.retains(pos)) {
+            continue;
+        }
         if !pos.is_finite() {
             continue;
         }
@@ -464,7 +475,14 @@ pub fn pick_section(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: 
         let Some(vb) = model.vertices().get(&edge.vertices[1]) else {
             continue;
         };
-        let [a,b] = if let Some(p) = section { let Some(segment)=p.clip_segment(va.position,vb.position) else {continue;}; segment } else { [va.position,vb.position] };
+        let [a, b] = if let Some(p) = section {
+            let Some(segment) = p.clip_segment(va.position, vb.position) else {
+                continue;
+            };
+            segment
+        } else {
+            [va.position, vb.position]
+        };
         if !a.is_finite() || !b.is_finite() || a.distance(b) <= TOLERANCE {
             continue;
         }
@@ -846,7 +864,9 @@ fn is_vertex_occluded(
         let Some((point, t)) = ray_face_intersection(model, face, test_origin, test_dir) else {
             continue;
         };
-        if section.is_some_and(|p| !p.retains(point)) { continue; }
+        if section.is_some_and(|p| !p.retains(point)) {
+            continue;
+        }
         if t < target_dist - TOLERANCE {
             return true;
         }
@@ -904,7 +924,9 @@ fn is_edge_occluded(
         let Some((point, t)) = ray_face_intersection(model, face, test_origin, test_dir) else {
             continue;
         };
-        if section.is_some_and(|p| !p.retains(point)) { continue; }
+        if section.is_some_and(|p| !p.retains(point)) {
+            continue;
+        }
         if t < target_dist - TOLERANCE {
             return true;
         }

@@ -11,6 +11,27 @@ struct Camera {
 @group(0) @binding(1) var t_materials: texture_2d_array<f32>;
 @group(0) @binding(2) var s_materials: sampler;
 
+struct Sun { matrix: mat4x4<f32>, direction: vec4<f32>, parameters: vec4<f32>, section: vec4<f32>, ground: vec4<f32> };
+@group(0) @binding(3) var<uniform> sun: Sun;
+@group(0) @binding(4) var shadow_map: texture_depth_2d;
+@group(0) @binding(5) var shadow_sampler: sampler_comparison;
+fn sunlight(world:vec3<f32>) -> f32 {
+    let p=sun.matrix*vec4<f32>(world,1.0);
+    let uv=vec2<f32>(p.x*0.5+0.5,0.5-p.y*0.5);
+    let texel=1.0/vec2<f32>(textureDimensions(shadow_map));
+    var lit=0.0;
+    var count=0.0;
+    let low=textureDimensions(shadow_map).x<=1024u;
+    for(var y=-1;y<=1;y+=1) {for(var x=-1;x<=1;x+=1) {
+        if low && (x==1 || y==1) {continue;}
+        let offset=vec2<f32>(f32(x),f32(y))+select(vec2<f32>(0.0),vec2<f32>(0.5),low);
+        lit+=textureSampleCompareLevel(shadow_map,shadow_sampler,uv+offset*texel,p.z-0.0003);
+        count+=1.0;
+    }}
+    if any(uv<vec2<f32>(0.0)) || any(uv>vec2<f32>(1.0)) || p.z<0.0 || p.z>1.0 {return 1.0;}
+    return lit/count;
+}
+
 struct FaceOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) normal: vec3<f32>,
@@ -22,6 +43,7 @@ struct FaceOutput {
     @location(6) uv: vec2<f32>,
     @location(7) tex_layer: f32,
     @location(8) section_distance: f32,
+    @location(9) world: vec3<f32>,
 };
 
 @vertex
@@ -43,6 +65,7 @@ fn vs_face(
 ) -> FaceOutput {
     var out: FaceOutput;
     out.section_distance = 0.0;
+    out.world=vec3<f32>(0.0);
     // Degenerate/zeroed slot detection uses zero normal rather than color
     if dot(normal, normal) == 0.0 {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
@@ -62,6 +85,7 @@ fn vs_face(
 
     let world_pos = model_matrix * vec4<f32>(position, 1.0);
     out.position = camera.view_projection * world_pos;
+    out.world=world_pos.xyz;
     out.section_distance = select(dot(camera.section, world_pos), 0.0, material < 0.0);
 
     // Normal transformation using inverse-transpose normal matrix (handles mirror/non-uniform scale)
@@ -138,7 +162,7 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
     let num_layers = textureNumLayers(t_materials);
     let raw_layer = u32(in.tex_layer + 0.5);
     let layer_idx = min(raw_layer, num_layers - 1u);
-    let tex_sample = textureSample(t_materials, s_materials, in.uv, layer_idx);
+    let tex_sample = textureSampleLevel(t_materials, s_materials, in.uv, layer_idx, 0.0);
 
     // Multiplies RGB/alpha into inherited/explicit material selection
     if camera.style.x == 1.0 {
@@ -154,14 +178,21 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
     let fill_light = normalize(vec3<f32>(-0.55, 0.60, 0.58));
     let shade = 0.45 + 0.40 * abs(dot(n, key_light)) + 0.15 * abs(dot(n, fill_light));
 
-    let dimmed_rgb = rgb * in.dim * shade;
+    var lighting=shade;
+    if sun.parameters.w>0.5 {
+        var visibility=1.0;
+        if sun.parameters.z>0.5 {visibility=sunlight(in.world);}
+        if sun.direction.z<=0.0 {visibility=0.0;}
+        lighting=mix(sun.parameters.y,sun.direction.w,visibility)*(0.55+0.45*abs(dot(n,sun.direction.xyz)));
+    }
+    let dimmed_rgb = rgb * in.dim * lighting;
     return vec4<f32>(dimmed_rgb, alpha);
 }
 
 @fragment
 fn fs_face_opaque(in: FaceOutput) -> @location(0) vec4<f32> {
-    if in.section_distance < -0.00001 { discard; }
     let color = compute_face_shading(in);
+    if in.section_distance < -0.00001 { discard; }
     if color.a < 0.999 {
         discard;
     }
@@ -170,8 +201,8 @@ fn fs_face_opaque(in: FaceOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_face_transparent(in: FaceOutput) -> @location(0) vec4<f32> {
-    if in.section_distance < -0.00001 { discard; }
     let color = compute_face_shading(in);
+    if in.section_distance < -0.00001 { discard; }
     if color.a >= 0.999 {
         discard;
     }
@@ -273,4 +304,18 @@ fn vs_profile_down(input: EdgeInput) -> EdgeOutput {
 fn fs_edge(in: EdgeOutput) -> @location(0) vec4<f32> {
     if in.section_distance < -0.00001 { discard; }
     return vec4<f32>(in.color, 1.0);
+}
+
+struct GroundOutput { @builtin(position) position: vec4<f32>, @location(0) world: vec3<f32> };
+@vertex fn vs_ground(@builtin(vertex_index) index:u32) -> GroundOutput {
+    let corners=array<vec2<f32>,6>(vec2<f32>(0.,0.),vec2<f32>(1.,0.),vec2<f32>(1.,1.),vec2<f32>(0.,0.),vec2<f32>(1.,1.),vec2<f32>(0.,1.));
+    let xy=mix(sun.ground.xy,sun.ground.zw,corners[index]);
+    var out:GroundOutput;out.world=vec3<f32>(xy,0.);out.position=camera.view_projection*vec4<f32>(out.world,1.);return out;
+}
+@fragment fn fs_ground(in:GroundOutput) -> @location(0) vec4<f32> {
+    if dot(camera.section,vec4<f32>(in.world,1.)) < -0.00001 {discard;}
+    var visibility=sunlight(in.world);
+    if sun.direction.z<=0.0 {visibility=0.0;}
+    let intensity=mix(sun.parameters.y,sun.direction.w,visibility);
+    return vec4<f32>(vec3<f32>(0.40,0.43,0.37)*intensity,1.);
 }

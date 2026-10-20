@@ -240,6 +240,9 @@ struct OffscreenTarget {
 /// Persistent GPU instanced renderer for scene definitions and occurrences.
 pub struct SceneRenderer {
     definitions: BTreeMap<DefinitionId, DefinitionState>,
+    shadow: crate::shadow::ShadowMap,
+    shadow_settings: cindral_core::ShadowSettings,
+    bounds: Option<[glam::Vec3; 2]>,
     uniform: wgpu::Buffer,
     camera_layout: wgpu::BindGroupLayout,
     camera_bind_group: wgpu::BindGroup,
@@ -266,12 +269,53 @@ pub struct SceneRenderer {
     draw_calls: usize,
 }
 
+fn camera_binding(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    uniform: &wgpu::Buffer,
+    materials: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    shadow: &crate::shadow::ShadowMap,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Scene camera/material/sun binding"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(materials),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: shadow.uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&shadow.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(&shadow.sampler),
+            },
+        ],
+    })
+}
+
 fn create_materials_texture_array(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layers: &[TexturePixels],
 ) -> (wgpu::Texture, wgpu::TextureView) {
-    let layer_count = (layers.len() as u32).max(1);
+    // OpenGL needs an actual array allocation even for the white-only table.
+    let layer_count = (layers.len() as u32).max(2);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Cindral scene materials texture array"),
         size: wgpu::Extent3d {
@@ -362,6 +406,32 @@ impl SceneRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
             ],
         });
 
@@ -380,7 +450,7 @@ impl SceneRenderer {
             size: wgpu::Extent3d {
                 width: PREVIEW_SIZE,
                 height: PREVIEW_SIZE,
-                depth_or_array_layers: 1,
+                depth_or_array_layers: 2,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -396,36 +466,10 @@ impl SceneRenderer {
             ..Default::default()
         });
 
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Cindral scene camera binding"),
-            layout: &camera_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&materials_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&texture_sampler),
-                },
-            ],
-        });
-
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Cindral scene shader module"),
             source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
         });
-
-        let scene_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Cindral scene pipeline layout"),
-                bind_group_layouts: &[&camera_layout],
-                push_constant_ranges: &[],
-            });
 
         let face_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: FACE_VERTEX_BYTES,
@@ -546,6 +590,62 @@ impl SceneRenderer {
             ],
         };
 
+        let mut shadow = crate::shadow::ShadowMap::new(
+            device,
+            face_vertex_layout.clone(),
+            edge_vertex_layout.clone(),
+            instance_layout.clone(),
+            &materials_view,
+            &texture_sampler,
+        );
+        let camera_bind_group = camera_binding(
+            device,
+            &camera_layout,
+            &uniform,
+            &materials_view,
+            &texture_sampler,
+            &shadow,
+        );
+        let scene_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Cindral scene pipeline layout"),
+                bind_group_layouts: &[&camera_layout],
+                push_constant_ranges: &[],
+            });
+
+        shadow.ground_pipeline = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("Shadow receiving ground"),
+                layout: Some(&scene_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &scene_shader,
+                    entry_point: Some("vs_ground"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &scene_shader,
+                    entry_point: Some("fs_ground"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: OFFSCREEN_COLOR_FORMAT,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: OFFSCREEN_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            },
+        ));
         let opaque_face_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Cindral scene opaque face pipeline"),
             layout: Some(&scene_pipeline_layout),
@@ -759,6 +859,9 @@ impl SceneRenderer {
 
         Self {
             definitions: BTreeMap::new(),
+            shadow,
+            shadow_settings: Default::default(),
+            bounds: None,
             uniform,
             camera_layout,
             camera_bind_group,
@@ -823,6 +926,9 @@ impl SceneRenderer {
             self.default_texture_initialized = true;
         }
 
+        if !update.geometry.is_empty() || update.batches.is_some() || !update.removed.is_empty() {
+            self.shadow.dirty = true;
+        }
         for removed_id in &update.removed {
             self.definitions.remove(removed_id);
         }
@@ -860,24 +966,16 @@ impl SceneRenderer {
             if changed {
                 let layers = prepare_preview_layers(textures);
                 let (texture, view) = create_materials_texture_array(device, queue, &layers);
-                self.camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Cindral scene camera binding"),
-                    layout: &self.camera_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: self.uniform.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
-                        },
-                    ],
-                });
+                self.shadow
+                    .set_materials(device, &view, &self.texture_sampler);
+                self.camera_bind_group = camera_binding(
+                    device,
+                    &self.camera_layout,
+                    &self.uniform,
+                    &view,
+                    &self.texture_sampler,
+                    &self.shadow,
+                );
                 self.materials_texture = texture;
                 self.default_texture_initialized = true;
                 self.last_textures = Some(Arc::downgrade(textures));
@@ -955,22 +1053,151 @@ impl SceneRenderer {
     }
 
     /// Set the non-destructive cut and independently cached world-space cap mesh.
-    pub fn set_section(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, plane: Option<cindral_core::SectionPlane>, caps: &Arc<Vec<FaceVertex>>) {
+    pub fn set_section(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        plane: Option<cindral_core::SectionPlane>,
+        caps: &Arc<Vec<FaceVertex>>,
+    ) {
+        if self.section.as_ref().map(|p| (p.normal, p.distance))
+            != plane.as_ref().map(|p| (p.normal, p.distance))
+        {
+            self.shadow.dirty = true;
+        }
         self.section = plane;
-        let equation = self.section.as_ref().map_or([0.;4], |p| [p.normal[0] as f32,p.normal[1] as f32,p.normal[2] as f32,-p.distance as f32]);
-        queue.write_buffer(&self.uniform,128,bytemuck::cast_slice(&equation));
-        if self.last_caps.as_ref().and_then(Weak::upgrade).is_some_and(|old| Arc::ptr_eq(&old,caps)) { return; }
+        let equation = self.section.as_ref().map_or([0.; 4], |p| {
+            [
+                p.normal[0] as f32,
+                p.normal[1] as f32,
+                p.normal[2] as f32,
+                -p.distance as f32,
+            ]
+        });
+        queue.write_buffer(&self.uniform, 128, bytemuck::cast_slice(&equation));
+        if self
+            .last_caps
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .is_some_and(|old| Arc::ptr_eq(&old, caps))
+        {
+            return;
+        }
+        self.shadow.dirty = true;
         self.cap_vertices = caps.len() as u32;
         if !caps.is_empty() {
-            let size = (caps.len()*std::mem::size_of::<FaceVertex>()) as u64;
-            if size>self.cap_buffer.capacity_bytes {
-                self.cap_buffer.buffer = device.create_buffer(&wgpu::BufferDescriptor { label:Some("Section view cap"),size:align_capacity(size*2),usage:wgpu::BufferUsages::VERTEX|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false });
-                self.cap_buffer.capacity_bytes=align_capacity(size*2);
+            let size = (caps.len() * std::mem::size_of::<FaceVertex>()) as u64;
+            if size > self.cap_buffer.capacity_bytes {
+                self.cap_buffer.buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Section view cap"),
+                    size: align_capacity(size * 2),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.cap_buffer.capacity_bytes = align_capacity(size * 2);
             }
-            queue.write_buffer(&self.cap_buffer.buffer,0,bytemuck::cast_slice(caps));
-            self.cap_identity.update(device,queue,&[InstanceData::new(glam::Mat4::IDENTITY,None,1.)]);
+            queue.write_buffer(&self.cap_buffer.buffer, 0, bytemuck::cast_slice(caps));
+            self.cap_identity.update(
+                device,
+                queue,
+                &[InstanceData::new(glam::Mat4::IDENTITY, None, 1.)],
+            );
         }
-        self.last_caps=Some(Arc::downgrade(caps));
+        self.last_caps = Some(Arc::downgrade(caps));
+    }
+
+    /// Configure sunlight without uploading geometry. Bounds contain visible occurrences.
+    pub fn set_shadows(
+        &mut self,
+        settings: cindral_core::ShadowSettings,
+        bounds: Option<[glam::Vec3; 2]>,
+    ) {
+        self.shadow_settings = settings;
+        self.bounds = bounds;
+    }
+    /// Number of depth-map redraws, useful for cache/performance verification.
+    pub fn shadow_renders(&self) -> u64 {
+        self.shadow.renders
+    }
+    fn prepare_shadows(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let resolution = self.shadow.resolution;
+        self.shadow.configure(
+            device,
+            queue,
+            &self.shadow_settings,
+            self.bounds,
+            self.section.as_ref(),
+        );
+        if resolution != self.shadow.resolution {
+            let view = self
+                .materials_texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2Array),
+                    ..Default::default()
+                });
+            self.camera_bind_group = camera_binding(
+                device,
+                &self.camera_layout,
+                &self.uniform,
+                &view,
+                &self.texture_sampler,
+                &self.shadow,
+            );
+        }
+        if !self.shadow.enabled || !self.shadow.dirty {
+            return;
+        }
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Cached sun depth pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.shadow.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.shadow.pipeline);
+        pass.set_bind_group(0, &self.shadow.depth_binding, &[]);
+        for state in self.definitions.values() {
+            if state.geometry.face_vertices() > 0 && state.instances.instance_count > 0 {
+                pass.set_vertex_buffer(0, state.geometry.face_buffer().slice(..));
+                pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
+                pass.draw(
+                    0..state.geometry.face_vertices(),
+                    0..state.instances.instance_count,
+                );
+            }
+        }
+        if self.cap_vertices > 0 {
+            pass.set_vertex_buffer(0, self.cap_buffer.buffer.slice(..));
+            pass.set_vertex_buffer(1, self.cap_identity.buffer.slice(..));
+            pass.draw(0..self.cap_vertices, 0..1);
+        }
+        if self.shadow.from_edges {
+            pass.set_pipeline(&self.shadow.edge_pipeline);
+            for state in self.definitions.values() {
+                if state.geometry.edge_vertices() > 0 && state.instances.instance_count > 0 {
+                    pass.set_vertex_buffer(0, state.geometry.edge_buffer().slice(..));
+                    pass.set_vertex_buffer(1, state.instances.buffer.slice(..));
+                    pass.draw(
+                        0..state.geometry.edge_vertices(),
+                        0..state.instances.instance_count,
+                    );
+                }
+            }
+        }
+        self.shadow.renders += 1;
+        self.shadow.dirty = false;
     }
 
     fn write_style(&self, queue: &wgpu::Queue, size: [u32; 2]) {
@@ -1038,6 +1265,7 @@ impl SceneRenderer {
             );
             self.default_texture_initialized = true;
         }
+        self.prepare_shadows(device, queue, encoder);
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&view_projection));
         self.write_style(queue, size);
         self.write_view_origin(queue, view_projection);
@@ -1073,6 +1301,13 @@ impl SceneRenderer {
             });
 
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            if self.shadow.ground {
+                if let Some(pipeline) = &self.shadow.ground_pipeline {
+                    pass.set_pipeline(pipeline);
+                    pass.draw(0..6, 0..1);
+                    draw_calls += 1;
+                }
+            }
 
             // 1. Opaque face pass (depth writes enabled)
             pass.set_pipeline(&self.opaque_face_pipeline);
@@ -1091,11 +1326,11 @@ impl SceneRenderer {
                 }
             }
 
-            if self.cap_vertices>0 && self.style.mode != cindral_core::StyleMode::Wireframe {
-                pass.set_vertex_buffer(0,self.cap_buffer.buffer.slice(..));
-                pass.set_vertex_buffer(1,self.cap_identity.buffer.slice(..));
-                pass.draw(0..self.cap_vertices,0..1);
-                draw_calls+=1;
+            if self.cap_vertices > 0 && self.style.mode != cindral_core::StyleMode::Wireframe {
+                pass.set_vertex_buffer(0, self.cap_buffer.buffer.slice(..));
+                pass.set_vertex_buffer(1, self.cap_identity.buffer.slice(..));
+                pass.draw(0..self.cap_vertices, 0..1);
+                draw_calls += 1;
             }
 
             // 2. Edge pass (depth writes enabled)
@@ -1233,6 +1468,10 @@ pub struct SceneCallback {
     pub section: Option<cindral_core::SectionPlane>,
     /// Separate world cap triangles, original model buffers are retained.
     pub caps: Arc<Vec<FaceVertex>>,
+    /// Sun controls, separate from geometry.
+    pub shadows: cindral_core::ShadowSettings,
+    /// World bounds of visible occurrences.
+    pub bounds: Option<[glam::Vec3; 2]>,
 }
 
 impl CallbackTrait for SceneCallback {
@@ -1250,7 +1489,9 @@ impl CallbackTrait for SceneCallback {
         if let Some(update) = &self.update {
             renderer.apply_update_once(device, queue, update);
         }
-        renderer.set_section(device,queue,self.section.clone(),&self.caps);
+        renderer.set_section(device, queue, self.section.clone(), &self.caps);
+        renderer.set_shadows(self.shadows.clone(), self.bounds);
+        renderer.prepare_shadows(device, queue, encoder);
         renderer.set_style(self.style.clone());
         renderer.write_style(queue, self.size);
         renderer.write_view_origin(queue, self.view_projection);

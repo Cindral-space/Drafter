@@ -3,6 +3,7 @@ use super::*;
 use cindral_tools::{Hit, ModifyKind};
 impl DrafterApp {
     pub(crate) fn choose_modify(&mut self, kind: ModifyKind) {
+        self.cancel_section();
         self.cancel_modify();
         self.modifying = true;
         self.modify.set_kind(kind);
@@ -158,7 +159,14 @@ impl DrafterApp {
                 .inverse()
                 .transform_vector3(direction.as_dvec3()),
         };
-        let hit = cindral_tools::pick_section(self.history.model(), ray, view, cursor, 10., self.local_section().as_ref());
+        let hit = cindral_tools::pick_section(
+            self.history.model(),
+            ray,
+            view,
+            cursor,
+            10.,
+            self.local_section().as_ref(),
+        );
         let mut query = Query::new(cursor, ray, view);
         query.plane = DrawingPlane {
             origin: self.modify.anchor().unwrap_or(self.work_plane.origin),

@@ -87,6 +87,9 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
             manifest.presentation = Default::default();
             manifest.archive_version = ARCHIVE_VERSION;
         }
+        3 => {
+            manifest.archive_version = ARCHIVE_VERSION;
+        }
         ARCHIVE_VERSION => {}
         other => {
             return Err(IoError::Invalid(format!(
@@ -320,7 +323,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
     #[test]
-    fn saved_v1_fixture_migrates_and_resaves_as_v3() {
+    fn saved_v1_fixture_migrates_and_resaves_as_v4() {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-square.cdraft");
         let report = load_draft_report(&fixture).unwrap();
         assert_eq!(report.source_version, 1);
@@ -333,7 +336,7 @@ mod tests {
         let output = dir.path().join("new.cdraft");
         save_draft(&output, &report.bundle).unwrap();
         let saved = load_draft_report(&output).unwrap();
-        assert_eq!(saved.source_version, 3);
+        assert_eq!(saved.source_version, 4);
         assert_eq!(saved.bundle, report.bundle);
     }
     #[test]

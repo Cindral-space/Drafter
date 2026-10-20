@@ -57,8 +57,8 @@ impl DrafterApp {
             camera_values(&self.camera),
             self.presentation.style.clone(),
         );
-        scene.sections=self.presentation.sections.clone();
-        scene.shadows=self.presentation.shadows.clone();
+        scene.sections = self.presentation.sections.clone();
+        scene.shadows = self.presentation.shadows.clone();
         scene
     }
     fn add_scene(&mut self, name: String) {
@@ -217,59 +217,61 @@ impl DrafterApp {
             .default_width(205.)
             .width_range(180. ..=320.)
             .show(ctx, |ui| {
-                ui.heading("Styles & Scenes");
-                let before = self.presentation.style.clone();
-                let style = &mut self.presentation.style;
-                egui::ComboBox::from_id_salt("style_mode")
-                    .selected_text(style_label(style.mode))
-                    .show_ui(ui, |ui| {
-                        for mode in [
-                            StyleMode::Shaded,
-                            StyleMode::Textured,
-                            StyleMode::Wireframe,
-                            StyleMode::HiddenLine,
-                            StyleMode::XRay,
-                        ] {
-                            ui.selectable_value(&mut style.mode, mode, style_label(mode));
-                        }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.heading("Styles & Scenes");
+                    let before = self.presentation.style.clone();
+                    let style = &mut self.presentation.style;
+                    egui::ComboBox::from_id_salt("style_mode")
+                        .selected_text(style_label(style.mode))
+                        .show_ui(ui, |ui| {
+                            for mode in [
+                                StyleMode::Shaded,
+                                StyleMode::Textured,
+                                StyleMode::Wireframe,
+                                StyleMode::HiddenLine,
+                                StyleMode::XRay,
+                            ] {
+                                ui.selectable_value(&mut style.mode, mode, style_label(mode));
+                            }
+                        });
+                    ui.checkbox(&mut style.profiles, "Profiles");
+                    ui.checkbox(&mut style.soft_edges, "Show soft edges");
+                    ui.checkbox(&mut style.smooth_edges, "Show smooth edges");
+                    ui.horizontal(|ui| {
+                        ui.label("Background");
+                        ui.color_edit_button_srgb(&mut style.background);
                     });
-                ui.checkbox(&mut style.profiles, "Profiles");
-                ui.checkbox(&mut style.soft_edges, "Show soft edges");
-                ui.checkbox(&mut style.smooth_edges, "Show smooth edges");
-                ui.horizontal(|ui| {
-                    ui.label("Background");
-                    ui.color_edit_button_srgb(&mut style.background);
-                });
-                optional_color(ui, "Sky", &mut style.sky, [90, 130, 185]);
-                optional_color(ui, "Ground", &mut style.ground, [80, 90, 65]);
-                if self.presentation.style != before {
-                    self.presentation_changed();
-                }
-                self.section_panel(ui);
-                ui.separator();
-                ui.checkbox(&mut self.presentation_ui.animate, "Animate scene camera");
-                if self.presentation_ui.transition.is_some()
-                    && ui.button("Skip transition (Esc)").clicked()
-                {
-                    self.skip_scene_transition();
-                }
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.presentation_ui.name)
-                        .hint_text("Scene name"),
-                );
-                let name = self.presentation_ui.name.clone();
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            valid_name(&name) && self.presentation.scenes.len() < 1000,
-                            egui::Button::new("Add"),
-                        )
-                        .clicked()
-                    {
-                        self.add_scene(name.clone());
+                    optional_color(ui, "Sky", &mut style.sky, [90, 130, 185]);
+                    optional_color(ui, "Ground", &mut style.ground, [80, 90, 65]);
+                    if self.presentation.style != before {
+                        self.presentation_changed();
                     }
-                    if let Some(index) = self.presentation_ui.selected {
+                    self.section_panel(ui);
+                    self.shadow_panel(ui);
+                    ui.separator();
+                    ui.checkbox(&mut self.presentation_ui.animate, "Animate scene camera");
+                    if self.presentation_ui.transition.is_some()
+                        && ui.button("Skip transition (Esc)").clicked()
+                    {
+                        self.skip_scene_transition();
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.presentation_ui.name)
+                            .hint_text("Scene name"),
+                    );
+                    let name = self.presentation_ui.name.clone();
+                    ui.horizontal(|ui| {
                         if ui
+                            .add_enabled(
+                                valid_name(&name) && self.presentation.scenes.len() < 1000,
+                                egui::Button::new("Add"),
+                            )
+                            .clicked()
+                        {
+                            self.add_scene(name.clone());
+                        }
+                        if let Some(index) = self.presentation_ui.selected {
+                            if ui
                             .button("Update")
                             .on_hover_text(
                                 "Replace the scene with the current camera, visibility and style",
@@ -278,21 +280,22 @@ impl DrafterApp {
                         {
                             self.update_scene(index);
                         }
-                    }
-                });
-                if let Some(index) = self.presentation_ui.selected {
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(valid_name(&name), egui::Button::new("Rename"))
-                            .clicked()
-                        {
-                            self.rename_scene(index, name.clone());
-                        }
-                        if ui.button("Delete").clicked() {
-                            self.delete_scene(index);
                         }
                     });
-                }
+                    if let Some(index) = self.presentation_ui.selected {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(valid_name(&name), egui::Button::new("Rename"))
+                                .clicked()
+                            {
+                                self.rename_scene(index, name.clone());
+                            }
+                            if ui.button("Delete").clicked() {
+                                self.delete_scene(index);
+                            }
+                        });
+                    }
+                });
             });
     }
 }
@@ -341,26 +344,26 @@ mod tests {
     }
     #[test]
     fn scripted_section_scene_restores_view_without_geometry_edits() {
-        let mut app=fixture();
-        let geometry=app.history.to_data();
-        app.place_section(DVec3::new(0.5,0.,0.),DVec3::X);
-        app.presentation.shadows.enabled=true;
-        app.presentation.shadows.minutes=540.;
-        let sections=app.presentation.sections.clone();
-        let shadows=app.presentation.shadows.clone();
+        let mut app = fixture();
+        let geometry = app.history.to_data();
+        app.place_section(DVec3::new(0.5, 0., 0.), DVec3::X);
+        app.presentation.shadows.enabled = true;
+        app.presentation.shadows.minutes = 540.;
+        let sections = app.presentation.sections.clone();
+        let shadows = app.presentation.shadows.clone();
         app.add_scene("Cut view".into());
-        app.presentation.sections.planes[0].distance=3.;
+        app.presentation.sections.planes[0].distance = 3.;
         app.presentation.sections.planes[0].flip();
-        app.presentation.sections.enabled=false;
-        app.presentation.shadows.enabled=false;
-        app.restore_scene(0,0.,false);
-        assert_eq!(app.presentation.sections,sections);
-        assert_eq!(app.presentation.shadows,shadows);
-        assert_eq!(app.history.to_data(),geometry);
+        app.presentation.sections.enabled = false;
+        app.presentation.shadows.enabled = false;
+        app.restore_scene(0, 0., false);
+        assert_eq!(app.presentation.sections, sections);
+        assert_eq!(app.presentation.shadows, shadows);
+        assert_eq!(app.history.to_data(), geometry);
         app.prepare_sections();
-        let caps=app.section_ui.caps.clone();
+        let caps = app.section_ui.caps.clone();
         app.prepare_sections();
-        assert!(Arc::ptr_eq(&caps,&app.section_ui.caps));
+        assert!(Arc::ptr_eq(&caps, &app.section_ui.caps));
     }
     #[test]
     fn scripted_scene_capture_switch_restore_and_native_roundtrip() {

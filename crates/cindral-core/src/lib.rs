@@ -85,3 +85,6 @@ pub use presentation::*;
 
 mod section;
 pub use section::section_cap;
+
+mod sun;
+pub use sun::{sun_direction, valid_date};

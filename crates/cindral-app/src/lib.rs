@@ -13,6 +13,7 @@ mod organization_ui;
 mod presentation_ui;
 mod scene_cache;
 mod section_ui;
+mod shadow_ui;
 use eframe::egui::{self, Color32, Key, PointerButton, RichText};
 use glam::Vec2;
 use std::sync::Arc;
@@ -117,6 +118,7 @@ impl DrafterApp {
             .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
     }
     fn set_tool(&mut self, kind: ToolKind) {
+        self.cancel_section();
         if let Ok(true) = self.history.cancel_preview() {
             self.refresh_mesh();
         }
@@ -293,7 +295,9 @@ impl DrafterApp {
                 self.camera.orbit(Vec2::new(delta.x, delta.y));
             }
         }
-        if self.section_input(response) { return; }
+        if self.section_input(response) {
+            return;
+        }
         if self.organization_pointer(response) {
             return;
         }
@@ -757,9 +761,11 @@ impl eframe::App for DrafterApp {
                             style: self.presentation.style.clone(),
                             section: self.presentation.sections.cut().cloned(),
                             caps: self.section_ui.caps.clone(),
+                            shadows: self.presentation.shadows.clone(),
+                            bounds: self.section_ui.bounds,
                         },
                     ));
-                self.section_widgets(ui,rect);
+                self.section_widgets(ui, rect);
                 let view = View {
                     matrix: matrix.as_dmat4() * self.history.world_transform(),
                     size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),

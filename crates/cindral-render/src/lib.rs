@@ -16,3 +16,5 @@ pub use scene::{
 pub use texture::{
     TextureError, TexturePixels, DEFAULT_WHITE_LAYER, MAX_TEXTURE_LAYERS, PREVIEW_SIZE,
 };
+
+mod shadow;

@@ -149,6 +149,31 @@ fn main() -> eframe::Result {
             } else if std::env::args().any(|arg| arg == "--demo") {
                 seed(&mut app)?;
             }
+            if std::env::args().any(|arg| arg == "--environment") {
+                app.set_view_environment(
+                    cindral_core::SectionState {
+                        planes: vec![cindral_core::SectionPlane::through(
+                            "Section Z".into(),
+                            cindral_core::DVec3::Z,
+                            cindral_core::DVec3::Z * -1.,
+                        )
+                        .ok_or("invalid plane")?],
+                        active: Some(0),
+                        enabled: true,
+                    },
+                    cindral_core::ShadowSettings {
+                        enabled: true,
+                        minutes: 540.,
+                        ..Default::default()
+                    },
+                )?;
+            }
+            if std::env::args().any(|arg| arg == "--shaded") {
+                app.set_view_style(cindral_core::ViewStyle {
+                    mode: cindral_core::StyleMode::Shaded,
+                    ..Default::default()
+                });
+            }
             Ok(Box::new(Capture {
                 app,
                 output,

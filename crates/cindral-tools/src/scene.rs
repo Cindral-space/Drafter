@@ -79,7 +79,7 @@ fn is_valid_affine(m: &DMat4) -> bool {
     inv.is_finite()
 }
 
-/// Transform ONLY world ray and projection into definition-local coordinates.
+/// Transform world ray, projection and optional section into definition-local coordinates.
 ///
 /// Returns a new [`Query`] where:
 /// - `query.ray` is transformed into local space: origin transformed by `world.inverse()`,
@@ -107,6 +107,7 @@ pub fn local_query(world: DMat4, query: &Query) -> Result<Query, ToolError> {
     }
 
     let mut local = query.clone();
+    local.section = query.section.as_ref().and_then(|p| p.in_frame(world));
     local.ray = Ray {
         origin: local_origin,
         direction: local_direction,
@@ -140,10 +141,17 @@ pub fn pick_instances(
     cursor: DVec2,
     radius: f64,
 ) -> Option<InstanceHit> {
-    pick_instances_section(items,ray,view,cursor,radius,None)
+    pick_instances_section(items, ray, view, cursor, radius, None)
 }
 /// Scene picking with a world-space section plane, including cut-aware occlusion.
-pub fn pick_instances_section(items: &[PickInstance<'_>], ray: Ray, view: View, cursor: DVec2, radius: f64, section: Option<&cindral_core::SectionPlane>) -> Option<InstanceHit> {
+pub fn pick_instances_section(
+    items: &[PickInstance<'_>],
+    ray: Ray,
+    view: View,
+    cursor: DVec2,
+    radius: f64,
+    section: Option<&cindral_core::SectionPlane>,
+) -> Option<InstanceHit> {
     if items.is_empty()
         || !cursor.is_finite()
         || !radius.is_finite()
@@ -245,7 +253,9 @@ pub fn pick_instances_section(items: &[PickInstance<'_>], ray: Ray, view: View, 
             };
 
             let world_point = cand.item.world.transform_point3(local_point);
-            if section.is_some_and(|p| !p.retains(world_point)) { continue; }
+            if section.is_some_and(|p| !p.retains(world_point)) {
+                continue;
+            }
             if view.project(world_point).is_none() {
                 continue;
             }
@@ -285,7 +295,9 @@ pub fn pick_instances_section(items: &[PickInstance<'_>], ray: Ray, view: View, 
                 continue;
             }
             let v_world = cand.item.world.transform_point3(v_local);
-            if section.is_some_and(|p| !p.retains(v_world)) { continue; }
+            if section.is_some_and(|p| !p.retains(v_world)) {
+                continue;
+            }
             let Some(screen_pos) = view.project(v_world) else {
                 continue;
             };
@@ -366,7 +378,14 @@ pub fn pick_instances_section(items: &[PickInstance<'_>], ray: Ray, view: View, 
 
             let original_a = cand.item.world.transform_point3(a_loc);
             let original_b = cand.item.world.transform_point3(b_loc);
-            let [a_world,b_world] = if let Some(p) = section { let Some(segment)=p.clip_segment(original_a,original_b) else {continue;}; segment } else { [original_a,original_b] };
+            let [a_world, b_world] = if let Some(p) = section {
+                let Some(segment) = p.clip_segment(original_a, original_b) else {
+                    continue;
+                };
+                segment
+            } else {
+                [original_a, original_b]
+            };
             if a_world.distance(b_world) <= TOLERANCE {
                 continue;
             }
@@ -895,7 +914,9 @@ fn is_point_occluded(
                 continue;
             };
 
-            if section.is_some_and(|p| !p.retains(cand.item.world.transform_point3(point))) { continue; }
+            if section.is_some_and(|p| !p.retains(cand.item.world.transform_point3(point))) {
+                continue;
+            }
             if t < target_dist - TOLERANCE {
                 return true;
             }

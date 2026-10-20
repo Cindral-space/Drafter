@@ -295,3 +295,46 @@ fn outward_pull_keeps_untouched_bottom_ids_out_of_dirty_sets() {
     assert!(!h.changes().faces.contains(&bottom));
     closed(h.model());
 }
+
+#[test]
+fn section_cap_preserves_tunnel_void_and_translated_plane() {
+    let mut h = box_model();
+    rectangle(&mut h, 4., 1., 3.);
+    let face = face_at(h.model(), 4., 4.);
+    h.execute(Command::PushPull {
+        face,
+        distance: -4.,
+    })
+    .unwrap();
+    let plane =
+        cindral_core::SectionPlane::through("Tunnel".into(), V::new(0., 0., 2.), V::Z).unwrap();
+    let cap = cindral_core::section_cap(h.model(), &plane).unwrap();
+    let area: f64 = cap
+        .iter()
+        .map(|t| (t[1] - t[0]).cross(t[2] - t[0]).length() / 2.)
+        .sum();
+    assert!((area - 12.).abs() < 1e-7, "cap area {area}");
+    for t in &cap {
+        let center = (t[0] + t[1] + t[2]) / 3.;
+        assert!(!(center.x > 1. && center.x < 3. && center.y > 1. && center.y < 3.));
+    }
+    let transform = glam::DMat4::from_scale_rotation_translation(
+        V::new(-2., 3., 0.5),
+        glam::DQuat::from_rotation_y(0.4),
+        V::new(20000., -30000., 40000.),
+    );
+    let point = transform.transform_point3(V::new(0., 0., 2.));
+    let normal = transform
+        .inverse()
+        .transpose()
+        .transform_vector3(V::Z)
+        .normalize();
+    let world = cindral_core::SectionPlane::through("Transformed".into(), point, normal).unwrap();
+    let local = world.in_frame(transform).unwrap();
+    let transformed = cindral_core::section_cap(h.model(), &local).unwrap();
+    let area: f64 = transformed
+        .iter()
+        .map(|t| (t[1] - t[0]).cross(t[2] - t[0]).length() / 2.)
+        .sum();
+    assert!((area - 12.).abs() < 1e-7);
+}

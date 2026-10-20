@@ -48,6 +48,8 @@ fn placed(data: GeometryData, count: usize, kind: DefinitionKind) -> DocumentDat
 }
 /// Captured mesh and matrix updates, in the order the GPU benchmark should apply them.
 pub struct Workload {
+    /// Initial document used for section-preview measurements.
+    pub section_document: DocumentData,
     /// Full scene initialization.
     pub initial: SceneUpdate,
     /// One shared face edit, with no instance matrix changes.
@@ -76,6 +78,7 @@ pub fn run_cpu() -> Result<Workload, KernelError> {
     let mut cache = SceneCache::default();
     let start = Instant::now();
     let initial = cache.sync(&doc)?;
+    let section_document = doc.to_data();
     println!("5000 occurrence traversal + initial mesh/instance preparation: {:.3} ms; definitions with geometry: {}",elapsed(start),initial.geometry.len());
     doc.enter(vec![InstanceId(2)])?;
     cache.sync(&doc)?;
@@ -169,6 +172,7 @@ pub fn run_cpu() -> Result<Workload, KernelError> {
     group.undo()?;
     println!("connected group placement undo: {:.3} ms", elapsed(start));
     Ok(Workload {
+        section_document,
         initial,
         edit,
         placement,
@@ -241,4 +245,37 @@ pub fn run_connected(
         Ok(())
     }
     run(segments, mode, &mut upload).map_err(|e| e.to_string())
+}
+
+/// Measure the real cap-cache rebuild and a GPU-completed cut/shadow consumer.
+/// Setup and the initial bounds traversal are outside the timed 30 plane movements.
+pub fn run_section_previews(
+    data: DocumentData,
+    mut draw: impl FnMut(
+        SectionPlane,
+        std::sync::Arc<Vec<cindral_render::mesh::FaceVertex>>,
+    ) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut app = crate::DrafterApp {
+        history: DocumentHistory::from_data(data).map_err(|e| e.to_string())?,
+        ..Default::default()
+    };
+    app.refresh_mesh();
+    app.place_section(DVec3::Z * 0.25, -DVec3::Z);
+    app.prepare_sections();
+    let mut cpu = Vec::new();
+    let mut total = Vec::new();
+    for i in 1..=30 {
+        let start = Instant::now();
+        app.presentation.sections.planes[0].distance = -(0.25 + i as f64 * 0.01);
+        app.prepare_sections();
+        cpu.push(elapsed(start));
+        draw(
+            app.presentation.sections.planes[0].clone(),
+            app.section_ui.caps.clone(),
+        )?;
+        total.push(elapsed(start));
+    }
+    println!("30 live section movements, cap CPU mean {:.3} ms/max {:.3} ms; caps + upload + invalidated shadow + color + GPU wait mean {:.3} ms/max {:.3} ms; cap vertices {}",cpu.iter().sum::<f64>()/30.,cpu.iter().copied().fold(0.,f64::max),total.iter().sum::<f64>()/30.,total.iter().copied().fold(0.,f64::max),app.section_ui.caps.len());
+    Ok(())
 }

@@ -2,7 +2,7 @@
 use cindral_core::{DocumentData, DocumentHistory};
 use std::{collections::BTreeMap, path::Path};
 /// Current zip-container schema; document topology keeps its independent schema field.
-pub const ARCHIVE_VERSION: u32 = 3;
+pub const ARCHIVE_VERSION: u32 = 4;
 /// Errors from validated file boundaries.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
@@ -71,7 +71,9 @@ pub fn validate_bundle(bundle: &DraftBundle) -> Result<DocumentHistory> {
     if bundle.presentation.scenes.len() > 1000 {
         return Err(IoError::Invalid("too many scenes (maximum 1000)".into()));
     }
+    validate_environment(&bundle.presentation.sections, &bundle.presentation.shadows)?;
     for scene in &bundle.presentation.scenes {
+        validate_environment(&scene.sections, &scene.shadows)?;
         let camera = &scene.camera;
         if scene.name.trim().is_empty()
             || scene.name.len() > 512
@@ -105,6 +107,49 @@ pub fn validate_bundle(bundle: &DraftBundle) -> Result<DocumentHistory> {
         decode_texture(asset)?;
     }
     Ok(DocumentHistory::from_data(bundle.document.clone())?)
+}
+fn validate_environment(
+    sections: &cindral_core::SectionState,
+    shadows: &cindral_core::ShadowSettings,
+) -> Result<()> {
+    if sections.planes.len() > 1000 || sections.active.is_some_and(|i| i >= sections.planes.len()) {
+        return Err(IoError::Invalid(
+            "invalid section count or active index".into(),
+        ));
+    }
+    for p in &sections.planes {
+        let normal = cindral_core::DVec3::from_array(p.normal);
+        if p.name.trim().is_empty()
+            || p.name.len() > 512
+            || p.name.chars().any(char::is_control)
+            || !normal.is_finite()
+            || (normal.length() - 1.).abs() > 1e-8
+            || !p.distance.is_finite()
+            || p.distance.abs() > cindral_core::MAX_COORDINATE
+        {
+            return Err(IoError::Invalid("invalid section plane".into()));
+        }
+    }
+    let s = shadows;
+    if !cindral_core::valid_date(s.year, s.month, s.day)
+        || !s.minutes.is_finite()
+        || !(0. ..1440.).contains(&s.minutes)
+        || !s.utc_offset.is_finite()
+        || !(-14. ..=14.).contains(&s.utc_offset)
+        || !s.latitude.is_finite()
+        || !(-90. ..=90.).contains(&s.latitude)
+        || !s.longitude.is_finite()
+        || !(-180. ..=180.).contains(&s.longitude)
+        || !s.light.is_finite()
+        || !(0. ..=1.).contains(&s.light)
+        || !s.dark.is_finite()
+        || !(0. ..=1.).contains(&s.dark)
+    {
+        return Err(IoError::Invalid(
+            "invalid sun date, location or intensity".into(),
+        ));
+    }
+    Ok(())
 }
 /// Atomically replace one file; failure before rename preserves the previous destination.
 /// Public for interchange writers; the closure must only write the supplied temporary file.
