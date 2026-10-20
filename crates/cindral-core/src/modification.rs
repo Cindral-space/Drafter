@@ -5,6 +5,7 @@ fn invalid(message: &str) -> KernelError {
     KernelError::InvalidTopology(message.into())
 }
 
+#[tracing::instrument(level = "info", skip_all, name = "modification.prepare")]
 pub(crate) fn prepare(
     model: &Model,
     command: &Command,
@@ -78,6 +79,7 @@ pub(crate) fn prepare(
             faces.extend(ids);
         }
     }
+    let traversal_span = tracing::info_span!("prepare.connected_traversal").entered();
     let mut queue: Vec<_> = faces.iter().copied().collect();
     let mut visited = BTreeSet::new();
     while let Some(id) = queue.pop() {
@@ -100,6 +102,13 @@ pub(crate) fn prepare(
             }
         }
     }
+    drop(traversal_span);
+    let copy_span = tracing::info_span!(
+        "prepare.patch_clone",
+        faces = faces.len(),
+        edges = edges.len()
+    )
+    .entered();
     let mut before = Model {
         next_id: model.next_id,
         ..Model::default()
@@ -128,6 +137,7 @@ pub(crate) fn prepare(
     }
     let mut after = before.clone();
     after.next_id = high_water;
+    drop(copy_span);
     match command {
         Command::Transform {
             vertices,
@@ -170,6 +180,7 @@ fn validate_matrix(m: glam::DMat4) -> Result<(), KernelError> {
     }
     Ok(())
 }
+#[tracing::instrument(level = "info", skip_all, name = "modification.transform")]
 pub(crate) fn transform(
     m: &mut Model,
     ids: &[VertexId],
@@ -307,6 +318,7 @@ fn edge_usage(m: &Model) -> BTreeMap<[VertexId; 2], Vec<(FaceId, bool)>> {
     usage
 }
 type OrientedBoundary = (Vec<crate::csg::Polygon>, bool, BTreeMap<FaceId, bool>);
+#[tracing::instrument(level = "info", skip_all, name = "modification.oriented")]
 fn oriented(m: &Model) -> Result<OrientedBoundary, KernelError> {
     let usage = edge_usage(m);
     let closed = !m.faces.is_empty() && usage.values().all(|f| f.len() == 2);
@@ -417,6 +429,7 @@ fn polygon_contains(p: &crate::csg::Polygon, point: DVec3) -> bool {
         .zip(p.vertices.iter().cycle().skip(1))
         .all(|(a, b)| (*b - *a).cross(point - *a).dot(n) >= -TOLERANCE * (*b - *a).length())
 }
+#[tracing::instrument(level = "info", skip_all, name = "modification.surfaces")]
 fn surfaces(
     m: &mut Model,
     polygons: Vec<crate::csg::Polygon>,
@@ -575,6 +588,7 @@ fn surfaces(
     *m = result;
     Ok(())
 }
+#[tracing::instrument(level = "info", skip_all, name = "modification.push_pull")]
 fn push_pull(m: &mut Model, face: FaceId, distance: f64) -> Result<(), KernelError> {
     if !distance.is_finite() {
         return Err(KernelError::InvalidPosition);

@@ -40,6 +40,7 @@ pub(crate) fn expanded(bounds: AABB<[f64; 3]>) -> AABB<[f64; 3]> {
     AABB::from_corners(low.to_array(), high.to_array())
 }
 impl Spatial {
+    #[tracing::instrument(level = "info", skip_all, name = "spatial.build")]
     pub fn build(model: &Model) -> Result<Self, KernelError> {
         let mut result = Self {
             vertices: RTree::bulk_load(

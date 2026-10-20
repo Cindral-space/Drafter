@@ -13,6 +13,16 @@ use cindral_core::connected_fixture::connected_solid;
 use cindral_core::{Command, DVec3, VertexId};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("CINDRAL_PROFILE").is_some() {
+        let _ = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_span_events(
+                tracing_subscriber::fmt::format::FmtSpan::ENTER
+                    | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+            )
+            .with_env_filter("cindral_core=info")
+            .try_init();
+    }
     let args: Vec<String> = std::env::args().collect();
     let mut mode = "pushpull".to_string();
     let mut segments = 60usize;

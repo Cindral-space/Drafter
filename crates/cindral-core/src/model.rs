@@ -235,6 +235,7 @@ impl Model {
     /// Check endpoints, intersections, face planarity, loop winding and triangulated area.
     ///
     /// Full validation is deliberately conservative and quadratic in edge count.
+    #[tracing::instrument(level = "info", skip_all, name = "model.validate")]
     pub fn validate(&self) -> Result<(), KernelError> {
         let invalid = |message: &str| KernelError::InvalidTopology(message.to_owned());
         for vertex in self.vertices.values() {
@@ -253,6 +254,8 @@ impl Model {
                 return Err(KernelError::DegenerateEdge);
             }
         }
+        let intersection_span =
+            tracing::info_span!("validate.edge_pairs", edges = self.edges.len()).entered();
         let edges: Vec<_> = self.edges.values().collect();
         for (i, a) in edges.iter().enumerate() {
             for b in &edges[i + 1..] {
@@ -274,6 +277,8 @@ impl Model {
                 }
             }
         }
+        drop(intersection_span);
+        let _faces_span = tracing::info_span!("validate.faces").entered();
         for (id, face) in &self.faces {
             if (face.plane.normal.length() - 1.0).abs() > TOLERANCE {
                 return Err(invalid("non-unit face normal"));
