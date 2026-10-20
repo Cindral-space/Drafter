@@ -4,9 +4,11 @@
 //! [`ToolError`], and length parser [`parse_length`].
 
 mod error;
+mod modify;
 mod selection;
+pub use modify::{Guide, ModifyKind, ModifySession};
 mod session;
-pub use selection::{Hit, Selection};
+pub use selection::{pick, Hit, Selection};
 mod units;
 
 pub use cindral_core::{Command, DVec3};

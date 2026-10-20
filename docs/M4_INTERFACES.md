@@ -22,3 +22,7 @@ Core commands extend existing enum:
 `Guide { pub origin:DVec3, pub direction:DVec3 }`; `guides()->&[Guide]`, `measurement()->Option<f64>`, `add_guide()->Result<(),ToolError>` from measured anchor/cursor; guides independent of model/undo. Re-export types at tools root.
 
 No new dependencies, no unsafe, no changes to unowned files. Integrator owns core, app and module declarations.
+
+## Integration additions
+
+`ModifySession::axis()->DVec3` exposes the fixed interaction normal. `set_reference(point:DVec3)->Result<(),ToolError>` establishes the rotation reference/scale handle around the begin pivot. The app uses the selected geometry centroid as pivot; a zero-length handle retains the session default. Push/Pull always uses the actual face canonical normal. `Model::closed_solid_volume()->Result<Option<f64>,KernelError>` reports volume only for orientable closed boundaries without loose wires. Private CSG union/subtract return `Result` after integration so resource-budget exhaustion aborts a transaction.

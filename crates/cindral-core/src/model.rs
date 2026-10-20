@@ -55,6 +55,8 @@ pub struct Face {
     pub holes: Vec<Vec<VertexId>>,
     /// Supporting plane.
     pub plane: Plane,
+    /// Linear display color as RGBA bytes.
+    pub color: [u8; 4],
 }
 
 /// Read-only topology. Mutations are available only through command history.

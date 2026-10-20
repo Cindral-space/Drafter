@@ -20,7 +20,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M1: viewport
 - [x] M2: geometry kernel
 - [x] M3: drawing and inference
-- [ ] M4: modification tools
+- [x] M4: modification tools
 - [ ] M5: organization
 - [ ] M6: files and export
 - [ ] M7: presentation
@@ -76,3 +76,19 @@ This renders a 500,000-triangle shaded heightfield with depth at 1280×800. See 
 Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Click successive anchors, or type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The sidebar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
 
 Inference and tools are CPU-only libraries with independent tests. To capture the shaded demo and exercise incremental GPU buffer growth, append `--incremental` after the capture path in the capture example command.
+
+## Modify (M4)
+
+Choose a modify tool in the sidebar. Select by clicking, drag left-to-right to enclose geometry, drag right-to-left to cross it, or triple-click for connected geometry. Shift adds to selection; amber outlines show the selection.
+
+Drag Push/Pull, Move/Copy, Rotate or Scale for a live preview; release commits one undo step, and Escape cancels. Alternatively click an anchor, type a value and press Enter: `2m`, `-50cm`, `90deg`, `2x` or `150%`. Rotation/scaling use the selection center as the pivot. Arrow locks and inference guide placement. Nonplanar deformations are rejected atomically.
+
+Offset makes an outer boundary inset/outset. Follow Me uses selected ordered path edges and a selected profile, starting normal to the profile; a cursor or typed normal segment also works. Eraser heals erased edges. Paint Bucket applies the chosen face color. Tape Measure displays distances and creates guide lines without changing geometry or undo history.
+
+To validate preview/cancel/commit and capture a painted through-hole with selection highlighting:
+
+```sh
+WGPU_BACKEND=opengl cargo run -p cindral-app --example capture_viewport -- /tmp/cindral-modify.ppm --modify
+```
+
+See [kernel benchmark](docs/KERNEL_BENCHMARK.md) for measured update costs and [architecture](docs/ARCHITECTURE.md) for solid/sweep limits.

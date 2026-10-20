@@ -40,3 +40,36 @@ WGPU_BACKEND=opengl cargo run --release -p cindral-app --features kernel-benchma
 ```
 
 For the original global/snapshot CPU result, run the first command in a separate checkout of `bc7fbf2`; allow several minutes. Benchmarks are explicit examples, not timed CI tests.
+
+## M4 rerun
+
+Same host, release profile and OpenGL adapter, measured after M4 integration. [All six raw reports](benchmarks/2026-10-20-m4-kernel-vega11.txt) are retained. The original 50k-edge/20k-face line edit still runs first. For interactive previews, setup then adds an isolated closed 2×2×1 m box outside the tile array. Its top face is pulled by 0.11–0.40 m in 30 absolute provisional updates, each replacing the previous delta. Final commit adds exactly **one undo entry** in every run.
+
+CPU preview fixture: 50,012 edges / 20,006 faces before the pull. GPU preview fixture: 50,014 edges / 20,007 faces because it retains the earlier line edit. A complete mesh cache and buffers are initialized outside the preview loop. Only the isolated closed box is edited; this is a large document containing a small affected solid, not a benchmark of one 20k-face connected solid.
+
+| Original CPU operation | M4, three runs |
+| --- | ---: |
+| Line edit | 0.151–0.217 ms |
+| Undo | 0.021–0.027 ms |
+| Redo | 0.017–0.019 ms |
+| Full triangulation | 16.421–18.322 ms |
+| Closed-box push/pull preview, per-run mean | 0.577–0.595 ms |
+| Closed-box push/pull preview, worst sample | 0.819 ms |
+| Whole-box Move preview | 0.204–0.213 ms |
+| Whole-box Rotate preview | 0.130–0.135 ms |
+| Whole-box Scale preview | 0.129–0.135 ms |
+
+Move/rotate/scale are individual successful previews of all box vertices, followed by cancellation. Push/pull has 30 samples per run; the other transforms have one per run, so these figures are not latency distributions.
+
+| Native closed-box update stage (30 samples/run) | Per-run mean range | Worst sample across 3 runs |
+| --- | ---: | ---: |
+| Kernel provisional delta | 0.599–0.842 ms | 1.574 ms |
+| Dirty CPU mesh preparation | 0.026–0.038 ms | 0.115 ms |
+| Completed GPU range upload | 0.269–0.471 ms | 1.457 ms |
+| Combined update path | **0.908–1.363 ms** | **2.368 ms** |
+
+**The measured interactive update path remains below 16 ms** on this fixture. Full mesh rebuilds still take 50.239–51.844 ms (before adding the box), while the original single-face line edit's partial mesh preparation takes 0.029–0.042 ms and completed range upload 0.333–0.416 ms.
+
+These times exclude inference candidate scans, picking, egui, actual drawing and frame scheduling. They establish update cost, not full-editor frame rate. Push/pull evaluates affected connected shells for Boolean operations; a very large connected solid may exceed 16 ms even though untouched boundary IDs and GPU ranges are retained. That workload remains unmeasured. Conservative complexity limits abort the operation rather than commit incomplete Boolean output. The earlier static 500k-triangle raster baseline is independent.
+
+The reproduction commands above now include the M4 measurements. Native `capture_viewport --modify` additionally exercises preview, cancel, committed through-hole, face painting and selection rendering; its screenshot is visual validation rather than a timing sample.

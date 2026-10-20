@@ -85,6 +85,69 @@ fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
         start.elapsed().as_secs_f64() * 1000.,
         buffers.allocated_bytes()
     );
+    let face =
+        cindral_core::benchmark::add_test_solid(&mut fixture.history).map_err(|e| e.to_string())?;
+    let (seed_cache, setup_update) =
+        MeshCache::rebuild(fixture.history.model()).map_err(|e| e.to_string())?;
+    cache = seed_cache;
+    buffers.apply(&render.device, &render.queue, &setup_update);
+    wait(&render.device, &render.queue)?;
+    println!(
+        "m4_fixture: {} edges / {} faces; isolated closed box",
+        fixture.history.model().edges().len(),
+        fixture.history.model().faces().len()
+    );
+    let undo_depth = fixture.history.undo_depth();
+    let mut frames = Vec::new();
+    let mut cpu = Vec::new();
+    let mut mesh = Vec::new();
+    let mut gpu = Vec::new();
+    for i in 1..=30 {
+        let total = Instant::now();
+        let start = Instant::now();
+        fixture
+            .history
+            .preview(cindral_core::Command::PushPull {
+                face,
+                distance: 0.1 + i as f64 * 0.01,
+            })
+            .map_err(|e| e.to_string())?;
+        cpu.push(start.elapsed().as_secs_f64() * 1000.);
+        let dirty = fixture.history.changes();
+        let faces = dirty.faces.iter().copied().collect::<Vec<_>>();
+        let edges = dirty.edges.iter().copied().collect::<Vec<_>>();
+        let start = Instant::now();
+        let partial = cache
+            .update(fixture.history.model(), &faces, &edges)
+            .map_err(|e| e.to_string())?;
+        mesh.push(start.elapsed().as_secs_f64() * 1000.);
+        let start = Instant::now();
+        buffers.apply(&render.device, &render.queue, &partial);
+        wait(&render.device, &render.queue)?;
+        gpu.push(start.elapsed().as_secs_f64() * 1000.);
+        frames.push(total.elapsed().as_secs_f64() * 1000.);
+    }
+    fixture
+        .history
+        .commit_preview()
+        .map_err(|e| e.to_string())?;
+    for (name, samples) in [
+        ("m4_kernel", cpu),
+        ("m4_mesh", mesh),
+        ("m4_gpu_completed", gpu),
+        ("m4_total_update", frames),
+    ] {
+        println!(
+            "{name}_ms: mean {:.3}; max {:.3}; samples {}",
+            samples.iter().sum::<f64>() / samples.len() as f64,
+            samples.iter().copied().fold(0., f64::max),
+            samples.len()
+        );
+    }
+    println!(
+        "m4_preview_undo_entries: {}",
+        fixture.history.undo_depth() - undo_depth
+    );
     Ok(())
 }
 struct Bench {

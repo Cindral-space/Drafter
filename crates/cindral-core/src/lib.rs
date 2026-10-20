@@ -21,8 +21,10 @@
 //! ```
 
 mod command;
+mod csg;
 mod geometry;
 mod model;
+mod modification;
 mod spatial;
 mod topology;
 mod transaction;

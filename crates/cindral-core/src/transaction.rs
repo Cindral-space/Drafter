@@ -89,7 +89,9 @@ impl Selection {
             | Command::Offset { .. }
             | Command::FollowMe { .. }
             | Command::PaintFace { .. } => {
-                return Err(KernelError::InvalidTopology("M4 operation pending".into()))
+                return Err(KernelError::InvalidTopology(
+                    "explicit surface edit requires a prepared transaction".into(),
+                ))
             }
             Command::AddEdge { start, end } => {
                 self.geometry = true;
@@ -133,6 +135,103 @@ impl Delta {
         command: &Command,
         high_water: u64,
     ) -> Result<Self, KernelError> {
+        if let Command::Batch(commands) = command {
+            fn depth(command: &Command, level: usize) -> Result<(), KernelError> {
+                if level > 64 {
+                    return Err(KernelError::BatchDepth);
+                }
+                if let Command::Batch(commands) = command {
+                    for c in commands {
+                        depth(c, level + 1)?;
+                    }
+                }
+                Ok(())
+            }
+            depth(command, 0)?;
+            let initial_next = model.next_id;
+            let mut deltas: Vec<Self> = Vec::new();
+            let mut next = high_water;
+            for c in commands {
+                match Self::prepare(model, c, next) {
+                    Ok(delta) => {
+                        delta.apply(model, true)?;
+                        next = delta.next_id();
+                        deltas.push(delta);
+                    }
+                    Err(error) => {
+                        for d in deltas.iter().rev() {
+                            d.apply(model, false)?;
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            for d in deltas.iter().rev() {
+                d.apply(model, false)?;
+            }
+            let mut combined = Self {
+                vertices: BTreeMap::new(),
+                edges: BTreeMap::new(),
+                faces: BTreeMap::new(),
+                before_next: initial_next,
+                after_next: next,
+            };
+            fn append<I: Ord, T>(
+                target: &mut BTreeMap<I, ValueChange<T>>,
+                source: BTreeMap<I, ValueChange<T>>,
+            ) {
+                for (id, change) in source {
+                    match target.entry(id) {
+                        std::collections::btree_map::Entry::Vacant(e) => {
+                            e.insert(change);
+                        }
+                        std::collections::btree_map::Entry::Occupied(mut e) => {
+                            e.get_mut().after = change.after;
+                        }
+                    }
+                }
+            }
+            for d in deltas {
+                append(&mut combined.vertices, d.vertices);
+                append(&mut combined.edges, d.edges);
+                append(&mut combined.faces, d.faces);
+            }
+            combined.vertices.retain(|_, v| v.before != v.after);
+            combined.edges.retain(|_, v| {
+                v.before != v.after
+                    || v.after.as_ref().is_some_and(|e| {
+                        e.vertices.iter().any(|v| combined.vertices.contains_key(v))
+                    })
+            });
+            combined.faces.retain(|_, v| {
+                v.before != v.after
+                    || v.after.as_ref().is_some_and(|f| {
+                        f.outer
+                            .iter()
+                            .chain(f.holes.iter().flatten())
+                            .any(|v| combined.vertices.contains_key(v))
+                    })
+            });
+            return Ok(combined);
+        }
+        if let Command::Offset { face, distance } = command {
+            return Self::prepare(
+                model,
+                &crate::modification::offset_command(model, *face, *distance)?,
+                high_water,
+            );
+        }
+        if matches!(
+            command,
+            Command::PushPull { .. }
+                | Command::Transform { .. }
+                | Command::FollowMe { .. }
+                | Command::PaintFace { .. }
+        ) {
+            model.ensure_spatial()?;
+            let (before, after) = crate::modification::prepare(model, command, high_water)?;
+            return Ok(Self::between(&before, &after, model.next_id));
+        }
         let mut selection = Selection::default();
         selection.scan(model, command, 0)?;
         for point in &selection.points {
@@ -239,6 +338,32 @@ impl Delta {
         if command.apply(&mut after, 0)? {
             after.rebuild_faces()?;
         }
+        // An explicit solid operation may leave bounded openings. A later draw on
+        // another surface must not automatically cap an already-existing void.
+        let old_faces: BTreeSet<_> = before.faces.values().map(face_key).collect();
+        let context = crate::spatial::envelope(before.vertices.values().map(|v| v.position))
+            .map(|bounds| spatial.query_faces(bounds))
+            .unwrap_or_default();
+        let context_faces: Vec<_> = context
+            .iter()
+            .filter_map(|id| model.faces.get(id))
+            .collect();
+        let existing_outers: BTreeSet<BTreeSet<VertexId>> = context_faces
+            .iter()
+            .map(|f| f.outer.iter().copied().collect())
+            .collect();
+        let openings: Vec<BTreeSet<VertexId>> = context_faces
+            .iter()
+            .flat_map(|f| f.holes.iter())
+            .map(|ring| ring.iter().copied().collect())
+            .filter(|ring| !existing_outers.contains(ring))
+            .collect();
+        after.faces.retain(|_, f| {
+            old_faces.contains(&face_key(f))
+                || !openings
+                    .iter()
+                    .any(|hole| *hole == f.outer.iter().copied().collect())
+        });
         // Context edges may bound an unchanged face outside this cavity. Do not
         // create a duplicate of that globally indexed region.
         after.faces.retain(|_, face| {
@@ -276,14 +401,49 @@ impl Delta {
             after.faces.remove(&id);
         }
         after.validate()?;
-        Ok(Self {
-            vertices: difference(&before.vertices, &after.vertices),
-            edges: difference(&before.edges, &after.edges),
-            faces: difference(&before.faces, &after.faces),
-            before_next: model.next_id,
-            after_next: after.next_id,
-        })
+        Ok(Self::between(&before, &after, model.next_id))
     }
+    fn between(before: &Model, after: &Model, before_next: u64) -> Self {
+        let vertices = difference(&before.vertices, &after.vertices);
+        let moved: BTreeSet<_> = vertices.keys().copied().collect();
+        let mut edges = difference(&before.edges, &after.edges);
+        let mut faces = difference(&before.faces, &after.faces);
+        for (id, edge) in &after.edges {
+            if edge.vertices.iter().any(|v| moved.contains(v)) {
+                edges.insert(
+                    *id,
+                    ValueChange {
+                        before: before.edges.get(id).cloned(),
+                        after: Some(edge.clone()),
+                    },
+                );
+            }
+        }
+        for (id, face) in &after.faces {
+            if face
+                .outer
+                .iter()
+                .chain(face.holes.iter().flatten())
+                .any(|v| moved.contains(v))
+            {
+                faces.insert(
+                    *id,
+                    ValueChange {
+                        before: before.faces.get(id).cloned(),
+                        after: Some(face.clone()),
+                    },
+                );
+            }
+        }
+        Self {
+            vertices,
+            edges,
+            faces,
+            before_next,
+            after_next: after.next_id,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.vertices.is_empty() && self.edges.is_empty() && self.faces.is_empty()
     }
@@ -309,10 +469,10 @@ impl Delta {
         }
         for (id, value) in &self.edges {
             if let Some(old) = value.old(forward) {
-                if value
-                    .new_value(forward)
-                    .is_none_or(|new| new.vertices != old.vertices)
-                {
+                if value.new_value(forward).is_none_or(|new| {
+                    new.vertices != old.vertices
+                        || old.vertices.iter().any(|v| self.vertices.contains_key(v))
+                }) {
                     spatial.remove_edge(*id, old, model)?;
                 }
             }
@@ -340,10 +500,10 @@ impl Delta {
         for (id, value) in &self.edges {
             if let Some(new) = value.new_value(forward) {
                 model.edges.insert(*id, new.clone());
-                if value
-                    .old(forward)
-                    .is_none_or(|old| old.vertices != new.vertices)
-                {
+                if value.old(forward).is_none_or(|old| {
+                    old.vertices != new.vertices
+                        || new.vertices.iter().any(|v| self.vertices.contains_key(v))
+                }) {
                     spatial.add_edge(*id, new, model)?;
                 }
             }
@@ -364,7 +524,7 @@ impl Delta {
     }
 }
 
-fn contains_face(model: &Model, face: &Face, point: DVec3) -> Result<bool, KernelError> {
+pub(crate) fn contains_face(model: &Model, face: &Face, point: DVec3) -> Result<bool, KernelError> {
     let origin = model.position(*face.outer.first().ok_or(KernelError::Triangulation)?)?;
     let (u, v) = face.plane.basis();
     let p = glam::DVec2::new((point - origin).dot(u), (point - origin).dot(v));

@@ -82,6 +82,7 @@ pub struct MeshUpdate {
 
 #[derive(Clone, Debug, PartialEq)]
 struct FaceSignature {
+    color: [u8; 4],
     normal: DVec3,
     distance: f64,
     outer: Vec<DVec3>,
@@ -487,6 +488,7 @@ fn build_face_signature(model: &Model, face: &Face) -> Result<FaceSignature, Ker
         })
         .collect::<Result<Vec<_>, KernelError>>()?;
     Ok(FaceSignature {
+        color: face.color,
         normal: face.plane.normal,
         distance: face.plane.distance,
         outer,
@@ -515,7 +517,15 @@ fn build_face_triangles(
             vertices.push(FaceVertex {
                 position: pos.to_array(),
                 normal: normal_arr,
-                color: FACE_COLOR,
+                color: if face.color == [160, 177, 193, 255] {
+                    FACE_COLOR
+                } else {
+                    [
+                        face.color[0] as f32 / 255.,
+                        face.color[1] as f32 / 255.,
+                        face.color[2] as f32 / 255.,
+                    ]
+                },
             });
         }
     }

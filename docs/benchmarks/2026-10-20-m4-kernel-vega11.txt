@@ -1,0 +1,71 @@
+=== m4-kernel-1 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 147.316 ms
+edit_ms: 0.152
+undo_ms: 0.023
+redo_ms: 0.019
+triangulate_all_ms: 18.322 (20001 triangles)
+pushpull_preview_ms: mean 0.595; max 0.670; samples 30; undo_entries 1
+move_preview_ms: 0.211; result Ok(true)
+rotate_preview_ms: 0.134; result Ok(true)
+scale_preview_ms: 0.135; result Ok(true)
+
+=== m4-kernel-2 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 138.560 ms
+edit_ms: 0.151
+undo_ms: 0.021
+redo_ms: 0.017
+triangulate_all_ms: 16.535 (20001 triangles)
+pushpull_preview_ms: mean 0.586; max 0.819; samples 30; undo_entries 1
+move_preview_ms: 0.204; result Ok(true)
+rotate_preview_ms: 0.130; result Ok(true)
+scale_preview_ms: 0.129; result Ok(true)
+
+=== m4-kernel-3 ===
+fixture: 40000 vertices / 50000 edges / 20000 faces; setup 153.876 ms
+edit_ms: 0.217
+undo_ms: 0.027
+redo_ms: 0.017
+triangulate_all_ms: 16.421 (20001 triangles)
+pushpull_preview_ms: mean 0.577; max 0.661; samples 30; undo_entries 1
+move_preview_ms: 0.213; result Ok(true)
+rotate_preview_ms: 0.135; result Ok(true)
+scale_preview_ms: 0.132; result Ok(true)
+
+=== m4-gpu-1 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 51.336; bytes 4560204
+full_gpu_buffer_ms: 2.260; allocated 9120408
+partial_cpu_mesh_ms: 0.042; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.415; allocated 9120000
+m4_fixture: 50014 edges / 20007 faces; isolated closed box
+m4_kernel_ms: mean 0.599; max 0.792; samples 30
+m4_mesh_ms: mean 0.029; max 0.049; samples 30
+m4_gpu_completed_ms: mean 0.269; max 0.502; samples 30
+m4_total_update_ms: mean 0.908; max 1.345; samples 30
+m4_preview_undo_entries: 1
+
+=== m4-gpu-2 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 51.844; bytes 4560204
+full_gpu_buffer_ms: 2.086; allocated 9120408
+partial_cpu_mesh_ms: 0.029; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.333; allocated 9120000
+m4_fixture: 50014 edges / 20007 faces; isolated closed box
+m4_kernel_ms: mean 0.636; max 1.231; samples 30
+m4_mesh_ms: mean 0.026; max 0.047; samples 30
+m4_gpu_completed_ms: mean 0.381; max 1.457; samples 30
+m4_total_update_ms: mean 1.053; max 2.119; samples 30
+m4_preview_undo_entries: 1
+
+=== m4-gpu-3 ===
+adapter: AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1) Gl; fixture 50000 edges / 20000 faces before edit
+full_cpu_mesh_ms: 50.239; bytes 4560204
+full_gpu_buffer_ms: 3.117; allocated 9120408
+partial_cpu_mesh_ms: 0.031; bytes 360; dirty_faces 3; dirty_edges 3
+partial_gpu_buffer_ms: 0.416; allocated 9120000
+m4_fixture: 50014 edges / 20007 faces; isolated closed box
+m4_kernel_ms: mean 0.842; max 1.574; samples 30
+m4_mesh_ms: mean 0.038; max 0.115; samples 30
+m4_gpu_completed_ms: mean 0.471; max 0.712; samples 30
+m4_total_update_ms: mean 1.363; max 2.368; samples 30
+m4_preview_undo_entries: 1

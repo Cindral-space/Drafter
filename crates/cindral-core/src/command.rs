@@ -31,19 +31,42 @@ pub enum Command {
         smooth: bool,
     },
     /// Extrude a planar face along its canonical normal by signed meters.
-    PushPull { face: FaceId, distance: f64 },
+    PushPull {
+        /// Target surface.
+        face: FaceId,
+        /// Signed normal distance in meters.
+        distance: f64,
+    },
     /// Transform selected vertices, or duplicate their induced geometry.
     Transform {
+        /// Unique vertices to transform.
         vertices: Vec<VertexId>,
+        /// Finite nonsingular affine transform.
         matrix: glam::DMat4,
+        /// Duplicate induced edges and faces instead of moving.
         copy: bool,
     },
     /// Draw an inset (positive distance) or outset boundary on a face.
-    Offset { face: FaceId, distance: f64 },
+    Offset {
+        /// Profile face.
+        face: FaceId,
+        /// Inset distance in meters, negative for outset.
+        distance: f64,
+    },
     /// Sweep a face along an ordered polyline path.
-    FollowMe { face: FaceId, path: Vec<DVec3> },
+    FollowMe {
+        /// Profile face.
+        face: FaceId,
+        /// Ordered sweep stations starting at the profile.
+        path: Vec<DVec3>,
+    },
     /// Apply a face color.
-    PaintFace { faces: Vec<FaceId>, color: [u8; 4] },
+    PaintFace {
+        /// Surfaces to color.
+        faces: Vec<FaceId>,
+        /// RGBA display color.
+        color: [u8; 4],
+    },
     /// Execute several mutations as one transaction and one history entry.
     Batch(Vec<Command>),
 }
@@ -58,9 +81,9 @@ impl Command {
             | Self::Transform { .. }
             | Self::Offset { .. }
             | Self::FollowMe { .. }
-            | Self::PaintFace { .. } => {
-                Err(KernelError::InvalidTopology("M4 operation pending".into()))
-            }
+            | Self::PaintFace { .. } => Err(KernelError::InvalidTopology(
+                "explicit surface edit requires a prepared transaction".into(),
+            )),
             Self::AddEdge { start, end } => {
                 model.insert_segment(*start, *end)?;
                 Ok(true)
@@ -132,6 +155,7 @@ pub struct History {
     high_water: u64,
     revision: u64,
     changes: crate::ChangeSet,
+    preview: Option<crate::transaction::Delta>,
 }
 
 impl Default for History {
@@ -143,6 +167,7 @@ impl Default for History {
             high_water: 1,
             revision: 0,
             changes: crate::ChangeSet::default(),
+            preview: None,
         }
     }
 }
@@ -171,6 +196,7 @@ impl History {
     /// Validate a candidate mutation and commit it atomically.
     /// Returns `false` for a no-op, which preserves redo history and revision.
     pub fn execute(&mut self, command: Command) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
         let delta = crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water)?;
         if delta.is_empty() {
             return Ok(false);
@@ -184,12 +210,70 @@ impl History {
         self.revision = revision;
         Ok(true)
     }
+    /// Replace a provisional edit using the same local delta path as a committed command.
+    /// No undo entry is recorded until `commit_preview`; cancellation restores the starting geometry.
+    pub fn preview(&mut self, command: Command) -> Result<bool, KernelError> {
+        let mut dirty = crate::ChangeSet::default();
+        if let Some(old) = self.preview.take() {
+            old.apply(&mut self.model, false)?;
+            dirty = old.changes(self.revision);
+        }
+        let prepared =
+            crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water);
+        match prepared {
+            Ok(delta) => {
+                let changed = !delta.is_empty();
+                if changed {
+                    delta.apply(&mut self.model, true)?;
+                }
+                let new = delta.changes(self.revision);
+                dirty.vertices.extend(new.vertices);
+                dirty.edges.extend(new.edges);
+                dirty.faces.extend(new.faces);
+                self.revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
+                dirty.revision = self.revision;
+                self.changes = dirty;
+                self.preview = Some(delta);
+                Ok(changed)
+            }
+            Err(error) => {
+                self.revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
+                dirty.revision = self.revision;
+                self.changes = dirty;
+                Err(error)
+            }
+        }
+    }
+    /// Cancel the active provisional delta without changing committed history.
+    pub fn cancel_preview(&mut self) -> Result<bool, KernelError> {
+        let Some(delta) = self.preview.take() else {
+            return Ok(false);
+        };
+        delta.apply(&mut self.model, false)?;
+        self.revision = self.revision.checked_add(1).ok_or(KernelError::Capacity)?;
+        self.changes = delta.changes(self.revision);
+        Ok(!delta.is_empty())
+    }
+    /// Record the current provisional delta as exactly one undo entry.
+    pub fn commit_preview(&mut self) -> Result<bool, KernelError> {
+        let Some(delta) = self.preview.take() else {
+            return Ok(false);
+        };
+        if delta.is_empty() {
+            return Ok(false);
+        }
+        self.high_water = self.high_water.max(delta.next_id());
+        self.undo.push(Entry { delta });
+        self.redo.clear();
+        Ok(true)
+    }
     /// Dirty entities from the most recent successful mutation, undo or redo.
     pub fn changes(&self) -> &crate::ChangeSet {
         &self.changes
     }
     /// Restore the state before the last successful command.
     pub fn undo(&mut self) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
         if self.undo.is_empty() {
             return Ok(false);
         }
@@ -204,6 +288,7 @@ impl History {
     }
     /// Reapply the most recently undone command.
     pub fn redo(&mut self) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
         if self.redo.is_empty() {
             return Ok(false);
         }

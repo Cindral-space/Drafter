@@ -6,7 +6,8 @@ use cindral_render::{
     grid::{GridCallback, GridRenderer},
     mesh::{MeshCache, MeshUpdate, ModelCallback, ModelRenderer},
 };
-use cindral_tools::{ToolKind, ToolSession};
+use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
+mod modify_ui;
 use eframe::egui::{self, Color32, Key, PointerButton, RichText};
 use glam::Vec2;
 use std::sync::Arc;
@@ -14,6 +15,14 @@ use std::sync::Arc;
 /// Editor state; geometry changes are committed only through core commands.
 pub struct DrafterApp {
     camera: Camera,
+    modifying: bool,
+    modify: ModifySession,
+    selection: Selection,
+    selection_start: Option<glam::DVec2>,
+    modify_press: Option<glam::DVec2>,
+    drag_axis: DVec3,
+    paint_color: [u8; 4],
+    last_tape: Option<f64>,
     history: History,
     engine: Engine,
     tool: ToolSession,
@@ -29,6 +38,14 @@ impl Default for DrafterApp {
     fn default() -> Self {
         Self {
             camera: Camera::default(),
+            modifying: false,
+            modify: ModifySession::new(ModifyKind::Select),
+            selection: Selection::default(),
+            selection_start: None,
+            modify_press: None,
+            drag_axis: DVec3::Z,
+            paint_color: [210, 130, 75, 255],
+            last_tape: None,
             history: History::new(),
             engine: Engine::default(),
             tool: ToolSession::new(ToolKind::Line),
@@ -80,6 +97,11 @@ impl DrafterApp {
             .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
     }
     fn set_tool(&mut self, kind: ToolKind) {
+        if let Ok(true) = self.history.cancel_preview() {
+            self.refresh_mesh();
+        }
+        self.modify.cancel();
+        self.modifying = false;
         self.tool.set_kind(kind);
         if let Err(error) = self.tool.set_plane(self.work_plane) {
             self.error = Some(error.to_string());
@@ -128,6 +150,29 @@ impl DrafterApp {
         }
         Ok(changed)
     }
+    /// Replace provisional geometry and upload only dirty mesh ranges; no history entry is added.
+    pub fn preview(&mut self, command: Command) -> Result<bool, cindral_core::KernelError> {
+        let result = self.history.preview(command);
+        self.refresh_mesh();
+        result
+    }
+    /// Commit the current provisional edit as one undo step.
+    pub fn commit_preview(&mut self) -> Result<bool, cindral_core::KernelError> {
+        self.history.commit_preview()
+    }
+    /// Restore provisional geometry and prepare the reverted dirty ranges.
+    pub fn cancel_preview(&mut self) -> Result<bool, cindral_core::KernelError> {
+        let changed = self.history.cancel_preview()?;
+        if changed {
+            self.refresh_mesh();
+        }
+        Ok(changed)
+    }
+    /// Select the topologically connected component for a given hit.
+    pub fn select_connected(&mut self, hit: cindral_tools::Hit) {
+        self.selection.connected(self.history.model(), hit, false);
+        self.choose_modify(ModifyKind::Select);
+    }
     /// Current rendering-independent document state.
     pub fn model(&self) -> &cindral_core::Model {
         self.history.model()
@@ -142,6 +187,11 @@ impl DrafterApp {
         }
     }
     fn history_step(&mut self, redo: bool) {
+        if let Ok(true) = self.history.cancel_preview() {
+            self.refresh_mesh();
+        }
+        self.modify.cancel();
+        self.selection_start = None;
         let result = if redo {
             self.history.redo()
         } else {
@@ -158,6 +208,10 @@ impl DrafterApp {
         }
     }
     fn apply_measurement(&mut self) {
+        if self.modifying {
+            self.modify_measurement();
+            return;
+        }
         let before = self.tool.clone();
         match self.tool.measure(&self.measurement) {
             Ok(Some(command)) => {
@@ -185,6 +239,13 @@ impl DrafterApp {
             }
         }
         if !response.hovered() {
+            if self.modifying && (self.modify.active() || self.selection_start.is_some()) {
+                self.modify_viewport_input(response);
+            }
+            return;
+        }
+        if self.modifying {
+            self.modify_viewport_input(response);
             return;
         }
         let keyboard_free = !response.ctx.wants_keyboard_input();
@@ -396,7 +457,7 @@ impl eframe::App for DrafterApp {
                 ] {
                     if ui
                         .selectable_label(
-                            self.tool.kind() == kind,
+                            !self.modifying && self.tool.kind() == kind,
                             format!("{}  {shortcut}", tool_label(kind)),
                         )
                         .clicked()
@@ -420,9 +481,9 @@ impl eframe::App for DrafterApp {
         });
         egui::TopBottomPanel::bottom("status").show(ctx,|ui| {
             ui.horizontal(|ui| {
-                ui.label(match self.tool.kind() {ToolKind::Line=>"Line: start, end; Esc stops chain",ToolKind::Rectangle=>"Rectangle: first corner, opposite corner",ToolKind::Circle=>"Circle: center, radius",ToolKind::Arc=>"Arc: center, start, end direction",ToolKind::Polygon=>"Polygon: center, vertex"});
+                ui.label(if self.modifying {"Modify: select geometry, drag; Escape cancels; type value + Enter"} else {match self.tool.kind() {ToolKind::Line=>"Line: start, end; Esc stops chain",ToolKind::Rectangle=>"Rectangle: first corner, opposite corner",ToolKind::Circle=>"Circle: center, radius",ToolKind::Arc=>"Arc: center, start, end direction",ToolKind::Polygon=>"Polygon: center, vertex"}});
                 ui.separator();ui.label("Measurements");
-                let field=ui.add(egui::TextEdit::singleline(&mut self.measurement).desired_width(145.).hint_text(match self.tool.kind(){ToolKind::Rectangle=>"width,height",ToolKind::Arc=>"degrees",_=>"length / radius"}));
+                let field=ui.add(egui::TextEdit::singleline(&mut self.measurement).desired_width(145.).hint_text(if self.modifying {match self.modify.kind(){ModifyKind::Rotate=>"angle / deg",ModifyKind::Scale=>"factor / x / %",_=>"distance"}} else {match self.tool.kind(){ToolKind::Rectangle=>"width,height",ToolKind::Arc=>"degrees",_=>"length / radius"}}));
                 if field.lost_focus() && ctx.input(|i|i.key_pressed(Key::Enter)) {self.apply_measurement();}
             });
             if let Some(error)=&self.error {ui.colored_label(Color32::LIGHT_RED,error);}
@@ -432,6 +493,54 @@ impl eframe::App for DrafterApp {
             .exact_width(174.)
             .resizable(false)
             .show(ctx, |ui| {
+                ui.heading("Modify");
+                for kind in [
+                    ModifyKind::Select,
+                    ModifyKind::PushPull,
+                    ModifyKind::Move,
+                    ModifyKind::Copy,
+                    ModifyKind::Rotate,
+                    ModifyKind::Scale,
+                    ModifyKind::Offset,
+                    ModifyKind::FollowMe,
+                    ModifyKind::Eraser,
+                    ModifyKind::TapeMeasure,
+                    ModifyKind::PaintBucket,
+                ] {
+                    if ui
+                        .selectable_label(
+                            self.modifying && self.modify.kind() == kind,
+                            match kind {
+                                ModifyKind::Select => "Select",
+                                ModifyKind::PushPull => "Push / Pull",
+                                ModifyKind::Move => "Move",
+                                ModifyKind::Copy => "Copy",
+                                ModifyKind::Rotate => "Rotate",
+                                ModifyKind::Scale => "Scale",
+                                ModifyKind::Offset => "Offset",
+                                ModifyKind::FollowMe => "Follow Me",
+                                ModifyKind::Eraser => "Eraser",
+                                ModifyKind::TapeMeasure => "Tape Measure",
+                                ModifyKind::PaintBucket => "Paint Bucket",
+                            },
+                        )
+                        .clicked()
+                    {
+                        self.choose_modify(kind);
+                    }
+                }
+                if self.modifying && self.modify.kind() == ModifyKind::PaintBucket {
+                    let mut color = [
+                        self.paint_color[0],
+                        self.paint_color[1],
+                        self.paint_color[2],
+                    ];
+                    if ui.color_edit_button_srgb(&mut color).changed() {
+                        self.paint_color = [color[0], color[1], color[2], 255];
+                        self.modify.set_color(self.paint_color);
+                    }
+                }
+                ui.separator();
                 ui.heading("View");
                 ui.selectable_value(
                     &mut self.camera.projection,
@@ -551,6 +660,7 @@ impl eframe::App for DrafterApp {
                     view.project(point)
                         .map(|p| rect.min + egui::vec2(p.x as f32, p.y as f32))
                 };
+                self.modify_overlay(ui, rect, view);
                 let preview = self.tool.preview();
                 for segment in preview.windows(2) {
                     if let (Some(a), Some(b)) = (screen(segment[0]), screen(segment[1])) {

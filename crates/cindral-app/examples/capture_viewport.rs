@@ -11,6 +11,7 @@ struct Capture {
     output: std::path::PathBuf,
     frames: usize,
     incremental: bool,
+    modify_face: Option<cindral_core::FaceId>,
 }
 
 impl eframe::App for Capture {
@@ -22,9 +23,33 @@ impl eframe::App for Capture {
                 return;
             }
         }
+        if let Some(face) = self.modify_face {
+            let result = match self.frames {
+                1 => self
+                    .app
+                    .preview(cindral_core::Command::PushPull { face, distance: 1. }),
+                2 => self.app.cancel_preview(),
+                3 => self.app.preview(cindral_core::Command::PushPull {
+                    face,
+                    distance: -3.,
+                }),
+                4 => self.app.commit_preview(),
+                _ => Ok(false),
+            };
+            if let Err(e) = result {
+                eprintln!("Modify capture failed: {e}");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        }
+        if self.modify_face.is_some() && self.frames == 4 {
+            if let Some(face) = self.app.model().faces().keys().next().copied() {
+                self.app.select_connected(cindral_tools::Hit::Face(face));
+            }
+        }
         self.app.update(ctx, frame);
         self.frames += 1;
-        if self.frames == 3 {
+        if self.frames == if self.modify_face.is_some() { 6 } else { 3 } {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         let capture = ctx.input(|input| {
@@ -77,6 +102,11 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let mut app = cindral_app::DrafterApp::new(cc)?;
             let incremental = std::env::args().any(|arg| arg == "--incremental");
+            let modify_face = if std::env::args().any(|arg| arg == "--modify") {
+                Some(seed_modify(&mut app)?)
+            } else {
+                None
+            };
             if incremental {
                 let mut tool = cindral_tools::ToolSession::new(cindral_tools::ToolKind::Rectangle);
                 tool.click(cindral_core::DVec3::new(-3., -2., 0.))?;
@@ -91,6 +121,7 @@ fn main() -> eframe::Result {
                 output,
                 frames: 0,
                 incremental,
+                modify_face,
             }))
         }),
     )
@@ -117,4 +148,46 @@ fn seed(app: &mut cindral_app::DrafterApp) -> Result<(), Box<dyn std::error::Err
         app.execute(command)?;
     }
     Ok(())
+}
+
+fn seed_modify(
+    app: &mut cindral_app::DrafterApp,
+) -> Result<cindral_core::FaceId, Box<dyn std::error::Error + Send + Sync>> {
+    use cindral_core::{Command, DVec3 as V};
+    app.execute(Command::AddPolyline {
+        points: vec![
+            V::new(-2., -2., 0.),
+            V::new(2., -2., 0.),
+            V::new(2., 2., 0.),
+            V::new(-2., 2., 0.),
+        ],
+        closed: true,
+    })?;
+    let face = *app.model().faces().keys().next().ok_or("missing base")?;
+    app.execute(Command::PushPull { face, distance: 2. })?;
+    app.execute(Command::AddPolyline {
+        points: vec![
+            V::new(-0.7, -0.7, 2.),
+            V::new(0.7, -0.7, 2.),
+            V::new(0.7, 0.7, 2.),
+            V::new(-0.7, 0.7, 2.),
+        ],
+        closed: true,
+    })?;
+    let face = *app
+        .model()
+        .faces()
+        .iter()
+        .find(|(_, f)| {
+            f.plane.normal.z > 0.9 && (f.plane.distance - 2.).abs() < 1e-7 && f.holes.is_empty()
+        })
+        .ok_or("missing inset")?
+        .0;
+    let faces = app.model().faces().keys().copied().collect();
+    app.execute(Command::PaintFace {
+        faces,
+        color: [195, 130, 75, 255],
+    })?;
+    app.select_connected(cindral_tools::Hit::Face(face));
+    Ok(face)
 }

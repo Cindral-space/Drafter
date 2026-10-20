@@ -56,6 +56,7 @@ pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError
                 model.faces.insert(
                     id,
                     Face {
+                        color: [160, 177, 193, 255],
                         outer: indices.map(|i| ids[i]).to_vec(),
                         holes: Vec::new(),
                         plane: Plane {
@@ -74,6 +75,42 @@ pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError
             end: DVec3::new(1.0, 0.5, 0.0),
         },
     })
+}
+
+/// Add an isolated 2×2×1 m closed solid outside the tiled fixture, returning its top face.
+/// Setup is excluded from interactive benchmark timing.
+pub fn add_test_solid(history: &mut History) -> Result<crate::FaceId, KernelError> {
+    history.execute(crate::Command::AddPolyline {
+        points: vec![
+            DVec3::new(-4., -4., 0.),
+            DVec3::new(-2., -4., 0.),
+            DVec3::new(-2., -2., 0.),
+            DVec3::new(-4., -2., 0.),
+        ],
+        closed: true,
+    })?;
+    let face = *history
+        .model()
+        .faces()
+        .iter()
+        .find(|(id, f)| {
+            f.plane.normal.z > 0.9
+                && f.plane.distance.abs() < crate::TOLERANCE
+                && history
+                    .model()
+                    .face_area(**id)
+                    .is_ok_and(|a| (a - 4.).abs() < crate::TOLERANCE)
+        })
+        .ok_or(KernelError::MissingEntity)?
+        .0;
+    history.execute(crate::Command::PushPull { face, distance: 1. })?;
+    history
+        .model()
+        .faces()
+        .iter()
+        .find(|(_, f)| f.plane.normal.z > 0.9 && (f.plane.distance - 1.).abs() < crate::TOLERANCE)
+        .map(|(id, _)| *id)
+        .ok_or(KernelError::MissingEntity)
 }
 
 #[cfg(test)]
