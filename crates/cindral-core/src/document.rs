@@ -127,6 +127,13 @@ pub enum OrganizationCommand {
         /// Whether tagged occurrences are visible.
         visible: bool,
     },
+    /// Restore scene visibility in one metadata transaction, ignoring deleted IDs.
+    RestoreVisibility {
+        /// Captured tag visible flags.
+        tags: BTreeMap<TagId, bool>,
+        /// Captured explicit hidden flags keyed by owner and instance identity.
+        objects: BTreeMap<(DefinitionId, InstanceId), bool>,
+    },
     /// Create a material.
     CreateMaterial(Material),
     /// Replace material values.
@@ -627,6 +634,15 @@ impl DocumentHistory {
     pub fn instances(&self, id: DefinitionId) -> Option<&BTreeMap<InstanceId, Instance>> {
         self.graph.definitions.get(&id).map(|d| &d.instances)
     }
+    /// Capture presentation and visibility without cloning geometry or traversing occurrences.
+    pub fn capture_scene(&self, name: String, camera: crate::SceneCamera, style: crate::ViewStyle) -> crate::SavedScene {
+        crate::SavedScene {
+            name, camera, style,
+            tags: self.graph.tags.iter().map(|(id, tag)| (*id, tag.visible)).collect(),
+            objects: self.graph.definitions.iter().flat_map(|(owner, definition)| definition.instances.iter().map(move |(id, instance)| ((*owner, *id), instance.hidden))).collect(),
+        }
+    }
+
     /// Read-only visibility tags.
     pub fn tags(&self) -> &BTreeMap<TagId, Tag> {
         &self.graph.tags
@@ -1432,6 +1448,14 @@ impl DocumentHistory {
                     .get_mut(&id)
                     .ok_or(KernelError::MissingEntity)?
                     .visible = visible;
+            }
+            OrganizationCommand::RestoreVisibility { tags, objects } => {
+                for (id, visible) in tags {
+                    if let Some(tag) = after.tags.get_mut(&id) { tag.visible = visible; }
+                }
+                for ((owner, id), hidden) in objects {
+                    if let Some(instance) = after.definitions.get_mut(&owner).and_then(|d| d.instances.get_mut(&id)) { instance.hidden = hidden; }
+                }
             }
             OrganizationCommand::CreateMaterial(material) => {
                 validate_material(&material)?;
