@@ -201,6 +201,7 @@ impl Model {
                 let mut face = face;
                 if let Some(previous) = self.faces.get(&id) {
                     face.color = previous.color;
+                    face.material = previous.material;
                 }
                 faces.insert(id, face);
             }
@@ -310,6 +311,7 @@ impl Model {
             holes.sort_by_key(|ring| canonical_ring(ring));
             faces.push(Face {
                 color: [160, 177, 193, 255],
+                material: None,
                 outer: ring.clone(),
                 holes,
                 plane,

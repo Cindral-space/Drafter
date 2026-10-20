@@ -8,7 +8,7 @@ pub const TOLERANCE: f64 = 1.0e-7;
 pub const MAX_COORDINATE: f64 = 1.0e6;
 
 /// Canonically oriented plane, `normal.dot(position) == distance`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Plane {
     /// Unit normal. Its largest-magnitude component is positive.
     pub normal: DVec3,

@@ -305,6 +305,11 @@ impl History {
 
 #[cfg(feature = "bench-fixtures")]
 impl History {
+    /// Construct a known-topology benchmark model without quadratic full validation.
+    /// Only deterministic benchmark fixtures should call this feature-gated entry point.
+    pub fn benchmark_from_data(data: crate::GeometryData) -> Result<Self, KernelError> {
+        Self::benchmark_seed(Model::from_values(data)?)
+    }
     pub(crate) fn benchmark_seed(mut model: Model) -> Result<Self, KernelError> {
         model.ensure_spatial()?;
         Ok(Self {

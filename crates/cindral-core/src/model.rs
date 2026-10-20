@@ -10,7 +10,18 @@ use crate::{
 macro_rules! entity_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
         pub struct $name(u64);
         impl $name {
             /// Reconstruct an ID; callers must still check model membership.
@@ -29,14 +40,14 @@ entity_id!(EdgeId, "Stable edge identity within a document.");
 entity_id!(FaceId, "Stable face identity within a document.");
 
 /// A vertex position in meters.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vertex {
     /// Double-precision world position.
     pub position: DVec3,
 }
 
 /// An undirected topological edge.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Edge {
     /// Distinct endpoint IDs, in ascending order.
     pub vertices: [VertexId; 2],
@@ -47,7 +58,7 @@ pub struct Edge {
 }
 
 /// A bounded planar region. Inner loops remove area from the outer loop.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Face {
     /// Counterclockwise boundary relative to the plane normal.
     pub outer: Vec<VertexId>,
@@ -57,6 +68,9 @@ pub struct Face {
     pub plane: Plane,
     /// Linear display color as RGBA bytes.
     pub color: [u8; 4],
+    /// Optional document material reference.
+    #[serde(default)]
+    pub material: Option<crate::MaterialId>,
 }
 
 /// Read-only topology. Mutations are available only through command history.

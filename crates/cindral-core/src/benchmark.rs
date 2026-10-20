@@ -57,6 +57,7 @@ pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError
                     id,
                     Face {
                         color: [160, 177, 193, 255],
+                        material: None,
                         outer: indices.map(|i| ids[i]).to_vec(),
                         holes: Vec::new(),
                         plane: Plane {
