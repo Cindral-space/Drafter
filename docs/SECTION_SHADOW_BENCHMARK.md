@@ -11,7 +11,16 @@ timeout 90s target/release/examples/component_benchmark
 
 Each static mode gets 20 warmup and 100 measured submissions. Timers include encoder creation, submission and device completion. Shadow redraw counters assert no redraw during unchanged frames, camera movement, receiver toggles or intensity changes; buffer-capacity assertions check that toggling effects retains geometry allocation. Instance edits get 30 measured changed placements and redraw the map. Section movements use the real app cap cache on the same 5,000-instance document: 30 changed Z cuts, with CPU cross-section generation, separate cap upload, invalidated map, color pass and GPU completion all timed together. Bounds traversal/setup is outside that section timing. Map drawing includes clipped faces and caps, with edge casting disabled.
 
-Final measurements and raw output are recorded below after the final renderer build.
+| GPU-completed workload | Mean ms | p95 ms | Maximum ms |
+| --- | ---: | ---: | ---: |
+| Shadows off | 1.752 | 1.882 | 1.973 |
+| Shadows on, Medium | 2.485 | 2.890 | 3.159 |
+| Instance update + invalidated map + color | 4.076 | — | 4.573 |
+| Live section: cap CPU + upload + map + color | 7.956 | — | 15.606 |
+
+Section cap CPU time alone averages 2.376 ms, maximum 3.871 ms; each section frame draws 90,000 separate cap vertices. Every sampled edit/section frame is below 16 ms, so Medium remains the default. The section maximum leaves little headroom for excluded UI work; it is not a full editor latency guarantee. Static shadows render the depth map exactly once across 120 frames, versus zero renders when disabled. Camera/intensity/receiver changes reuse it, and geometry allocation is unchanged across effect toggles.
+
+[Final raw output](benchmarks/2026-10-21-m7b-sections-shadows.txt) records adapter and CPU setup paths. The preliminary run preceded the white-array/alpha-caster corrections and is superseded by this final run. Native release captures of solid/transparent/mirrored groups and checker-textured shared components pass without GPU validation errors; orange filled caps, plane widget, cut-away geometry and ground/face shadows were visually checked. The white-only texture fallback now allocates a real two-layer array to avoid black materials on the OpenGL backend.
 
 These are measured editor paths, not full presented frame latency: egui/Outliner layout, inference, grid, widget painting, swapchain composition, event scheduling and vsync are excluded. They establish neither a hard real-time guarantee nor arbitrary connected-solid/Boolean performance. Map resolution/filtering, screen coverage, transparency, model complexity and desktop contention affect timings. Only the affected component/section/shadow benchmark was rerun for M7b; unrelated file and connected-kernel benchmarks were not rerun.
 

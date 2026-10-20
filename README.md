@@ -24,7 +24,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M5: organization
 - [x] M6: files and export
 - [x] M7a: Styles and Scenes
-- [ ] M7b: section planes and shadows
+- [x] M7b: section planes and shadows
 
 ## Run the viewport
 
@@ -114,3 +114,5 @@ cargo run --release -p cindral-io --features bench-fixtures --example file_bench
 cargo run -p cindral-io --example make_texture_demo -- /tmp/textured.cdraft
 CINDRAL_CAPTURE_DRAFT=/tmp/textured.cdraft WGPU_BACKEND=opengl cargo run -p cindral-app --example capture_viewport -- /tmp/textured.ppm
 ```
+
+Section planes and geographic shadows are available in the Styles & Scenes panel. See [controls, validation and release measurements](docs/SECTION_SHADOW_BENCHMARK.md). This completes the planned M0–M7b feature milestones.

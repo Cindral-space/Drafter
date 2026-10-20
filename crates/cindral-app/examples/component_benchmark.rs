@@ -126,6 +126,16 @@ fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
             }
         }
         renderer.apply_update(&render.device, &render.queue, &update);
+        renderer.set_shadows(
+            cindral_core::ShadowSettings {
+                enabled: true,
+                ..Default::default()
+            },
+            Some([
+                glam::Vec3::ZERO,
+                glam::Vec3::new(199., 99., 1. + i as f32 * 0.01),
+            ]),
+        );
         let mut encoder = render.device.create_command_encoder(&Default::default());
         renderer.render(
             &render.device,
@@ -139,6 +149,22 @@ fn run(render: &egui_wgpu::RenderState) -> Result<(), String> {
         edit_times.push(start.elapsed().as_secs_f64() * 1000.);
     }
     println!("30 instance updates + invalidated shadow + color pass + GPU wait: mean {:.3} ms; max {:.3} ms",edit_times.iter().sum::<f64>()/30.,edit_times.iter().copied().fold(0.,f64::max));
+    // Restore the original placements/bounds to match the section document exactly.
+    renderer.apply_update(
+        &render.device,
+        &render.queue,
+        &cindral_render::scene::SceneUpdate {
+            batches: workload.initial.batches.clone(),
+            ..Default::default()
+        },
+    );
+    renderer.set_shadows(
+        cindral_core::ShadowSettings {
+            enabled: true,
+            ..Default::default()
+        },
+        bounds,
+    );
     cindral_app::organization_benchmark::run_section_previews(
         workload.section_document,
         |plane, caps| {
