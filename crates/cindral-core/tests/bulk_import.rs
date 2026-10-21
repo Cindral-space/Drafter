@@ -194,3 +194,51 @@ fn explicit_mesh_edges_do_not_restore_cleaned_diagonals() {
     let m = g.build(false, true).unwrap();
     assert_eq!(m.edges().values().filter(|e| e.soft && e.smooth).count(), 1);
 }
+#[test]
+fn loose_append_preserves_existing_ids_and_branch_allocation_floor() {
+    let mut h = DocumentHistory::new();
+    h.execute(Command::AddPolyline {
+        points: vec![
+            DVec3::new(10., 0., 0.),
+            DVec3::new(11., 0., 0.),
+            DVec3::new(11., 1., 0.),
+            DVec3::new(10., 1., 0.),
+        ],
+        closed: true,
+    })
+    .unwrap();
+    let before = h.model().to_data();
+    h.execute(Command::AddEdge {
+        start: DVec3::new(20., 0., 0.),
+        end: DVec3::new(21., 0., 0.),
+    })
+    .unwrap();
+    let used_floor = h.model().to_data().next_id;
+    h.undo().unwrap();
+    let mut incoming = DocumentHistory::new().to_data();
+    incoming
+        .definitions
+        .get_mut(&DefinitionId(0))
+        .unwrap()
+        .geometry = square().build(true, true).unwrap().to_data();
+    h.append_import(incoming).unwrap();
+    for (id, v) in &before.vertices {
+        assert_eq!(h.model().vertices().get(id), Some(v));
+    }
+    for (id, e) in &before.edges {
+        assert_eq!(h.model().edges().get(id), Some(e));
+    }
+    for (id, f) in &before.faces {
+        assert_eq!(h.model().faces().get(id), Some(f));
+    }
+    assert!(h
+        .model()
+        .vertices()
+        .keys()
+        .filter(|id| !before.vertices.contains_key(id))
+        .all(|id| id.value() >= used_floor));
+    h.undo().unwrap();
+    assert_eq!(h.model().to_data(), before);
+    h.redo().unwrap();
+    assert_eq!(h.model().faces().len(), 2);
+}

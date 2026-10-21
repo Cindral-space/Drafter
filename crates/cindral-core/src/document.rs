@@ -1721,36 +1721,65 @@ impl DocumentHistory {
         let root_replacement = if source.vertices().is_empty() {
             None
         } else {
-            let mut bulk = BulkGeometry::default();
-            for (model, remap) in [(self.model(), false), (source, true)] {
-                let mut indices = BTreeMap::new();
-                for (id, v) in model.vertices() {
-                    indices.insert(*id, bulk.vertices.len());
-                    bulk.vertices.push(v.position);
+            // Preserve existing IDs and the geometry allocator's branch high-water mark.
+            // Only incoming positions are interned; existing topology is never renumbered.
+            let mut model = self.model().clone();
+            model.next_id = model.next_id.max(self.history(active).allocation_floor());
+            model.ensure_spatial()?;
+            let mut vertices = BTreeMap::new();
+            for (id, v) in source.vertices() {
+                vertices.insert(*id, model.intern(v.position)?);
+            }
+            let mut pairs: BTreeMap<_, _> = model
+                .edges
+                .iter()
+                .map(|(id, e)| (e.vertices, *id))
+                .collect();
+            for edge in source.edges().values() {
+                let mut pair = edge.vertices.map(|v| vertices[&v]);
+                pair.sort();
+                if pair[0] == pair[1] {
+                    continue;
                 }
-                for f in model.faces().values() {
-                    bulk.faces.push(BulkFace {
-                        outer: f.outer.iter().map(|v| indices[v]).collect(),
-                        holes: f
-                            .holes
-                            .iter()
-                            .map(|r| r.iter().map(|v| indices[v]).collect())
-                            .collect(),
-                        color: f.color,
-                        material: f.material.map(|id| if remap { materials[&id] } else { id }),
-                    });
-                }
-                for e in model.edges().values() {
-                    bulk.edges.push(BulkEdge {
-                        vertices: e.vertices.map(|v| indices[&v]),
-                        soft: e.soft,
-                        hidden: e.smooth,
-                    });
+                if let Some(id) = pairs.get(&pair) {
+                    let e = model.edges.get_mut(id).ok_or(KernelError::MissingEntity)?;
+                    e.soft |= edge.soft;
+                    e.smooth |= edge.smooth;
+                } else {
+                    let id = EdgeId::from_raw(model.allocate()?);
+                    model.edges.insert(
+                        id,
+                        Edge {
+                            vertices: pair,
+                            soft: edge.soft,
+                            smooth: edge.smooth,
+                        },
+                    );
+                    pairs.insert(pair, id);
                 }
             }
-            let m = bulk.build(false, false)?;
-            m.validate()?;
-            Some(m)
+            let mut keys: BTreeSet<_> = model
+                .faces
+                .values()
+                .map(crate::topology::face_key)
+                .collect();
+            for face in source.faces().values() {
+                let mut face = face.clone();
+                face.outer = face.outer.iter().map(|v| vertices[v]).collect();
+                face.holes = face
+                    .holes
+                    .iter()
+                    .map(|r| r.iter().map(|v| vertices[v]).collect())
+                    .collect();
+                face.material = face.material.map(|id| materials[&id]);
+                if keys.insert(crate::topology::face_key(&face)) {
+                    let id = FaceId::from_raw(model.allocate()?);
+                    model.faces.insert(id, face);
+                }
+            }
+            model.spatial = None;
+            model.validate()?;
+            Some(model)
         };
         let mut steps = Vec::new();
         // Every operation below is on prepared values. Derived index construction is already done.

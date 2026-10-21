@@ -295,6 +295,9 @@ impl History {
             ..Self::default()
         })
     }
+    pub(crate) fn allocation_floor(&self) -> u64 {
+        self.high_water
+    }
     pub(crate) fn record_import(&mut self) {
         let delta = crate::transaction::Delta::between(&Model::default(), &self.model, 1);
         self.revision = 1;
