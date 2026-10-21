@@ -113,7 +113,9 @@ See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid m
 
 ## Files and interchange (M6)
 
-Use **File** to create/open/save `.cdraft`, import OBJ, export OBJ/STL/glTF 2, and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup offers retained crash snapshots.
+Use **File** to create/open/save `.cdraft`, import OBJ/glTF/GLB/COLLADA, export OBJ/STL/glTF 2, and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup offers retained crash snapshots.
+
+Imports append as one undo step, with component/loose geometry and coplanar cleanup options, background progress, cancellation and a summary. See the [import pipeline and limits](docs/IMPORT_PIPELINE.md).
 
 Materials can embed PNG/JPEG images; original bytes survive native round trips, while the viewport uses 256×256 planar previews. OBJ/STL flatten visible instances in metres/Z-up; glTF shares meshes with nested placement nodes and converts to metres/Y-up. See [format, migration, recovery and interchange limits](docs/FILE_FORMAT.md) and [save/load measurements](docs/FILE_BENCHMARK.md).
 

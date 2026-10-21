@@ -1,0 +1,15 @@
+   Compiling cindral-core v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-core)
+   Compiling cindral-inference v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-inference)
+   Compiling cindral-io v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-io)
+   Compiling cindral-render v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-render)
+   Compiling cindral-tools v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-tools)
+   Compiling cindral-app v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-app)
+    Finished `release` profile [optimized] target(s) in 1m 10s
+     Running unittests src/lib.rs (target/release/deps/cindral_app-34f63b2b941710c4)
+
+running 1 test
+Imported 100k triangles: connected edit plus dirty CPU mesh 2.123ms
+test files_ui::tests::imported_100k_interactive_mesh_update ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 3.02s
+

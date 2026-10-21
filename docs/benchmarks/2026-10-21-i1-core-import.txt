@@ -1,0 +1,12 @@
+Early core-only baseline, before final convex-chord guard. Final IO/app results are in the adjacent gltf-import/import-edit reports.
+
+   Compiling cindral-core v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-core)
+    Finished `release` profile [optimized] target(s) in 29.53s
+     Running tests/import_performance.rs (target/release/deps/import_performance-2f816ed7eb0d6971)
+
+running 1 test
+100k triangles: import 2.588s; connected corner chord edit 1.707ms; 50002 faces
+test import_100k_triangles_and_edit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.75s
+

@@ -1,0 +1,6 @@
+cargo fmt --all; final cargo fmt --all -- --check: PASS
+cargo clippy --workspace --all-targets --all-features -- -D warnings: PASS
+cargo test --workspace --all-features: PASS
+Completed target summaries: 34; passed including doctest: 284; failures: 0; ignored release workloads: 3
+After final explicit-edge cleanup fix: bulk_import 8/8, import_pipeline 3/3; strict core/IO all-target/all-feature Clippy PASS; workspace fmt check PASS. Three new active regressions, including a later stable-ID/branch-allocation test; strict core Clippy passed after the identity correction.
+Initial XML-depth abort, topology property failure and lint failures were corrected; initial failing runs are not counted as passes.

@@ -2,7 +2,7 @@
 
 ## Status
 
-M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kernel, pure inference and drawing, modify tools, nested organization/instancing, and native files/recovery/textures/import/export. Measured static 500k-triangle, component, kernel and connected-solid benchmarks distinguish their workloads and limits. M7a implements Styles and Scenes; M7b section planes and shadows remain planned. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
+M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kernel, pure inference and drawing, modify tools, nested organization/instancing, and native files/recovery/textures/import/export. Measured static 500k-triangle, component, kernel and connected-solid benchmarks distinguish their workloads and limits. M7a implements Styles and Scenes; M7b implements section planes and shadows. I1 adds the shared import pipeline and glTF/GLB/COLLADA import. Public interfaces are frozen by the integrating engineer before dependent tasks are delegated.
 
 ## Crate boundaries
 
@@ -175,3 +175,27 @@ Sun direction uses NOAA Julian-century solar equations, Gregorian civil date, ex
 The shadow benchmark reports GPU-completed offscreen color frames separately from map-invalidating instance updates; neither implies full editor/vsync latency. See `SECTION_SHADOW_BENCHMARK.md` for measured results and limitations. Current float32 raster precision and existing unsorted transparency limits remain. Native GPU checks are local Linux/Vega11; cross-platform runtime remains untested.
 
 Solar math reference: [NOAA solar calculation details](https://gml.noaa.gov/grad/solcalc/calcdetails.html). Unit tests compare the geometric result against the NREL SPA Boulder example (2003-10-17, 12:30:30 MST) within 0.05 degrees, allowing the reference atmospheric-refraction difference.
+
+
+## I1 general import pipeline
+
+All File > Import formats emit `cindral_io::ImportedScene`: indexed polygons with holes,
+styled edges, shared definitions, instances, materials/assets, tags and source units/up-axis.
+A common converter performs basis conjugation, unit conversion, cleanup and bounded
+validation. glTF/GLB and COLLADA retain shared geometry and nested placements. The legacy
+OBJ bundle APIs remain compatible; the UI uses its intermediate-scene entry point.
+See [import contracts, security limits and release workloads](IMPORT_PIPELINE.md).
+
+`BulkGeometry` builds welded mesh topology directly using tolerance spatial hashing and
+unique edge lookup. It never routes imported triangles through edit intersection splitting.
+Cleanup joins disjoint coplanar triangle pairs and softens compatible remaining seams;
+material/color boundaries survive. Final validation rejects unsplit crossings with a
+five-million candidate-pair budget; polygon work and input counts are bounded separately.
+Geometry and organization deltas produce one import undo entry, including when appending
+to an existing editing context. Later edits retain normal undo/redo behavior.
+
+Import workers parse, validate, append, decode textures and prepare initial CPU render
+caches; the foreground installs prepared state and schedules GPU uploads. Cancellation,
+document generations and geometry revisions guard completed results. Snapshot cloning and
+GPU uploads remain foreground costs. Original source normals/UV sets are replaced by native
+face normals/planar mapping; alpha MASK uses blending. No `.skp` implementation is included.
