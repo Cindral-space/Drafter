@@ -295,6 +295,12 @@ impl History {
             ..Self::default()
         })
     }
+    pub(crate) fn record_import(&mut self) {
+        let delta = crate::transaction::Delta::between(&Model::default(), &self.model, 1);
+        self.revision = 1;
+        self.changes = delta.changes(1);
+        self.undo.push(Entry { delta });
+    }
     pub(crate) fn replace_model(&mut self, mut model: Model) -> Result<bool, KernelError> {
         self.cancel_preview()?;
         model.spatial = None;

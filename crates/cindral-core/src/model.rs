@@ -310,6 +310,10 @@ impl Model {
     /// Full validation is deliberately conservative and quadratic in edge count.
     #[tracing::instrument(level = "info", skip_all, name = "model.validate")]
     pub fn validate(&self) -> Result<(), KernelError> {
+        self.validate_mesh(true)
+    }
+    // Mesh import preserves overlapping surfaces; intersections are not edit arrangements.
+    pub(crate) fn validate_mesh(&self, intersections: bool) -> Result<(), KernelError> {
         let invalid = |message: &str| KernelError::InvalidTopology(message.to_owned());
         for vertex in self.vertices.values() {
             geometry::validate_position(vertex.position)?;
@@ -327,6 +331,7 @@ impl Model {
                 return Err(KernelError::DegenerateEdge);
             }
         }
+        if intersections {
         let intersection_span =
             tracing::info_span!("validate.edge_pairs", edges = self.edges.len()).entered();
         // Conservative R-tree broad phase; the exact tolerance-aware predicate below
@@ -378,9 +383,10 @@ impl Model {
             }
         }
         drop(intersection_span);
+        }
         let _faces_span = tracing::info_span!("validate.faces").entered();
         for (id, face) in &self.faces {
-            if (face.plane.normal.length() - 1.0).abs() > TOLERANCE {
+            if !face.plane.normal.is_finite() || !face.plane.distance.is_finite() || (face.plane.normal.length() - 1.0).abs() > TOLERANCE {
                 return Err(invalid("non-unit face normal"));
             }
             for (index, ring) in std::iter::once(&face.outer)

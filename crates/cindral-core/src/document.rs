@@ -617,7 +617,7 @@ impl DocumentHistory {
     }
     /// Dirty entities for the active definition, compatible with M4 geometry history.
     pub fn changes(&self) -> &ChangeSet {
-        self.history(self.active_definition()).changes()
+        self.changes.geometry.get(&self.active_definition()).unwrap_or_else(|| self.history(self.active_definition()).changes())
     }
     /// Dirty geometry partitions and scene metadata flags.
     pub fn document_changes(&self) -> &DocumentChanges {
@@ -1078,6 +1078,19 @@ impl DocumentHistory {
             return Err(invalid("invalid document ID allocator"));
         }
         result.occurrences()?;
+        Ok(result)
+    }
+    /// Construct an imported document with exactly one reversible import entry.
+    /// Geometry must be validated as mesh surfaces; crossings are preserved, not split.
+    pub fn from_import_data(data: DocumentData) -> Result<Self, KernelError> {
+        let mut result = Self::from_data_impl(data, false)?;
+        for id in result.graph.definitions.keys() { result.history(*id).model().validate_mesh(false)?; }
+        let steps: Vec<_> = result.graph.definitions.keys().copied().collect();
+        for id in &steps { result.history_mut(*id)?.record_import(); }
+        let delta = GraphDelta::between(&Self::new().graph, &result.graph);
+        result.undo.push(DocumentEntry::Organization { delta, steps });
+        result.revision = 1;
+        result.changes.instances = true;
         Ok(result)
     }
     /// Undo the most recent committed edit regardless of the current edit context.
