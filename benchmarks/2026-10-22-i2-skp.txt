@@ -1,0 +1,40 @@
+Cindral Drafter I2 — 2026-10-22
+AMD Ryzen 5 2400G with Radeon Vega Graphics; Linux x86_64; 8 logical CPUs.
+Rust release profile. Sequential executions after all benchmark builds/agents
+finished; no concurrent Cargo builds during measured execution.
+
+Authored connected 140x140 grid: 19,600 real quads, 19,881 shared vertices,
+4,687,806 model-record bytes; 680,689-byte compressed .skp seed.
+Source generation/compression is outside the timed region. IO workload starts
+at in-memory SKP bytes, includes ZIP decode, records, adapter validation, shared
+conversion and history construction; second timing includes destination append.
+Kernel chord splits one convex corner face. App workload imports the same seed,
+prepares/installs normal CPU caches, enters the occurrence, then times a real
+edit plus dirty CPU mesh preparation. Single sample per workload, no p95 claim.
+Excludes OS file reading from IO timing, GPU completion, picking/inference,
+UI/vsync, entire-frame latency, and arbitrary production/max-size models.
+No user fixtures were present. No cross-platform or native visual/runtime claim.
+
+Reproduce (benchmarks must use --release):
+CINDRAL_SKP_BENCHMARK_SEED="$PWD/.agent-out/i2-connected.skp" cargo test -p cindral-io --release --test skp_import connected_skp_import_performance -- --ignored --nocapture
+CINDRAL_SKP_BENCHMARK_SEED="$PWD/.agent-out/i2-connected.skp" cargo test -p cindral-app --release --lib imported_skp_interactive_mesh_update -- --ignored --nocapture
+
+Final measured executions below used the freshly built release test binaries
+directly, sequentially, with --test-threads=1 to exclude concurrent builds.
+Earlier build-contended measurements are superseded and are not the evidence.
+
+
+running 1 test
+test connected_skp_import_performance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 2.49s
+
+SKP connected 19600 quads, expanded 4687806 bytes, compressed 680689 bytes: import 1.559s; with append 2.230s; kernel chord 0.199ms
+
+
+running 1 test
+test files_ui::tests::imported_skp_interactive_mesh_update ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 1.48s
+
+SKP connected edit plus dirty CPU mesh 1.163ms

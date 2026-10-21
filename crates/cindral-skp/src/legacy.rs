@@ -26,7 +26,10 @@ struct Fail {
 }
 type R<T> = std::result::Result<T, Fail>;
 fn fail<T>(at: usize, msg: impl Into<String>) -> R<T> {
-    Err(Fail { at, msg: msg.into() })
+    Err(Fail {
+        at,
+        msg: msg.into(),
+    })
 }
 
 fn u16_at(d: &[u8], at: usize) -> Option<u16> {
@@ -49,7 +52,10 @@ fn find(d: &[u8], needle: &[u8], start: usize, end: usize) -> Option<usize> {
     if start >= end || end - start < needle.len() {
         return None;
     }
-    d[start..end].windows(needle.len()).position(|w| w == needle).map(|i| i + start)
+    d[start..end]
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|i| i + start)
 }
 
 /// Bounded little-endian byte cursor.
@@ -80,7 +86,10 @@ impl<'a> Cur<'a> {
     fn f64(&mut self) -> R<f64> {
         let at = self.pos;
         self.take(8)?;
-        f64_at(self.d, at).ok_or(Fail { at, msg: "truncated f64".into() })
+        f64_at(self.d, at).ok_or(Fail {
+            at,
+            msg: "truncated f64".into(),
+        })
     }
     fn f64s<const N: usize>(&mut self) -> R<[f64; N]> {
         let mut o = [0.0; N];
@@ -93,7 +102,10 @@ impl<'a> Cur<'a> {
         self.d.get(self.pos..self.pos.checked_add(n)?)
     }
     fn peek_u16(&self) -> R<u16> {
-        u16_at(self.d, self.pos).ok_or(Fail { at: self.pos, msg: "truncated tag".into() })
+        u16_at(self.d, self.pos).ok_or(Fail {
+            at: self.pos,
+            msg: "truncated tag".into(),
+        })
     }
     fn seek(&mut self, pos: usize) -> R<()> {
         if pos > self.d.len() {
@@ -103,7 +115,10 @@ impl<'a> Cur<'a> {
         Ok(())
     }
     fn back(&mut self, n: usize) -> R<()> {
-        self.pos = self.pos.checked_sub(n).ok_or(Fail { at: self.pos, msg: "seek before start".into() })?;
+        self.pos = self.pos.checked_sub(n).ok_or(Fail {
+            at: self.pos,
+            msg: "seek before start".into(),
+        })?;
         Ok(())
     }
     fn utf16(&mut self) -> R<String> {
@@ -118,9 +133,18 @@ impl<'a> Cur<'a> {
                 n = self.u32()? as usize;
             }
         }
-        let bytes = n.checked_mul(2).ok_or(Fail { at: self.pos, msg: "string length overflow".into() })?;
+        let bytes = n.checked_mul(2).ok_or(Fail {
+            at: self.pos,
+            msg: "string length overflow".into(),
+        })?;
         let b = self.take(bytes)?;
-        let units: Vec<u16> = b.as_chunks::<2>().0.iter().take(512).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = b
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .take(512)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         Ok(String::from_utf16_lossy(&units))
     }
 }
@@ -215,15 +239,39 @@ enum Val {
     Pending,
     None,
     Vertex(DVec3),
-    Edge { v1: Option<usize>, v2: Option<usize>, db: Db },
-    EdgeUse { edge: Option<usize>, sense: u8 },
+    Edge {
+        v1: Option<usize>,
+        v2: Option<usize>,
+        db: Db,
+    },
+    EdgeUse {
+        edge: Option<usize>,
+        sense: u8,
+    },
     Loop(Vec<(Option<usize>, u8)>),
-    Face { db: Db, loops: Vec<Option<usize>> },
+    Face {
+        db: Db,
+        loops: Vec<Option<usize>>,
+    },
     Material(Mat),
-    Layer { name: String, hidden: bool },
-    Dib { start: usize, len: usize },
-    Definition { name: String, ents: Vec<Option<usize>> },
-    Instance { db: Db, def: Option<usize>, xf: [f64; 12], name: String },
+    Layer {
+        name: String,
+        hidden: bool,
+    },
+    Dib {
+        start: usize,
+        len: usize,
+    },
+    Definition {
+        name: String,
+        ents: Vec<Option<usize>>,
+    },
+    Instance {
+        db: Db,
+        def: Option<usize>,
+        xf: [f64; 12],
+        name: String,
+    },
 }
 
 #[derive(Debug)]
@@ -244,7 +292,10 @@ struct Ref {
     slot: Option<usize>,
     kind: RK,
 }
-const NULL: Ref = Ref { slot: None, kind: RK::Null };
+const NULL: Ref = Ref {
+    slot: None,
+    kind: RK::Null,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Owner {
@@ -305,7 +356,10 @@ impl<'a> Ar<'a> {
         }
         let s = self.next_slot;
         self.slots.insert(s, e);
-        self.next_slot = s.checked_add(1).ok_or(Fail { at, msg: "slot overflow".into() })?;
+        self.next_slot = s.checked_add(1).ok_or(Fail {
+            at,
+            msg: "slot overflow".into(),
+        })?;
         Ok(s)
     }
 
@@ -325,7 +379,9 @@ impl<'a> Ar<'a> {
 
     fn read_object(&mut self, r: &mut Cur, expect: Option<K>) -> R<Ref> {
         self.reads += 1;
-        if self.reads > MAX_OBJECTS { return fail(r.pos, "archive read-work limit exceeded"); }
+        if self.reads > MAX_OBJECTS {
+            return fail(r.pos, "archive read-work limit exceeded");
+        }
         let at = r.pos;
         let tag = r.u16()?;
         if tag == 0 {
@@ -365,7 +421,9 @@ impl<'a> Ar<'a> {
     fn new_of_class(&mut self, r: &mut Cur, cslot: usize, expect: Option<K>) -> R<Ref> {
         let (k, name) = match self.slots.get(&cslot) {
             Some(Entry::Class(k, n)) => (*k, n.clone()),
-            Some(Entry::Obj(..)) => return fail(r.pos, format!("class-ref to non-class slot {cslot}")),
+            Some(Entry::Obj(..)) => {
+                return fail(r.pos, format!("class-ref to non-class slot {cslot}"))
+            }
             None => {
                 let Some(e) = expect else {
                     return fail(r.pos, format!("class-ref to unknown slot {cslot}"));
@@ -381,7 +439,11 @@ impl<'a> Ar<'a> {
 
     fn new_obj(&mut self, r: &mut Cur, k: K, name: &str) -> R<Ref> {
         if k == K::Unknown {
-            let n: String = name.chars().filter(|c| c.is_ascii_graphic()).take(40).collect();
+            let n: String = name
+                .chars()
+                .filter(|c| c.is_ascii_graphic())
+                .take(40)
+                .collect();
             return fail(r.pos, format!("unsupported record class {n}"));
         }
         if self.depth >= MAX_DEPTH {
@@ -398,29 +460,48 @@ impl<'a> Ar<'a> {
         if matches!(k, K::DimLinear | K::Text) {
             self.annot_watermark = Some(self.next_slot);
         }
-        Ok(Ref { slot: Some(slot), kind: RK::Obj(k) })
+        Ok(Ref {
+            slot: Some(slot),
+            kind: RK::Obj(k),
+        })
     }
 
     fn translate_ref(&self, slot: usize) -> Option<usize> {
         let index = self.burns.partition_point(|&(start, _, _)| start <= slot);
-        if index == 0 { return Some(slot); }
+        if index == 0 {
+            return Some(slot);
+        }
         let (start, width, cumulative) = self.burns[index - 1];
-        if slot < start.saturating_add(width) { None } else { slot.checked_sub(cumulative) }
-
+        if slot < start.saturating_add(width) {
+            None
+        } else {
+            slot.checked_sub(cumulative)
+        }
     }
 
     fn backref(&self, mut slot: usize, at: usize) -> R<Ref> {
         if self.burns.first().is_some_and(|b| slot >= b.0) {
             match self.translate_ref(slot) {
-                None => return Ok(Ref { slot: Some(slot), kind: RK::Reserved }),
+                None => {
+                    return Ok(Ref {
+                        slot: Some(slot),
+                        kind: RK::Reserved,
+                    })
+                }
                 Some(w) => slot = w,
             }
         }
         match self.slots.get(&slot) {
-            None if slot < self.walk_base => Ok(Ref { slot: Some(slot), kind: RK::Premodel }),
+            None if slot < self.walk_base => Ok(Ref {
+                slot: Some(slot),
+                kind: RK::Premodel,
+            }),
             None => fail(at, format!("back-ref to unwalked slot {slot}")),
             Some(Entry::Class(..)) => fail(at, format!("back-ref to class slot {slot}")),
-            Some(Entry::Obj(k, _)) => Ok(Ref { slot: Some(slot), kind: RK::Obj(*k) }),
+            Some(Entry::Obj(k, _)) => Ok(Ref {
+                slot: Some(slot),
+                kind: RK::Obj(*k),
+            }),
         }
     }
 
@@ -434,8 +515,13 @@ impl<'a> Ar<'a> {
     }
 
     fn clayer_record_at(&self, at: usize, unmatched: bool) -> bool {
-        let Some(tag) = u16_at(self.d, at) else { return false };
-        if tag == 0xFFFF && u16_at(self.d, at + 4) == Some(6) && self.d.get(at + 6..at + 12) == Some(b"CLayer") {
+        let Some(tag) = u16_at(self.d, at) else {
+            return false;
+        };
+        if tag == 0xFFFF
+            && u16_at(self.d, at + 4) == Some(6)
+            && self.d.get(at + 6..at + 12) == Some(b"CLayer")
+        {
             return true;
         }
         if let Some(&c) = self.class_slot.get(&K::Layer) {
@@ -456,19 +542,28 @@ impl<'a> Ar<'a> {
     }
 
     fn skip_clayer_parent_ref(&self, r: &mut Cur, self_slot: Option<usize>) {
-        let (Some(a), Some(b), Some(me)) = (u16_at(self.d, r.pos), u16_at(self.d, r.pos + 2), self_slot) else {
+        let (Some(a), Some(b), Some(me)) =
+            (u16_at(self.d, r.pos), u16_at(self.d, r.pos + 2), self_slot)
+        else {
             return;
         };
         let bad = |t: u16| t == 0 || t & 0x8000 != 0 || t == 0x7FFF;
         if bad(a) || a as usize == me || bad(b) {
             return;
         }
-        if self.obj_kind(a as usize) == Some(K::Layer) && self.obj_kind(b as usize) == Some(K::Layer) {
+        if self.obj_kind(a as usize) == Some(K::Layer)
+            && self.obj_kind(b as usize) == Some(K::Layer)
+        {
             r.pos += 2;
         }
     }
 
-    fn collect_trailing_layers(&mut self, r: &mut Cur, out: &mut Vec<usize>, unmatched: bool) -> R<()> {
+    fn collect_trailing_layers(
+        &mut self,
+        r: &mut Cur,
+        out: &mut Vec<usize>,
+        unmatched: bool,
+    ) -> R<()> {
         while r.pos + 2 <= self.d.len() {
             if r.peek_u16()? == 0 {
                 r.pos += 2;
@@ -486,22 +581,32 @@ impl<'a> Ar<'a> {
     }
 
     fn plausible_list_tag(&self, at: usize) -> bool {
-        let Some(t) = u16_at(self.d, at) else { return false };
+        let Some(t) = u16_at(self.d, at) else {
+            return false;
+        };
         if matches!(t, 0 | 0x7FFF | 0xFFFF) {
             return true;
         }
         if t & 0x8000 != 0 {
-            return matches!(self.slots.get(&((t & 0x7FFF) as usize)), Some(Entry::Class(..)));
+            return matches!(
+                self.slots.get(&((t & 0x7FFF) as usize)),
+                Some(Entry::Class(..))
+            );
         }
         (t as usize) < self.next_slot
     }
 
     fn strict_next_tag(&self, at: usize, allow_null: bool) -> bool {
-        let Some(t) = u16_at(self.d, at) else { return false };
+        let Some(t) = u16_at(self.d, at) else {
+            return false;
+        };
         match t {
             0 => allow_null,
             0x7FFF | 0xFFFF => true,
-            t if t & 0x8000 != 0 => matches!(self.slots.get(&((t & 0x7FFF) as usize)), Some(Entry::Class(..))),
+            t if t & 0x8000 != 0 => matches!(
+                self.slots.get(&((t & 0x7FFF) as usize)),
+                Some(Entry::Class(..))
+            ),
             _ => false,
         }
     }
@@ -509,7 +614,12 @@ impl<'a> Ar<'a> {
     /// SketchUp 2020 can place an empty string plus zero padding ahead of a count.
     fn retry_v20(&self, r: &mut Cur, count_pos: usize, limit: u32) -> Option<u32> {
         let d = self.d;
-        let marker_at = find(d, MARKER, count_pos, (count_pos + 12).min(d.len().saturating_sub(3)) + 2)?;
+        let marker_at = find(
+            d,
+            MARKER,
+            count_pos,
+            (count_pos + 12).min(d.len().saturating_sub(3)) + 2,
+        )?;
         if marker_at >= count_pos + 12 || *d.get(marker_at + 3)? != 0 {
             return None;
         }
@@ -518,11 +628,15 @@ impl<'a> Ar<'a> {
             at += 1;
         }
         for back in 0..4 {
-            let Some(at2) = at.checked_sub(back) else { continue };
+            let Some(at2) = at.checked_sub(back) else {
+                continue;
+            };
             if at2 < marker_at + 4 {
                 continue;
             }
-            let Some(count) = u32_at(d, at2) else { continue };
+            let Some(count) = u32_at(d, at2) else {
+                continue;
+            };
             if count == 0 || count > limit || !self.plausible_list_tag(at2 + 4) {
                 continue;
             }
@@ -549,10 +663,20 @@ impl<'a> Ar<'a> {
     }
 
     fn drawbase(&mut self, r: &mut Cur) -> R<Db> {
-        let n = if self.ver < FIRST_V4 { 5 } else if self.ver < 5 { 7 } else { 8 };
+        let n = if self.ver < FIRST_V4 {
+            5
+        } else if self.ver < 5 {
+            7
+        } else {
+            8
+        };
         let b = r.take(n)?;
         let tag = r.peek_u16()?;
-        let lay = self.class_slot.get(&K::Layer).copied().filter(|&c| c < 0x7FFF);
+        let lay = self
+            .class_slot
+            .get(&K::Layer)
+            .copied()
+            .filter(|&c| c < 0x7FFF);
         let layer = if lay.is_some_and(|c| tag == 0x8000 | c as u16) {
             // By-object layer: an inline layer record on first use.
             self.read_object(r, Some(K::Layer))?.slot
@@ -567,9 +691,18 @@ impl<'a> Ar<'a> {
             Some(r.u16()? as usize).filter(|&l| l != 0)
         };
         if self.ver < FIRST_V4 {
-            return Ok(Db { layer, ..Db::default() });
+            return Ok(Db {
+                layer,
+                ..Db::default()
+            });
         }
-        Ok(Db { mat: u16::from_le_bytes([b[0], b[1]]) as usize, hidden: b[2], soft: b[5], smooth: b[6], layer })
+        Ok(Db {
+            mat: u16::from_le_bytes([b[0], b[1]]) as usize,
+            hidden: b[2],
+            soft: b[5],
+            smooth: b[6],
+            layer,
+        })
     }
 
     fn entity_ref(&self, r: &mut Cur) -> R<Option<usize>> {
@@ -693,7 +826,12 @@ impl<'a> Ar<'a> {
                 r.f64()?;
                 r.utf16()?;
                 r.take(16)?;
-                Ok(Val::Instance { db, def, xf, name: String::new() })
+                Ok(Val::Instance {
+                    db,
+                    def,
+                    xf,
+                    name: String::new(),
+                })
             }
             K::Relationship => {
                 self.preamble(r)?;
@@ -715,7 +853,11 @@ impl<'a> Ar<'a> {
                             .iter()
                             .copied()
                             .find(|&c| self.strict_next_tag(r.pos + c, false))
-                            .or_else(|| [4, 0, 7].into_iter().find(|&c| self.strict_next_tag(r.pos + c, true)))
+                            .or_else(|| {
+                                [4, 0, 7]
+                                    .into_iter()
+                                    .find(|&c| self.strict_next_tag(r.pos + c, true))
+                            })
                             .unwrap_or(4);
                         self.cline_tail = Some(k);
                         k
@@ -733,7 +875,10 @@ impl<'a> Ar<'a> {
             K::SectionPlane => {
                 self.preamble(r)?;
                 self.drawbase(r)?;
-                let first = f64_at(self.d, r.pos).ok_or(Fail { at: r.pos, msg: "truncated section plane".into() })?;
+                let first = f64_at(self.d, r.pos).ok_or(Fail {
+                    at: r.pos,
+                    msg: "truncated section plane".into(),
+                })?;
                 if !first.is_finite() || first.abs() > 1.0001 {
                     self.read_object(r, None)?;
                 }
@@ -763,7 +908,9 @@ impl<'a> Ar<'a> {
     }
 
     fn register_burn(&mut self, delta: usize, at: usize) -> R<()> {
-        let Some(w) = self.annot_watermark.take() else { return fail(at, "burn without annotation") };
+        let Some(w) = self.annot_watermark.take() else {
+            return fail(at, "burn without annotation");
+        };
         if self.burns.len() >= MAX_BURNS {
             return fail(at, "store-map burn limit exceeded");
         }
@@ -803,7 +950,10 @@ impl<'a> Ar<'a> {
                 self.register_burn(delta, p0)?;
             } else {
                 r.pos = p0;
-                return fail(p0, format!("edge-use parent slot {ps:?} != current loop {expected:?}"));
+                return fail(
+                    p0,
+                    format!("edge-use parent slot {ps:?} != current loop {expected:?}"),
+                );
             }
         }
         Ok(Val::EdgeUse { edge, sense })
@@ -814,7 +964,9 @@ impl<'a> Ar<'a> {
         r.take(2)?;
         let mut uses = Vec::new();
         while r.peek_u16()? != 0 {
-            if uses.len() >= 4096 { return fail(r.pos, "loop exceeds 4096 coedges"); }
+            if uses.len() >= 4096 {
+                return fail(r.pos, "loop exceeds 4096 coedges");
+            }
             let u = self.read_object(r, Some(K::EdgeUse))?;
             if let Some(Val::EdgeUse { edge, sense }) = self.val(u.slot) {
                 uses.push((*edge, *sense));
@@ -840,13 +992,18 @@ impl<'a> Ar<'a> {
         for _ in 0..nloops {
             loops.push(self.read_object(r, Some(K::Loop))?.slot);
         }
-        let _back_mat = r.u16()?;
+        let back_mat = r.u16()?;
+        if db.mat == 0 {
+            db.mat = back_mat as usize;
+        }
         Ok(Val::Face { db, loops })
     }
 
     fn texture_block(&mut self, r: &mut Cur) -> R<([u8; 4], f64, u8, Tex)> {
         let (dib, inline) = if self.ver < FIRST_DIB_OBJECT {
-            let Val::Dib { start, len } = read_dib(r)? else { return fail(r.pos, "texture dib") };
+            let Val::Dib { start, len } = read_dib(r)? else {
+                return fail(r.pos, "texture dib");
+            };
             (None, Some((start, len)))
         } else {
             r.back(1)?;
@@ -886,10 +1043,22 @@ impl<'a> Ar<'a> {
             r.take(8)?;
             let opacity = r.f64()?;
             let use_opacity = r.u8()?;
-            return Ok(Val::Material(Mat { name, rgba, opacity, use_opacity, tex: None }));
+            return Ok(Val::Material(Mat {
+                name,
+                rgba,
+                opacity,
+                use_opacity,
+                tex: None,
+            }));
         }
         let (rgba, opacity, use_opacity, tex) = self.texture_block(r)?;
-        Ok(Val::Material(Mat { name, rgba, opacity, use_opacity, tex: Some(tex) }))
+        Ok(Val::Material(Mat {
+            name,
+            rgba,
+            opacity,
+            use_opacity,
+            tex: Some(tex),
+        }))
     }
 
     fn read_layer(&mut self, r: &mut Cur) -> R<Val> {
@@ -926,7 +1095,10 @@ impl<'a> Ar<'a> {
             for _ in 0..count {
                 let tag = r.peek_u16()?;
                 let new = if tag == 0x7FFF {
-                    u32_at(self.d, r.pos + 2).ok_or(Fail { at: r.pos, msg: "truncated path ref".into() })? & 0x8000_0000
+                    u32_at(self.d, r.pos + 2).ok_or(Fail {
+                        at: r.pos,
+                        msg: "truncated path ref".into(),
+                    })? & 0x8000_0000
                         != 0
                 } else {
                     tag == 0xFFFF || tag & 0x8000 != 0
@@ -984,7 +1156,10 @@ impl<'a> Ar<'a> {
         r.utf16()?;
         r.take(5)?;
         while r.peek(2) == Some(&[0xff, 0x7f][..]) {
-            let v = u32_at(self.d, r.pos + 2).ok_or(Fail { at: r.pos, msg: "truncated text attachment".into() })?;
+            let v = u32_at(self.d, r.pos + 2).ok_or(Fail {
+                at: r.pos,
+                msg: "truncated text attachment".into(),
+            })?;
             if v & 0x8000_0000 != 0 {
                 break;
             }
@@ -993,14 +1168,26 @@ impl<'a> Ar<'a> {
         Ok(Val::None)
     }
 
-    fn entity_list(&mut self, r: &mut Cur, count: u32, owner: Owner, out: &mut Vec<Option<usize>>) -> R<()> {
+    fn entity_list(
+        &mut self,
+        r: &mut Cur,
+        count: u32,
+        owner: Owner,
+        out: &mut Vec<Option<usize>>,
+    ) -> R<()> {
         self.burn_stack.push(0);
         let res = self.entity_list_inner(r, count as usize, owner, out);
         self.burn_stack.pop();
         res
     }
 
-    fn entity_list_inner(&mut self, r: &mut Cur, count: usize, owner: Owner, out: &mut Vec<Option<usize>>) -> R<()> {
+    fn entity_list_inner(
+        &mut self,
+        r: &mut Cur,
+        count: usize,
+        owner: Owner,
+        out: &mut Vec<Option<usize>>,
+    ) -> R<()> {
         while out.len() < count {
             let p = r.pos;
             let burned = self.burn_stack.last().is_some_and(|&b| b > 0);
@@ -1014,7 +1201,8 @@ impl<'a> Ar<'a> {
             match self.read_object(r, None) {
                 Ok(x) => out.push(x.slot),
                 Err(e) if owner == Owner::Root => {
-                    self.notes.truncate(255); self.notes.push(format!(
+                    self.notes.truncate(255);
+                    self.notes.push(format!(
                         "root entity list stopped after {} of {count} items at offset {:#x}: {}",
                         out.len(),
                         e.at,
@@ -1036,7 +1224,15 @@ impl<'a> Ar<'a> {
     fn read_definition(&mut self, r: &mut Cur) -> R<Val> {
         self.preamble(r)?;
         let v = self.ver;
-        r.take(if v >= 17 { 22 } else if v >= 5 { 20 } else if v >= FIRST_V4 { 19 } else { 13 })?;
+        r.take(if v >= 17 {
+            22
+        } else if v >= 5 {
+            20
+        } else if v >= FIRST_V4 {
+            19
+        } else {
+            13
+        })?;
         let nlayers = r.u32()?;
         if nlayers > 10_000 {
             return fail(r.pos, "implausible definition layer count");
@@ -1056,7 +1252,11 @@ impl<'a> Ar<'a> {
         if r.u16()? == 0x7FFF {
             r.u32()?;
         }
-        let mut count = if v >= 20 { self.retry_v20(r, r.pos, 5_000_000) } else { None };
+        let mut count = if v >= 20 {
+            self.retry_v20(r, r.pos, 5_000_000)
+        } else {
+            None
+        };
         let mut c = match count.take() {
             Some(c) => c,
             None => {
@@ -1101,7 +1301,9 @@ impl<'a> Ar<'a> {
                 && self.d.get(p + 6..p + 16) == Some(b"CThumbnail"))
                 || thumb.is_some_and(|t| self.is_class_ref(p, t))
         });
-        let Some(tpos) = tpos else { return fail(r.pos, "definition tail: thumbnail not found") };
+        let Some(tpos) = tpos else {
+            return fail(r.pos, "definition tail: thumbnail not found");
+        };
         r.seek(tpos)?;
         self.read_object(r, Some(K::Thumbnail))?;
         Ok(Val::Definition { name, ents })
@@ -1117,20 +1319,31 @@ impl<'a> Ar<'a> {
         let all = r.f64s::<13>()?;
         let mut xf = [0.0; 12];
         xf.copy_from_slice(&all[..12]);
-        let name =
-            if self.ver >= FIRST_NAMED_INSTANCE || r.peek(3) == Some(MARKER) { r.utf16()? } else { String::new() };
+        let name = if self.ver >= FIRST_NAMED_INSTANCE || r.peek(3) == Some(MARKER) {
+            r.utf16()?
+        } else {
+            String::new()
+        };
         if self.ver >= 14 {
             r.take(16)?;
         }
-        Ok(Val::Instance { db, def: d.slot, xf, name })
+        Ok(Val::Instance {
+            db,
+            def: d.slot,
+            xf,
+            name,
+        })
     }
 
     fn definition_starts_at(&self, at: usize) -> bool {
-        if self.d.get(at..at + 2) == Some(&[0xff, 0xff][..]) && self.d.get(at + 6..at + 26) == Some(b"CComponentDefinition")
+        if self.d.get(at..at + 2) == Some(&[0xff, 0xff][..])
+            && self.d.get(at + 6..at + 26) == Some(b"CComponentDefinition")
         {
             return true;
         }
-        self.class_slot.get(&K::Definition).is_some_and(|&c| self.is_class_ref(at, c))
+        self.class_slot
+            .get(&K::Definition)
+            .is_some_and(|&c| self.is_class_ref(at, c))
     }
 }
 
@@ -1345,21 +1558,34 @@ fn probe_layer_anchor_bases(d: &[u8], ver: u32, start: usize, mat_count: u32) ->
 pub fn parse(data: &[u8], major: u32, version: &str) -> Result<Scene> {
     let err = |m: String| Error(format!("SketchUp {version}: {m}"));
     if !(3..=20).contains(&major) {
-        return Err(err(format!("unsupported legacy archive version {major}; supported legacy versions are 3–20")));
+        return Err(err(format!(
+            "unsupported legacy archive version {major}; supported legacy versions are 3–20"
+        )));
     }
     if data.len() > MAX_BYTES {
         return Err(err("legacy archive exceeds 64 MiB limit".into()));
     }
-    let to_err = |f: Fail| err(format!("legacy archive error at offset {:#x}: {}", f.at, f.msg));
+    let to_err = |f: Fail| {
+        err(format!(
+            "legacy archive error at offset {:#x}: {}",
+            f.at, f.msg
+        ))
+    };
     let (start, mat_count) = if let Some(start) = find_class_decl(data, b"CMaterial") {
-        let mc = start.checked_sub(4).and_then(|p| u32_at(data, p)).ok_or_else(|| err("truncated material count".into()))?;
+        let mc = start
+            .checked_sub(4)
+            .and_then(|p| u32_at(data, p))
+            .ok_or_else(|| err("truncated material count".into()))?;
         if mc > 100_000 {
             return Err(err("implausible material count".into()));
         }
         (start, mc)
     } else {
-        let lm = find_class_decl(data, b"CLayer").ok_or_else(|| err("no CMaterial or CLayer class record found".into()))?;
-        let start = lm.checked_sub(if major >= 17 { 9 } else { 8 }).ok_or_else(|| err("truncated layer list".into()))?;
+        let lm = find_class_decl(data, b"CLayer")
+            .ok_or_else(|| err("no CMaterial or CLayer class record found".into()))?;
+        let start = lm
+            .checked_sub(if major >= 17 { 9 } else { 8 })
+            .ok_or_else(|| err("truncated layer list".into()))?;
         (start, 0)
     };
     let bases = if mat_count >= 2 {
@@ -1380,7 +1606,9 @@ pub fn parse(data: &[u8], major: u32, version: &str) -> Result<Scene> {
             }
         }
     }
-    let Some((ar, st, f)) = best else { return Err(err("no viable slot base candidate".into())) };
+    let Some((ar, st, f)) = best else {
+        return Err(err("no viable slot base candidate".into()));
+    };
     let scene = build_scene(&ar, &st, version, Some(&f));
     if scene.definitions.is_empty() && scene.roots.is_empty() {
         return Err(to_err(f));
@@ -1403,7 +1631,8 @@ fn transform(xf: &[f64; 12]) -> Option<DMat4> {
         return None;
     }
     Some(DMat4::from_cols_array(&[
-        xf[0], xf[3], xf[6], 0.0, xf[1], xf[4], xf[7], 0.0, xf[2], xf[5], xf[8], 0.0, xf[9], xf[10], xf[11], 1.0,
+        xf[0], xf[3], xf[6], 0.0, xf[1], xf[4], xf[7], 0.0, xf[2], xf[5], xf[8], 0.0, xf[9],
+        xf[10], xf[11], 1.0,
     ]))
 }
 
@@ -1424,8 +1653,8 @@ struct Build<'c, 's> {
     edges: HashSet<usize>,
     instances: Vec<Instance>,
     warns: Vec<String>,
-    face_assignments: BTreeMap<usize,(Option<usize>,bool)>,
-    edge_tags: BTreeMap<usize,usize>,
+    face_assignments: BTreeMap<usize, (Option<usize>, bool)>,
+    edge_tags: BTreeMap<usize, usize>,
 }
 
 impl Build<'_, '_> {
@@ -1433,7 +1662,10 @@ impl Build<'_, '_> {
         if self.cx.items >= MAX_ITEMS {
             if !self.cx.limit_hit {
                 self.cx.limit_hit = true;
-                self.warns.truncate(255); self.warns.push("legacy geometry record limit reached; remaining geometry skipped".into());
+                self.warns.truncate(255);
+                self.warns.push(
+                    "legacy geometry record limit reached; remaining geometry skipped".into(),
+                );
             }
             return false;
         }
@@ -1446,7 +1678,9 @@ impl Build<'_, '_> {
         if let Some(&i) = self.vmap.get(&slot) {
             return Some(i);
         }
-        let Some(Val::Vertex(p)) = self.cx.ar.val(Some(slot)) else { return None };
+        let Some(Val::Vertex(p)) = self.cx.ar.val(Some(slot)) else {
+            return None;
+        };
         let p = *p;
         if !p.is_finite() || !self.budget() {
             return None;
@@ -1458,12 +1692,16 @@ impl Build<'_, '_> {
     }
 
     fn edge(&mut self, slot: usize) -> Option<(usize, usize)> {
-        let Some(Val::Edge { v1, v2, db }) = self.cx.ar.val(Some(slot)) else { return None };
+        let Some(Val::Edge { v1, v2, db }) = self.cx.ar.val(Some(slot)) else {
+            return None;
+        };
         let (v1, v2, db) = (*v1, *v2, *db);
         let a = self.vertex(v1)?;
         let b = self.vertex(v2)?;
         if self.edges.insert(slot) && a != b && self.budget() {
-            if let Some(tag) = db.layer.and_then(|id| self.cx.tags.get(&id)).copied() { self.edge_tags.insert(self.g.edges.len(), tag); }
+            if let Some(tag) = db.layer.and_then(|id| self.cx.tags.get(&id)).copied() {
+                self.edge_tags.insert(self.g.edges.len(), tag);
+            }
             self.g.edges.push(BulkEdge {
                 vertices: [a, b],
                 soft: db.soft != 0,
@@ -1475,20 +1713,28 @@ impl Build<'_, '_> {
     }
 
     fn ring(&mut self, loop_slot: Option<usize>) -> Option<Vec<usize>> {
-        let Some(Val::Loop(uses)) = self.cx.ar.val(loop_slot) else { return None };
+        let Some(Val::Loop(uses)) = self.cx.ar.val(loop_slot) else {
+            return None;
+        };
         let mut out: Vec<usize> = Vec::with_capacity(uses.len());
         let mut expected = None;
         for &(edge, sense) in uses {
-            if !self.budget() { return None; }
+            if !self.budget() {
+                return None;
+            }
             let (a, b) = self.edge(edge?)?;
             let start = if sense == 0 { a } else { b };
-            if expected.is_some_and(|end| end != start) { return None; }
+            if expected.is_some_and(|end| end != start) {
+                return None;
+            }
             expected = Some(if sense == 0 { b } else { a });
             if out.last() != Some(&start) {
                 out.push(start);
             }
         }
-        if expected != out.first().copied() || out.len() < 3 { return None; }
+        if expected != out.first().copied() || out.len() < 3 {
+            return None;
+        }
         if out.len() > 1 && out.first() == out.last() {
             out.pop();
         }
@@ -1500,7 +1746,9 @@ impl Build<'_, '_> {
         match ar.slots.get(&slot) {
             Some(Entry::Obj(K::Edge, Val::Edge { .. })) => {
                 if self.edge(slot).is_none() {
-                    self.warns.truncate(255); self.warns.push(format!("edge record {slot} has unresolved vertices"));
+                    self.warns.truncate(255);
+                    self.warns
+                        .push(format!("edge record {slot} has unresolved vertices"));
                 }
             }
             Some(Entry::Obj(K::Face, Val::Face { db, loops })) => {
@@ -1509,14 +1757,20 @@ impl Build<'_, '_> {
                     match self.ring(l) {
                         Some(r) => rings.push(r),
                         None => {
-                            self.warns.truncate(255); self.warns.push(format!("face record {slot} has an unresolved loop; face skipped"));
+                            self.warns.truncate(255);
+                            self.warns.push(format!(
+                                "face record {slot} has an unresolved loop; face skipped"
+                            ));
                             return;
                         }
                     }
                 }
                 let mut rings = rings.into_iter();
                 let Some(outer) = rings.next().filter(|o| o.len() >= 3) else {
-                    self.warns.truncate(255); self.warns.push(format!("face record {slot} has a degenerate outer loop; face skipped"));
+                    self.warns.truncate(255);
+                    self.warns.push(format!(
+                        "face record {slot} has a degenerate outer loop; face skipped"
+                    ));
                     return;
                 };
                 let holes: Vec<Vec<usize>> = rings.collect();
@@ -1524,25 +1778,45 @@ impl Build<'_, '_> {
                     return;
                 }
                 let mi = self.cx.mats.get(&db.mat).copied();
-                self.face_assignments.insert(self.g.faces.len(), (db.layer.and_then(|id| self.cx.tags.get(&id)).copied(), db.hidden != 0));
+                self.face_assignments.insert(
+                    self.g.faces.len(),
+                    (
+                        db.layer.and_then(|id| self.cx.tags.get(&id)).copied(),
+                        db.hidden != 0,
+                    ),
+                );
                 self.g.faces.push(BulkFace {
                     outer,
                     holes,
                     material: mi.map(|i| MaterialId(i as u64 + 1)),
-                    color: mi.and_then(|i| self.cx.colors.get(i).copied()).unwrap_or([255; 4]),
+                    color: mi
+                        .and_then(|i| self.cx.colors.get(i).copied())
+                        .unwrap_or([255; 4]),
                 });
             }
             Some(Entry::Obj(K::Instance | K::Image, Val::Instance { db, def, xf, name })) => {
                 let Some(&definition) = def.and_then(|d| self.cx.defs.get(&d)) else {
-                    self.warns.truncate(255); self.warns.push(format!("instance record {slot} references an unrecovered definition"));
+                    self.warns.truncate(255);
+                    self.warns.push(format!(
+                        "instance record {slot} references an unrecovered definition"
+                    ));
                     return;
                 };
                 let Some(transform) = transform(xf) else {
-                    self.warns.truncate(255); self.warns.push(format!("instance record {slot} has a non-finite transform"));
+                    self.warns.truncate(255);
+                    self.warns
+                        .push(format!("instance record {slot} has a non-finite transform"));
                     return;
                 };
                 let tag = db.layer.and_then(|l| self.cx.tags.get(&l).copied());
-                self.instances.push(Instance { name: name.clone(), definition, transform, tag, material: self.cx.mats.get(&db.mat).map(|i| MaterialId(*i as u64+1)), hidden: db.hidden != 0 });
+                self.instances.push(Instance {
+                    name: name.clone(),
+                    definition,
+                    transform,
+                    tag,
+                    material: self.cx.mats.get(&db.mat).map(|i| MaterialId(*i as u64 + 1)),
+                    hidden: db.hidden != 0,
+                });
             }
             _ => {}
         }
@@ -1557,18 +1831,28 @@ fn build(cx: &mut Ctx, ents: &[Option<usize>], warns: &mut Vec<String>) -> Defin
         edges: HashSet::new(),
         instances: Vec::new(),
         warns: Vec::new(),
-        face_assignments: BTreeMap::new(), edge_tags: BTreeMap::new(),
+        face_assignments: BTreeMap::new(),
+        edge_tags: BTreeMap::new(),
     };
     for &s in ents.iter().flatten() {
         b.entity(s);
     }
     warns.append(&mut b.warns);
     warns.truncate(256);
-    Definition { geometry:b.g, instances:b.instances, face_assignments:b.face_assignments, edge_tags:b.edge_tags, ..Default::default() }
+    Definition {
+        geometry: b.g,
+        instances: b.instances,
+        face_assignments: b.face_assignments,
+        edge_tags: b.edge_tags,
+        ..Default::default()
+    }
 }
 
 fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) -> Scene {
-    let mut scene = Scene { version: version.to_string(), ..Scene::default() };
+    let mut scene = Scene {
+        version: version.to_string(),
+        ..Scene::default()
+    };
     let mut cx = Ctx {
         ar,
         mats: HashMap::new(),
@@ -1585,7 +1869,9 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
         if cx.mats.contains_key(&s) {
             continue;
         }
-        let Some(Val::Material(m)) = ar.val(Some(s)) else { continue };
+        let Some(Val::Material(m)) = ar.val(Some(s)) else {
+            continue;
+        };
         let mut opacity = f32::from(m.rgba[3]) / 255.0;
         if m.use_opacity != 0 && m.opacity.is_finite() {
             opacity *= (1.0 - m.opacity).clamp(0.0, 1.0) as f32;
@@ -1600,11 +1886,24 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
                 if let Some(key) = dib_keys.get(&(start, len)) {
                     texture = Some(key.clone());
                 } else if tex_bytes.saturating_add(len) > MAX_BYTES {
-                    warns.push(format!("texture for material {} skipped: texture byte limit", m.name));
+                    warns.push(format!(
+                        "texture for material {} skipped: texture byte limit",
+                        m.name
+                    ));
                 } else if let Some(bytes) = ar.d.get(start..start + len) {
                     let png = bytes.starts_with(b"\x89PNG");
-                    let base = t.file.rsplit(['/', '\\']).next().unwrap_or("").trim().to_string();
-                    let base = if base.is_empty() { format!("{}.{}", m.name, if png { "png" } else { "jpg" }) } else { base };
+                    let base = t
+                        .file
+                        .rsplit(['/', '\\'])
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let base = if base.is_empty() {
+                        format!("{}.{}", m.name, if png { "png" } else { "jpg" })
+                    } else {
+                        base
+                    };
                     let mut key = base.clone();
                     let mut n = 1;
                     while scene.textures.contains_key(&key) {
@@ -1622,7 +1921,11 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
         cx.colors.push(m.rgba);
         scene.materials.push(Material {
             name: m.name.clone(),
-            color: [srgb_to_linear(m.rgba[0]), srgb_to_linear(m.rgba[1]), srgb_to_linear(m.rgba[2])],
+            color: [
+                srgb_to_linear(m.rgba[0]),
+                srgb_to_linear(m.rgba[1]),
+                srgb_to_linear(m.rgba[2]),
+            ],
             opacity,
             texture,
         });
@@ -1633,7 +1936,10 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
         }
         if let Some(Val::Layer { name, hidden }) = ar.val(Some(s)) {
             cx.tags.insert(s, scene.tags.len());
-            scene.tags.push(Tag { name: name.clone(), visible: !hidden });
+            scene.tags.push(Tag {
+                name: name.clone(),
+                visible: !hidden,
+            });
         }
     }
     let mut def_slots: Vec<usize> = ar
@@ -1647,17 +1953,30 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
         cx.defs.insert(s, i);
     }
     for &s in &def_slots {
-        let Some(Val::Definition { name, ents }) = ar.val(Some(s)) else { continue };
+        let Some(Val::Definition { name, ents }) = ar.val(Some(s)) else {
+            continue;
+        };
         let mut definition = build(&mut cx, ents, &mut warns);
         definition.name = name.clone();
         scene.definitions.push(definition);
     }
     let mut root = build(&mut cx, &st.root, &mut warns);
-    if failure.is_none() || !root.geometry.vertices.is_empty() || !root.instances.is_empty() || !scene.definitions.is_empty() {
+    if failure.is_none()
+        || !root.geometry.vertices.is_empty()
+        || !root.instances.is_empty()
+        || !scene.definitions.is_empty()
+    {
         let definition = scene.definitions.len();
         root.name = "Model".into();
         scene.definitions.push(root);
-        scene.roots.push(Instance { name: "Model".into(), definition, transform: DMat4::IDENTITY, tag: None, material: None, hidden: false });
+        scene.roots.push(Instance {
+            name: "Model".into(),
+            definition,
+            transform: DMat4::IDENTITY,
+            tag: None,
+            material: None,
+            hidden: false,
+        });
     }
     for n in &ar.notes {
         scene.warn(n.clone());
@@ -1668,7 +1987,11 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
             f.at,
             f.msg,
             def_slots.len(),
-            if st.root_read || !st.root.is_empty() { "" } else { " without root placements" }
+            if st.root_read || !st.root.is_empty() {
+                ""
+            } else {
+                " without root placements"
+            }
         ));
     }
     for w in warns {
@@ -1754,15 +2077,16 @@ mod tests {
         let mut next = 3u16;
         let mut cls: HashMap<&str, u16> = HashMap::new();
         let mut vslots: Vec<u16> = Vec::new();
-        let put_class = |b: &mut Vec<u8>, name: &'static str, next: &mut u16, cls: &mut HashMap<&str, u16>| {
-            if let Some(c) = cls.get(name) {
-                b.extend_from_slice(&(0x8000 | *c).to_le_bytes());
-            } else {
-                class(b, name);
-                cls.insert(name, *next);
-                *next += 1;
-            }
-        };
+        let put_class =
+            |b: &mut Vec<u8>, name: &'static str, next: &mut u16, cls: &mut HashMap<&str, u16>| {
+                if let Some(c) = cls.get(name) {
+                    b.extend_from_slice(&(0x8000 | *c).to_le_bytes());
+                } else {
+                    class(b, name);
+                    cls.insert(name, *next);
+                    *next += 1;
+                }
+            };
         for (li, ring) in [vec![0usize, 1, 2, 3], vec![4, 5, 6]].iter().enumerate() {
             put_class(&mut ar_bytes, "CLoop", &mut next, &mut cls);
             let loop_slot = next;
@@ -1806,7 +2130,11 @@ mod tests {
         let mut r = Cur { d: &d, pos: 0 };
         let face = ar.read_object(&mut r, None).unwrap();
         assert_eq!(r.pos, d.len());
-        let st = Progress { root: vec![face.slot], root_read: true, ..Progress::default() };
+        let st = Progress {
+            root: vec![face.slot],
+            root_read: true,
+            ..Progress::default()
+        };
         let scene = build_scene(&ar, &st, "{16.0}", None);
         let g = &scene.definitions[0].geometry;
         assert_eq!(g.faces.len(), 1);
@@ -1817,15 +2145,32 @@ mod tests {
         assert_eq!(g.edges.len(), 7);
         assert_eq!(g.vertices[g.faces[0].outer[2]], DVec3::new(10.0, 10.0, 0.0));
         assert_eq!(scene.roots.len(), 1);
+        let mut back_only = d.clone();
+        let end = back_only.len();
+        back_only[end - 2..].copy_from_slice(&7u16.to_le_bytes());
+        let mut archive = Ar::new(&back_only, 16, base);
+        let mut cursor = Cur {
+            d: &back_only,
+            pos: 0,
+        };
+        let decoded = archive.read_object(&mut cursor, None).unwrap();
+        assert!(matches!(archive.val(decoded.slot), Some(Val::Face {db, ..}) if db.mat == 7));
         for cut in (0..d.len()).step_by(17) {
             let mut archive = Ar::new(&d[..cut], 16, base);
-            let mut cursor = Cur { d: &d[..cut], pos: 0 };
+            let mut cursor = Cur {
+                d: &d[..cut],
+                pos: 0,
+            };
             let _ = archive.read_object(&mut cursor, None);
         }
         for i in (0..d.len()).step_by(7) {
-            let mut mutated = d.clone(); mutated[i] ^= 0xff;
+            let mut mutated = d.clone();
+            mutated[i] ^= 0xff;
             let mut archive = Ar::new(&mutated, 16, base);
-            let mut cursor = Cur { d: &mutated, pos: 0 };
+            let mut cursor = Cur {
+                d: &mutated,
+                pos: 0,
+            };
             let _ = archive.read_object(&mut cursor, None);
         }
     }

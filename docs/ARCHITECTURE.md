@@ -12,7 +12,8 @@ M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kern
 | cindral-inference | Geometric queries and snap candidates | core |
 | cindral-tools | Tool state machines, CPU picking/selection and command creation | core, inference |
 | cindral-render | Camera, GPU resources and styles | core |
-| cindral-io | Versioned documents and import/export | core |
+| cindral-skp | Bounded independent SketchUp container/record reader | core |
+| cindral-io | Versioned documents and import/export | core, skp |
 | cindral-app | Window, egui controls, input routing | all above |
 
 Rendering and UI dependencies never enter core. Tools emit commands; they do not mutate renderer buffers. IO deserializes into validated core documents.
@@ -199,3 +200,18 @@ caches; the foreground installs prepared state and schedules GPU uploads. Cancel
 document generations and geometry revisions guard completed results. Snapshot cloning and
 GPU uploads remain foreground costs. Original source normals/UV sets are replaced by native
 face normals/planar mapping; alpha MASK uses blending. No `.skp` implementation is included.
+
+
+## I2 native read-only SketchUp import
+
+`cindral-skp` decodes MFC and VFF records independently of UI and IO into raw
+inch/Z-up shared geometry, placements, palette/images, visibility tags and
+per-primitive assignments. `cindral-io::import_skp` adapts those values to I1,
+validates/recover-isolates polygons, partitions authored tags/hidden faces into
+child containers and converts units once. `ImportedInstance` now carries hidden
+state and optional instance paint. Bulk/kernel edges retain hidden independently
+of soft and smooth; old serialized edges default hidden to false. File dispatch
+bypasses coplanar cleanup for SKP polygons. The existing async append worker,
+progress/cancellation, stale-result guards and import summary are reused. Open
+routes SKP to import and native saves require `.cdraft`. Details, version evidence,
+recovery boundaries and limits: [SKP_IMPORT.md](SKP_IMPORT.md).

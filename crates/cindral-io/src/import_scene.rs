@@ -501,8 +501,15 @@ pub fn import_file(
         "skp" => crate::import_skp(path, control)?,
         _ => return Err(IoError::Invalid("unsupported import format".into())),
     };
-    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
-        let options = ImportOptions { merge_coplanar: false, soften_coplanar: false, ..options.clone() };
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))
+    {
+        let options = ImportOptions {
+            merge_coplanar: false,
+            soften_coplanar: false,
+            ..options.clone()
+        };
         convert_scene(scene, &options, control)
     } else {
         convert_scene(scene, options, control)
@@ -569,7 +576,7 @@ pub(crate) fn scene_from_bundle(bundle: crate::DraftBundle) -> ImportedScene {
                         vertices: e.vertices.map(|v| map[&v]),
                         soft: e.soft,
                         smooth: e.smooth,
-                    hidden: e.hidden,
+                        hidden: e.hidden,
                     })
                     .collect(),
             },

@@ -98,3 +98,15 @@ regression samples, not distribution or full-editor frame-rate claims. The final
 ID-preservation correction affects loose append only; these component workloads
 are unchanged. Loose append retains existing geometry identities and welds incoming
 vertices into the indexed model using its allocator high-water mark.
+
+
+## I2 SketchUp extension
+
+`.skp` dispatch uses the independent `cindral-skp` crate and retains authored
+polygons/holes, so it disables both coplanar cleanup options. The adapter applies
+inch-to-meter conversion through the same scene basis boundary. Tags on loose
+geometry and hidden faces become child containers. Imported placements can now
+carry instance paint and hidden state; explicit edge smooth and hidden fields
+are independent throughout conversion/append/persistence. Open routes `.skp` to
+the asynchronous append worker, with a read-only source note and `.cdraft` save.
+See [the reader contract and limitations](SKP_IMPORT.md).

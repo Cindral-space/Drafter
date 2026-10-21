@@ -670,7 +670,9 @@ fn styled_edge_vertices(
     edge: &cindral_core::Edge,
     offset: DVec3,
 ) -> Result<[EdgeVertex; 2], KernelError> {
-    if edge.hidden { return Ok([EdgeVertex::zeroed(); 2]); }
+    if edge.hidden {
+        return Ok([EdgeVertex::zeroed(); 2]);
+    }
     let mut vertices = build_edge_vertices_in_frame(model, edge.vertices, offset)?;
     let faces: Vec<_> = model
         .edge_faces(id)

@@ -126,3 +126,21 @@ CINDRAL_CAPTURE_DRAFT=/tmp/textured.cdraft WGPU_BACKEND=opengl cargo run -p cind
 ```
 
 Section planes and geographic shadows are available in the Styles & Scenes panel. See [controls, validation and release measurements](docs/SECTION_SHADOW_BENCHMARK.md). This completes the planned M0–M7b feature milestones.
+
+## Known limitations: SketchUp import
+
+Read-only `.skp` import accepts classic MFC versions **3–8 and 2013–2020** and
+modern VFF versions **2021–2026**. Compatibility varies by legacy dialect;
+unknown/corrupt records can produce an explicitly reported partial import.
+Future versions fail with a named error. Open/Import uses authored faces with
+holes, shared definitions, placements, materials/images, tags and edge flags;
+save the result as `.cdraft`. There is no `.skp` export.
+
+Scenes/cameras, styles, section planes, dynamic behavior/custom dictionaries,
+text/dimensions, construction guides, analytic curves, billboard behavior,
+tag colors/folders, separate front/back rendering and source display preferences
+are omitted. Textures use planar mapping; source UV pins/tile sizes and exact
+colorization are not reproduced. Boundary-edge tags follow their face container.
+The created, ignored `tests/fixtures/skp-local/` directory had no user files;
+production-file compatibility/performance remains unverified. See the
+[reader, version evidence, safety limits and cross-check workflow](docs/SKP_IMPORT.md).

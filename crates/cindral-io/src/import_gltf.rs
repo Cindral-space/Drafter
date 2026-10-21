@@ -1536,8 +1536,8 @@ fn build_node_hierarchy(
                     definition: def_idx,
                     transform,
                     tag: None,
-            ..Default::default()
-}))
+                    ..Default::default()
+                }))
             }
             (None, false) => {
                 let def_idx = scene.definitions.len();
@@ -1551,8 +1551,8 @@ fn build_node_hierarchy(
                     definition: def_idx,
                     transform,
                     tag: None,
-            ..Default::default()
-}))
+                    ..Default::default()
+                }))
             }
             (Some(m_idx), false) => {
                 let mut instances = child_instances;
@@ -1564,8 +1564,8 @@ fn build_node_hierarchy(
                             definition: mesh_def_idx,
                             transform: DMat4::IDENTITY,
                             tag: None,
-            ..Default::default()
-},
+                            ..Default::default()
+                        },
                     );
                 }
                 let def_idx = scene.definitions.len();
@@ -1579,8 +1579,8 @@ fn build_node_hierarchy(
                     definition: def_idx,
                     transform,
                     tag: None,
-            ..Default::default()
-}))
+                    ..Default::default()
+                }))
             }
             (None, true) => Ok(None),
         }

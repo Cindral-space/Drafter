@@ -1,0 +1,30 @@
+I2 OpenSKP comparison — 2026-10-22
+External reference revision: 525093be16d52f64e0f0ccb2e56cc91648eabeb9
+Dev-only Python reader versus freshly rebuilt Rust release skp_inspect.
+No SDK/application runtime invoked. Reference-owned synthetic fixtures read in
+place, never copied; four VFF header variants independently authored in ignored
+.agent-out. No user local models existed. These synthetic results do not certify
+arbitrary real files or every version/schema. Counts are authored definitions /
+placements; bounds are placed visible-occurrence geometry in meters.
+Tolerance: 1e-7 absolute / 1e-8 relative. Source UVs/styles/etc are not compared.
+
+Command: python scripts/compare_skp.py --no-build FILES...
+Files are the eleven external synthetic fixture names and four authored VFF
+variant names listed below. Without arguments, the script checks only ignored
+tests/fixtures/skp-local/*.skp and exits successfully with SKIP when empty.
+
+PASS legacy_v3_synthetic.skp ({3.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v4_synthetic.skp ({4.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v5_synthetic.skp ({5.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v6_synthetic.skp ({6.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v7_synthetic.skp ({7.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v2014_synthetic.skp ({14.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v2019_synthetic.skp ({19.0.1}): faces=4 instances=11 bounds=[[0.0, 0.0, 0.0], [9.652000000000001, 0.762, 0.0]]
+PASS legacy_v3_textured.skp ({3.0.1}): faces=1 instances=0 bounds=[[0.0, 0.0, 0.0], [0.508, 0.508, 0.0]]
+PASS legacy_v4_textured.skp ({4.0.1}): faces=1 instances=0 bounds=[[0.0, 0.0, 0.0], [0.508, 0.508, 0.0]]
+PASS legacy_v5_textured.skp ({5.0.1}): faces=1 instances=0 bounds=[[0.0, 0.0, 0.0], [0.508, 0.508, 0.0]]
+PASS legacy_v2020_textured.skp ({20.0.1}): faces=1 instances=0 bounds=[[0.0, 0.0, 0.0], [0.508, 0.508, 0.0]]
+PASS i2-authored-v21.skp ({21.0.0}): faces=2 instances=1 bounds=[[0.0, 0.0, 0.0], [0.508, 0.381, 0.0]]
+PASS i2-authored-v22.skp ({22.0.0}): faces=2 instances=1 bounds=[[0.0, 0.0, 0.0], [0.508, 0.381, 0.0]]
+PASS i2-authored-v25.skp ({25.0.0}): faces=2 instances=1 bounds=[[0.0, 0.0, 0.0], [0.508, 0.381, 0.0]]
+PASS i2-authored-v26.skp ({26.0.0}): faces=2 instances=1 bounds=[[0.0, 0.0, 0.0], [0.508, 0.381, 0.0]]

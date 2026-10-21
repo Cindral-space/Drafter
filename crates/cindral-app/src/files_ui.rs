@@ -239,7 +239,10 @@ impl DrafterApp {
     /// Open validated native values into fresh history/root context; retain the previous draft's recovery snapshot.
     pub fn open_path(&mut self, path: &Path) -> cindral_io::Result<()> {
         self.cancel_import();
-        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))
+        {
             self.start_import(path.to_owned(), self.files.import_options.clone());
             return Ok(());
         }
@@ -251,8 +254,13 @@ impl DrafterApp {
     }
     /// Atomically save committed values; any active drag is cancelled before writing.
     pub fn save_path(&mut self, path: &Path) -> cindral_io::Result<()> {
-        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("cdraft")) {
-            return Err(cindral_io::IoError::Invalid("Save As .cdraft is required".into()));
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("cdraft"))
+        {
+            return Err(cindral_io::IoError::Invalid(
+                "Save As .cdraft is required".into(),
+            ));
         }
         self.cancel_modify();
         self.tool.cancel();
@@ -785,8 +793,13 @@ impl DrafterApp {
             "Imported {}",
             path.file_name().unwrap_or_default().to_string_lossy()
         );
-        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
-            self.files.status.push_str(" · imported from .skp · Save As .cdraft");
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))
+        {
+            self.files
+                .status
+                .push_str(" · imported from .skp · Save As .cdraft");
         }
         self.files.import_summary = Some(report);
         Ok(())
@@ -1237,7 +1250,9 @@ mod tests {
         editor.cancel_import();
         assert!(editor.save_path(&path).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"source stays unchanged");
-        editor.apply_import_result(test_import_result(), &path).unwrap();
+        editor
+            .apply_import_result(test_import_result(), &path)
+            .unwrap();
         assert!(editor.files.status.contains("imported from .skp"));
         assert!(editor.files.status.contains("Save As .cdraft"));
         assert!(editor.files.path.is_none());
@@ -1375,7 +1390,10 @@ mod tests {
     fn imported_skp_interactive_mesh_update() {
         assert!(!cfg!(debug_assertions), "benchmark requires --release");
         let Some(path) = std::env::var_os("CINDRAL_SKP_BENCHMARK_SEED") else {
-            eprintln!("SKIP: set CINDRAL_SKP_BENCHMARK_SEED to authored connected benchmark fixture"); return;
+            eprintln!(
+                "SKIP: set CINDRAL_SKP_BENCHMARK_SEED to authored connected benchmark fixture"
+            );
+            return;
         };
         let path = std::path::PathBuf::from(path);
         let control = ImportControl::default();
@@ -1383,18 +1401,39 @@ mod tests {
         let prepared = prepare_import(result, &control).unwrap();
         let mut editor = DrafterApp::default();
         editor.apply_import_result(prepared, &path).unwrap();
-        let occurrence = editor.history.occurrences().unwrap().into_iter().find(|o| {
-            !editor.history.definition_model(o.definition).unwrap().faces().is_empty()
-        }).unwrap();
+        let occurrence = editor
+            .history
+            .occurrences()
+            .unwrap()
+            .into_iter()
+            .find(|o| {
+                !editor
+                    .history
+                    .definition_model(o.definition)
+                    .unwrap()
+                    .faces()
+                    .is_empty()
+            })
+            .unwrap();
         editor.history.enter(occurrence.path).unwrap();
         editor.refresh_mesh();
         editor.pending = None;
         let start = Instant::now();
-        editor.execute(Command::AddEdge {start: DVec3::new(0., 0.127, 0.), end: DVec3::new(0.127, 0., 0.)}).unwrap();
+        editor
+            .execute(Command::AddEdge {
+                start: DVec3::new(0., 0.127, 0.),
+                end: DVec3::new(0.127, 0., 0.),
+            })
+            .unwrap();
         let elapsed = start.elapsed();
-        eprintln!("SKP connected edit plus dirty CPU mesh {:.3}ms", elapsed.as_secs_f64()*1000.);
-        assert!(elapsed < Duration::from_millis(16), "interactive budget exceeded: {elapsed:?}");
+        eprintln!(
+            "SKP connected edit plus dirty CPU mesh {:.3}ms",
+            elapsed.as_secs_f64() * 1000.
+        );
+        assert!(
+            elapsed < Duration::from_millis(16),
+            "interactive budget exceeded: {elapsed:?}"
+        );
         assert_eq!(editor.history.undo_depth(), 2);
     }
-
 }

@@ -49,10 +49,10 @@ const T_LAYER_HIDDEN: u16 = 0x3C8E;
 
 /// Known container tags; every other tag is an opaque leaf.
 const CONTAINERS: &[u16] = &[
-    0x01F4, 0x01F7, 0x30D4, 0x30D5, 0x32C8, 0x157C, 0x1388, 0x1389, 0x138A, 0x138B, 0x138C,
-    0x138D, 0x1D4C, 0x1964, 0x01F9, 0x1770, 0x1771, 0x07D0, 0x09C4, 0x1194, 0x1195, 0x010F,
-    0x4A38, 0x0BB8, 0x1397, 0x4C2C, 0x0DAC, 0x0DAE, 0x01F6, 0x01F8, 0x3A98, 0x3A99, 0x3C8C,
-    0x1390, 0x1F40, 0x1391, 0x1392, 0x4269, 0x426C, 0x4268,
+    0x01F4, 0x01F7, 0x30D4, 0x30D5, 0x32C8, 0x157C, 0x1388, 0x1389, 0x138A, 0x138B, 0x138C, 0x138D,
+    0x1D4C, 0x1964, 0x01F9, 0x1770, 0x1771, 0x07D0, 0x09C4, 0x1194, 0x1195, 0x010F, 0x4A38, 0x0BB8,
+    0x1397, 0x4C2C, 0x0DAC, 0x0DAE, 0x01F6, 0x01F8, 0x3A98, 0x3A99, 0x3C8C, 0x1390, 0x1F40, 0x1391,
+    0x1392, 0x4269, 0x426C, 0x4268,
 ];
 const MAT_NS: &str = "http://sketchup.google.com/schemas/sketchup/1.0/material";
 /// TLV nodes materialized for one top-level record (or one definition).
@@ -119,10 +119,16 @@ fn parse_tree<'a>(data: &'a [u8], depth: usize, budget: &mut Budget) -> Vec<Node
         } else {
             Vec::new()
         };
-        out.push(Node { tag, payload, children });
+        out.push(Node {
+            tag,
+            payload,
+            children,
+        });
         pos = end;
     }
-    if pos != data.len() { budget.malformed = true; }
+    if pos != data.len() {
+        budget.malformed = true;
+    }
     out
 }
 
@@ -149,8 +155,7 @@ fn entity_id(node: &Node) -> Option<u64> {
         match child.tag {
             T_ID => return var_int(child.payload),
             T_ID_WRAPPER if child.payload.starts_with(&T_ID.to_le_bytes()) => {
-                return header(child.payload, 0)
-                    .and_then(|(_, s, e)| var_int(&child.payload[s..e]))
+                return header(child.payload, 0).and_then(|(_, s, e)| var_int(&child.payload[s..e]))
             }
             _ => {}
         }
@@ -244,15 +249,23 @@ impl Reader {
     /// Reserve aggregate work; returns false (once warning) when the item cap is reached.
     fn visit(&mut self) -> bool {
         if self.work == 0 {
-            if !self.work_exhausted { self.work_exhausted = true; self.scene.warn("TLV traversal work limit reached; remaining records skipped"); }
+            if !self.work_exhausted {
+                self.work_exhausted = true;
+                self.scene
+                    .warn("TLV traversal work limit reached; remaining records skipped");
+            }
             false
-        } else { self.work -= 1; true }
+        } else {
+            self.work -= 1;
+            true
+        }
     }
     fn take(&mut self, n: usize) -> bool {
         if self.items.saturating_add(n) > MAX_ITEMS {
             if !self.capped {
                 self.capped = true;
-                self.scene.warn("item limit reached; remaining geometry skipped");
+                self.scene
+                    .warn("item limit reached; remaining geometry skipped");
             }
             return false;
         }
@@ -270,12 +283,18 @@ impl Reader {
         };
         let nodes = parse_tree(data, 0, &mut budget);
         self.total_nodes = budget.total;
-        if budget.malformed { self.scene.warn(format!("record {tag:#06x}: truncated TLV siblings skipped")); }
+        if budget.malformed {
+            self.scene
+                .warn(format!("record {tag:#06x}: truncated TLV siblings skipped"));
+        }
         if budget.too_deep {
-            self.scene.warn(format!("record {tag:#06x}: nesting exceeds limit; truncated"));
+            self.scene.warn(format!(
+                "record {tag:#06x}: nesting exceeds limit; truncated"
+            ));
         }
         if budget.exhausted {
-            self.scene.warn(format!("record {tag:#06x}: node limit reached; skipped"));
+            self.scene
+                .warn(format!("record {tag:#06x}: node limit reached; skipped"));
             return;
         }
         self.walk(&nodes);
@@ -288,11 +307,14 @@ impl Reader {
 
     fn walk(&mut self, nodes: &[Node]) {
         for el in nodes {
-            if !self.visit() { return; }
+            if !self.visit() {
+                return;
+            }
             match el.tag {
                 T_LAYER_LIST => {
                     for layer in el.children.iter().filter(|c| c.tag == T_LAYER) {
-                        let id = find(&layer.children, T_ID_WRAPPER).and_then(|n| wrapped_id(n.payload));
+                        let id =
+                            find(&layer.children, T_ID_WRAPPER).and_then(|n| wrapped_id(n.payload));
                         let name = find(&layer.children, T_LAYER_NAME);
                         if let (Some(id), Some(name)) = (id, name) {
                             let hidden = find(&layer.children, T_LAYER_HIDDEN)
@@ -329,18 +351,23 @@ impl Reader {
         if !self.take(1) {
             return;
         }
-        let name = direct(&el.children, T_DEF_NAME).map(|n| text(n.payload)).unwrap_or_default();
+        let name = direct(&el.children, T_DEF_NAME)
+            .map(|n| text(n.payload))
+            .unwrap_or_default();
         let mut builder = Builder::default();
         self.extract(&el.children, &mut builder);
         if self.def_by_id.insert(id, self.defs.len()).is_some() {
-            self.scene.warn(format!("duplicate definition id {id}; later record wins"));
+            self.scene
+                .warn(format!("duplicate definition id {id}; later record wins"));
         }
         self.defs.push(RawDef { name, builder });
     }
 
     fn extract(&mut self, elements: &[Node], b: &mut Builder) {
         for el in elements {
-            if !self.visit() { return; }
+            if !self.visit() {
+                return;
+            }
             match el.tag {
                 T_VERTEX => {
                     let pos = find(&el.children, T_POSITION).and_then(|n| f64s::<3>(n.payload));
@@ -364,7 +391,9 @@ impl Reader {
                     match (id, v1, v2) {
                         (Some(id), Some(v1), Some(v2)) => {
                             if self.take(1) {
-                                let layer = direct(&el.children, T_ENTITY_INFO).and_then(|i| direct(&i.children, T_INFO_LAYER)).and_then(|n| var_int(n.payload));
+                                let layer = direct(&el.children, T_ENTITY_INFO)
+                                    .and_then(|i| direct(&i.children, T_INFO_LAYER))
+                                    .and_then(|n| var_int(n.payload));
                                 b.edges.push((id, v1, v2, flags, layer));
                             }
                         }
@@ -412,7 +441,8 @@ impl Reader {
                     if let (Some(edge), Some(orient)) = (edge, orient) {
                         coedges.push((edge, orient == 0));
                     } else {
-                        self.scene.warn("malformed coedge; entire face skipped"); return;
+                        self.scene.warn("malformed coedge; entire face skipped");
+                        return;
                     }
                 }
                 if !coedges.is_empty() {
@@ -425,9 +455,15 @@ impl Reader {
             return;
         }
         if let Some(info) = direct(&el.children, T_ENTITY_INFO) {
-            face.material = direct(&info.children, T_INFO_MATERIAL).and_then(|n| var_int(n.payload));
+            face.material =
+                direct(&info.children, T_INFO_MATERIAL).and_then(|n| var_int(n.payload));
             face.layer = direct(&info.children, T_INFO_LAYER).and_then(|n| var_int(n.payload));
-            face.hidden = direct(&info.children, T_INFO_FLAGS).and_then(|n| n.payload.first()).is_some_and(|flag| flag & 1 != 0);
+            face.hidden = direct(&info.children, T_INFO_FLAGS)
+                .and_then(|n| n.payload.first())
+                .is_some_and(|flag| flag & 1 != 0);
+        }
+        if face.material == Some(0) {
+            face.material = None;
         }
         if face.material.is_none() {
             face.material = direct(&el.children, T_FACE_BACK_MAT)
@@ -440,31 +476,50 @@ impl Reader {
     fn instance(&mut self, el: &Node, b: &mut Builder) {
         let search: &[Node] = &el.children;
         let Some(definition) = find(search, T_INST_DEF).and_then(|n| var_int(n.payload)) else {
-            self.scene.warn("instance without definition reference skipped");
+            self.scene
+                .warn("instance without definition reference skipped");
             return;
         };
         if !self.take(1) {
             return;
         }
-        let name = find(search, T_INST_NAME).map(|n| text(n.payload)).unwrap_or_default();
+        let name = find(search, T_INST_NAME)
+            .map(|n| text(n.payload))
+            .unwrap_or_default();
         let matrix = find(search, T_INST_MATRIX).and_then(|n| f64s::<13>(n.payload));
         let layer = direct(search, T_ENTITY_INFO)
             .and_then(|i| direct(&i.children, T_INFO_LAYER))
             .filter(|n| !n.payload.is_empty())
             .and_then(|n| var_int(n.payload));
         let info = direct(search, T_ENTITY_INFO);
-        let material = info.and_then(|i| direct(&i.children, T_INFO_MATERIAL)).and_then(|n| var_int(n.payload));
-        let hidden = info.and_then(|i| direct(&i.children, T_INFO_FLAGS)).and_then(|n| n.payload.first()).is_some_and(|flag| flag & 1 != 0);
-        b.instances.push(RawInstance { name, definition, matrix, layer, material, hidden });
+        let material = info
+            .and_then(|i| direct(&i.children, T_INFO_MATERIAL))
+            .and_then(|n| var_int(n.payload));
+        let hidden = info
+            .and_then(|i| direct(&i.children, T_INFO_FLAGS))
+            .and_then(|n| n.payload.first())
+            .is_some_and(|flag| flag & 1 != 0);
+        b.instances.push(RawInstance {
+            name,
+            definition,
+            matrix,
+            layer,
+            material,
+            hidden,
+        });
     }
 
     fn top_level(&mut self, data: &[u8]) {
         let mut headers = flat(data);
-        if headers.iter().map(|(_,p)| p.len()+6).sum::<usize>() != data.len() { self.scene.warn("truncated top-level TLV records skipped"); }
+        if headers.iter().map(|(_, p)| p.len() + 6).sum::<usize>() != data.len() {
+            self.scene.warn("truncated top-level TLV records skipped");
+        }
         if let [(T_WRAPPER, inner)] = headers.as_slice() {
             let inner = *inner;
             headers = flat(inner);
-            if headers.iter().map(|(_,p)| p.len()+6).sum::<usize>() != inner.len() { self.scene.warn("truncated model wrapper records skipped"); }
+            if headers.iter().map(|(_, p)| p.len() + 6).sum::<usize>() != inner.len() {
+                self.scene.warn("truncated model wrapper records skipped");
+            }
         }
         for (tag, payload) in headers {
             if tag == T_DEF_LIST {
@@ -479,7 +534,9 @@ impl Reader {
             let start = payload.as_ptr() as usize - data.as_ptr() as usize;
             match data.get(start.saturating_sub(6)..start + payload.len()) {
                 Some(full) if start >= 6 => self.record(full, tag),
-                _ => self.scene.warn(format!("record {tag:#06x} unframed; skipped")),
+                _ => self
+                    .scene
+                    .warn(format!("record {tag:#06x} unframed; skipped")),
             }
         }
     }
@@ -504,7 +561,11 @@ fn unwrap_definitions(payload: &[u8]) -> Option<Vec<&[u8]>> {
 
 fn srgb_to_linear(c: u8) -> f32 {
     let c = f32::from(c) / 255.0;
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Parse `materials/*/material.xml`; returns material-name -> palette index plus display colors.
@@ -582,20 +643,27 @@ fn preflight_xml(xml: &str) -> Result<()> {
     Ok(())
 }
 
-
-fn load_materials(files: &BTreeMap<String, Vec<u8>>, scene: &mut Scene) -> HashMap<String, (usize, [u8; 4])> {
+fn load_materials(
+    files: &BTreeMap<String, Vec<u8>>,
+    scene: &mut Scene,
+) -> HashMap<String, (usize, [u8; 4])> {
     let mut by_name = HashMap::new();
     let mut texture_bytes = 0usize;
     for (path, bytes) in files {
         if !(path.starts_with("materials/") && path.ends_with("material.xml")) {
             continue;
         }
-        let Some(xml) = std::str::from_utf8(bytes).ok().map(|s| s.trim_start_matches('\u{feff}')) else {
+        let Some(xml) = std::str::from_utf8(bytes)
+            .ok()
+            .map(|s| s.trim_start_matches('\u{feff}'))
+        else {
             scene.warn(format!("{path}: material XML is not UTF-8"));
             continue;
         };
         if bytes.len() > 1024 * 1024 || preflight_xml(xml).is_err() {
-            scene.warn(format!("{path}: XML size/depth/declaration limit; material skipped"));
+            scene.warn(format!(
+                "{path}: XML size/depth/declaration limit; material skipped"
+            ));
             continue;
         }
         let doc = match roxmltree::Document::parse(xml) {
@@ -608,45 +676,65 @@ fn load_materials(files: &BTreeMap<String, Vec<u8>>, scene: &mut Scene) -> HashM
         let Some(mat) = doc
             .descendants()
             .find(|n| n.has_tag_name((MAT_NS, "material")))
-            .or_else(|| doc.descendants().find(|n| n.tag_name().name() == "material"))
+            .or_else(|| {
+                doc.descendants()
+                    .find(|n| n.tag_name().name() == "material")
+            })
         else {
             continue;
         };
         let channel = |key: &str| {
-            mat.attribute(key).and_then(|v| v.trim().parse::<i64>().ok()).map_or(128, |v| v.clamp(0, 255) as u8)
+            mat.attribute(key)
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .map_or(128, |v| v.clamp(0, 255) as u8)
         };
-        let rgb = [channel("colorRed"), channel("colorGreen"), channel("colorBlue")];
+        let rgb = [
+            channel("colorRed"),
+            channel("colorGreen"),
+            channel("colorBlue"),
+        ];
         let opacity = if mat.attribute("useTrans") == Some("1") {
-            let t = mat.attribute("trans").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
-            if t.is_finite() { (1.0 - t).clamp(0.0, 1.0) } else { 1.0 }
+            let t = mat
+                .attribute("trans")
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .unwrap_or(0.0);
+            if t.is_finite() {
+                (1.0 - t).clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
         } else {
             1.0
         };
         let name = mat.attribute("name").unwrap_or("unknown").to_owned();
         let folder = path.rsplit_once('/').map_or("", |(f, _)| f);
-        let texture = mat.children().find(|n| n.tag_name().name() == "texture").and_then(|tex| {
-            let filename = tex.attribute("textureFilename").unwrap_or("");
-            let candidate = format!("{folder}/{filename}");
-            if !filename.is_empty() && files.contains_key(&candidate) {
-                return Some(candidate);
-            }
-            let prefix = format!("{folder}/");
-            if let Some(entry) = files
-                .keys()
-                .find(|k| k.starts_with(&prefix) && *k != path && !k.to_ascii_lowercase().ends_with(".xml"))
-            {
-                return Some(entry.clone());
-            }
-            let image = tex
-                .descendants()
-                .find(|n| n.tag_name().name() == "image")
-                .and_then(|n| n.attribute("path"))
-                .unwrap_or("")
-                .trim_start_matches(['.', '/']);
-            [image.to_owned(), format!("{folder}/{image}")]
-                .into_iter()
-                .find(|c| !image.is_empty() && files.contains_key(c))
-        });
+        let texture = mat
+            .children()
+            .find(|n| n.tag_name().name() == "texture")
+            .and_then(|tex| {
+                let filename = tex.attribute("textureFilename").unwrap_or("");
+                let candidate = format!("{folder}/{filename}");
+                if !filename.is_empty() && files.contains_key(&candidate) {
+                    return Some(candidate);
+                }
+                let prefix = format!("{folder}/");
+                if let Some(entry) = files.keys().find(|k| {
+                    k.starts_with(&prefix)
+                        && *k != path
+                        && !k.to_ascii_lowercase().ends_with(".xml")
+                }) {
+                    return Some(entry.clone());
+                }
+                let image = tex
+                    .descendants()
+                    .find(|n| n.tag_name().name() == "image")
+                    .and_then(|n| n.attribute("path"))
+                    .unwrap_or("")
+                    .trim_start_matches(['.', '/']);
+                [image.to_owned(), format!("{folder}/{image}")]
+                    .into_iter()
+                    .find(|c| !image.is_empty() && files.contains_key(c))
+            });
         if let Some(reference) = &texture {
             if let Some(data) = files.get(reference) {
                 if !scene.textures.contains_key(reference) {
@@ -663,7 +751,10 @@ fn load_materials(files: &BTreeMap<String, Vec<u8>>, scene: &mut Scene) -> HashM
             continue;
         }
         let alpha = (opacity * 255.0).round() as u8;
-        by_name.insert(name.clone(), (scene.materials.len(), [rgb[0], rgb[1], rgb[2], alpha]));
+        by_name.insert(
+            name.clone(),
+            (scene.materials.len(), [rgb[0], rgb[1], rgb[2], alpha]),
+        );
         scene.materials.push(Material {
             name,
             color: rgb.map(srgb_to_linear),
@@ -678,7 +769,8 @@ fn transform(m: &[f64; 13]) -> Option<DMat4> {
     // Reference convention: row-major 3x3 then translation; p' = R * p + t; m[12] is not applied.
     m.iter().all(|v| v.is_finite()).then(|| {
         DMat4::from_cols_array(&[
-            m[0], m[3], m[6], 0.0, m[1], m[4], m[7], 0.0, m[2], m[5], m[8], 0.0, m[9], m[10], m[11], 1.0,
+            m[0], m[3], m[6], 0.0, m[1], m[4], m[7], 0.0, m[2], m[5], m[8], 0.0, m[9], m[10],
+            m[11], 1.0,
         ])
     })
 }
@@ -714,7 +806,9 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
                 edge_ends.insert(id, (a, c));
                 if a != c {
                     // 0x01 hidden, 0x08 soft, 0x10 smooth.
-                    if let Some(tag) = layer.and_then(|id| r.layer_index.get(&id)).copied() { edge_tags.insert(geometry.edges.len(), tag); }
+                    if let Some(tag) = layer.and_then(|id| r.layer_index.get(&id)).copied() {
+                        edge_tags.insert(geometry.edges.len(), tag);
+                    }
                     geometry.edges.push(BulkEdge {
                         vertices: [a, c],
                         soft: flags & 0x08 != 0,
@@ -733,12 +827,15 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             let mut expected = None;
             for &(edge, forward) in coedges {
                 let Some(&(a, c)) = edge_ends.get(&edge) else {
-                    scene.warn(format!("face loop references unknown edge {edge}; face skipped"));
+                    scene.warn(format!(
+                        "face loop references unknown edge {edge}; face skipped"
+                    ));
                     continue 'faces;
                 };
                 let start = if forward { a } else { c };
                 if expected.is_some_and(|end| end != start) {
-                    scene.warn("disconnected coedge loop; face skipped"); continue 'faces;
+                    scene.warn("disconnected coedge loop; face skipped");
+                    continue 'faces;
                 }
                 expected = Some(if forward { c } else { a });
                 if ring.last() != Some(&start) {
@@ -746,7 +843,8 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
                 }
             }
             if expected != ring.first().copied() {
-                scene.warn("unclosed coedge loop; face skipped"); continue 'faces;
+                scene.warn("unclosed coedge loop; face skipped");
+                continue 'faces;
             }
             if ring.len() > 1 && ring.first() == ring.last() {
                 ring.pop();
@@ -769,14 +867,23 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
                 let pts: Vec<DVec3> = ring.iter().map(|&v| geometry.vertices[v]).collect();
                 (i, polygon_area(&pts))
             })
-            .fold((0, -1.0), |best, cur| if cur.1 > best.1 { cur } else { best })
+            .fold(
+                (0, -1.0),
+                |best, cur| if cur.1 > best.1 { cur } else { best },
+            )
             .0;
         let outer = rings.remove(outer);
         let resolved = face
             .material
             .and_then(|id| r.material_names.get(&id))
             .and_then(|name| r.materials.get(name));
-        face_assignments.insert(geometry.faces.len(), (face.layer.and_then(|id| r.layer_index.get(&id)).copied(), face.hidden));
+        face_assignments.insert(
+            geometry.faces.len(),
+            (
+                face.layer.and_then(|id| r.layer_index.get(&id)).copied(),
+                face.hidden,
+            ),
+        );
         geometry.faces.push(BulkFace {
             outer,
             holes: rings,
@@ -787,7 +894,10 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
     let mut instances = Vec::with_capacity(b.instances.len());
     for inst in b.instances {
         let Some(&definition) = r.def_by_id.get(&inst.definition) else {
-            scene.warn(format!("instance references unknown definition {}; skipped", inst.definition));
+            scene.warn(format!(
+                "instance references unknown definition {}; skipped",
+                inst.definition
+            ));
             continue;
         };
         let transform = match inst.matrix.as_ref().map(transform) {
@@ -799,10 +909,27 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             None => DMat4::IDENTITY,
         };
         let tag = inst.layer.and_then(|l| r.layer_index.get(&l).copied());
-        let material = inst.material.and_then(|id| r.material_names.get(&id)).and_then(|name| r.materials.get(name)).map(|(index,_)| MaterialId(*index as u64+1));
-        instances.push(Instance { name: inst.name, definition, transform, tag, material, hidden: inst.hidden });
+        let material = inst
+            .material
+            .and_then(|id| r.material_names.get(&id))
+            .and_then(|name| r.materials.get(name))
+            .map(|(index, _)| MaterialId(*index as u64 + 1));
+        instances.push(Instance {
+            name: inst.name,
+            definition,
+            transform,
+            tag,
+            material,
+            hidden: inst.hidden,
+        });
     }
-    Definition { name, geometry, instances, face_assignments, edge_tags }
+    Definition {
+        name,
+        geometry,
+        instances,
+        face_assignments,
+        edge_tags,
+    }
 }
 
 /// Drop instance edges that close a definition cycle.
@@ -839,14 +966,25 @@ fn break_cycles(defs: &mut [Definition], scene: &mut Scene) {
 }
 
 /// Parse an already-extracted modern `model.dat` plus the other archive entries.
-pub(crate) fn parse(model_data: &[u8], files: &BTreeMap<String, Vec<u8>>, version: &str) -> Result<Scene> {
+pub(crate) fn parse(
+    model_data: &[u8],
+    files: &BTreeMap<String, Vec<u8>>,
+    version: &str,
+) -> Result<Scene> {
     if model_data.len() > MAX_BYTES {
-        return Err(Error(format!("SketchUp file {version}: model.dat exceeds {MAX_BYTES} bytes")));
+        return Err(Error(format!(
+            "SketchUp file {version}: model.dat exceeds {MAX_BYTES} bytes"
+        )));
     }
     if header(model_data, 0).is_none() {
-        return Err(Error(format!("SketchUp file {version}: model.dat has no readable records")));
+        return Err(Error(format!(
+            "SketchUp file {version}: model.dat has no readable records"
+        )));
     }
-    let mut scene = Scene { version: version.to_owned(), ..Scene::default() };
+    let mut scene = Scene {
+        version: version.to_owned(),
+        ..Scene::default()
+    };
     let materials = load_materials(files, &mut scene);
     let mut reader = Reader {
         scene,
@@ -862,16 +1000,32 @@ pub(crate) fn parse(model_data: &[u8], files: &BTreeMap<String, Vec<u8>>, versio
         work_exhausted: false,
     };
     reader.top_level(model_data);
-    let Reader { mut scene, defs, def_by_id, material_names, layers, root, .. } = reader;
+    let Reader {
+        mut scene,
+        defs,
+        def_by_id,
+        material_names,
+        layers,
+        root,
+        ..
+    } = reader;
     let mut layer_index = HashMap::new();
     for (id, name, hidden) in layers {
         if layer_index.contains_key(&id) {
             continue;
         }
         layer_index.insert(id, scene.tags.len());
-        scene.tags.push(Tag { name, visible: !hidden });
+        scene.tags.push(Tag {
+            name,
+            visible: !hidden,
+        });
     }
-    let resolver = Resolver { def_by_id: &def_by_id, material_names: &material_names, materials: &materials, layer_index: &layer_index };
+    let resolver = Resolver {
+        def_by_id: &def_by_id,
+        material_names: &material_names,
+        materials: &materials,
+        layer_index: &layer_index,
+    };
     let mut definitions = Vec::with_capacity(defs.len() + 1);
     for def in defs {
         definitions.push(build(def.builder, def.name, &resolver, &mut scene));
@@ -879,7 +1033,12 @@ pub(crate) fn parse(model_data: &[u8], files: &BTreeMap<String, Vec<u8>>, versio
     let root = build(root, "Model".to_owned(), &resolver, &mut scene);
     break_cycles(&mut definitions, &mut scene);
     scene.roots = vec![Instance {
-        name: "Model".into(), definition: definitions.len(), transform: DMat4::IDENTITY, tag: None, material: None, hidden: false,
+        name: "Model".into(),
+        definition: definitions.len(),
+        transform: DMat4::IDENTITY,
+        tag: None,
+        material: None,
+        hidden: false,
     }];
     definitions.push(root);
     scene.definitions = definitions;
@@ -920,7 +1079,15 @@ mod tests {
     fn lp(coedges: &[(u64, u8)]) -> Vec<u8> {
         let parts: Vec<Vec<u8>> = coedges
             .iter()
-            .map(|&(e, o)| rec(T_COEDGE, &cat(&[rec(T_COEDGE_EDGE, &(e as u32).to_le_bytes()), rec(T_COEDGE_ORIENT, &[o])])))
+            .map(|&(e, o)| {
+                rec(
+                    T_COEDGE,
+                    &cat(&[
+                        rec(T_COEDGE_EDGE, &(e as u32).to_le_bytes()),
+                        rec(T_COEDGE_ORIENT, &[o]),
+                    ]),
+                )
+            })
             .collect();
         rec(T_LOOP, &cat(&parts))
     }
@@ -936,13 +1103,23 @@ mod tests {
     }
     /// Square of side `s` at offset `o`, ids starting at `base`.
     fn square(base: u64, o: f64, s: f64, reversed: bool) -> (Vec<u8>, Vec<u8>) {
-        let pts = [[o, o, 0.0], [o + s, o, 0.0], [o + s, o + s, 0.0], [o, o + s, 0.0]];
+        let pts = [
+            [o, o, 0.0],
+            [o + s, o, 0.0],
+            [o + s, o + s, 0.0],
+            [o, o + s, 0.0],
+        ];
         let mut geo = Vec::new();
         for (i, p) in pts.iter().enumerate() {
             geo.extend(vertex(base + i as u64, *p));
         }
         for i in 0..4u64 {
-            geo.extend(edge(base + 10 + i, base + i, base + (i + 1) % 4, if i == 0 { 0x07 } else { 0x06 }));
+            geo.extend(edge(
+                base + 10 + i,
+                base + i,
+                base + (i + 1) % 4,
+                if i == 0 { 0x07 } else { 0x06 },
+            ));
         }
         let coedges: Vec<(u64, u8)> = if reversed {
             (0..4u64).rev().map(|i| (base + 10 + i, 1)).collect()
@@ -956,14 +1133,29 @@ mod tests {
         let (outer_geo, outer_loop) = square(100, 0.0, 10.0, false);
         let (inner_geo, inner_loop) = square(200, 3.0, 2.0, true);
         let (def_geo, def_loop) = square(300, 0.0, 1.0, false);
-        let materials = rec(T_MATERIAL, &cat(&[wrapped(7), rec(T_MATERIAL_NAME, b"Brick")]));
+        let materials = rec(
+            T_MATERIAL,
+            &cat(&[wrapped(7), rec(T_MATERIAL_NAME, b"Brick")]),
+        );
         let layers = rec(
             T_LAYER_LIST,
-            &cat(&[rec(T_LAYER, &cat(&[wrapped(9), rec(T_LAYER_NAME, b"Walls"), rec(T_LAYER_HIDDEN, &[1])]))]),
+            &cat(&[rec(
+                T_LAYER,
+                &cat(&[
+                    wrapped(9),
+                    rec(T_LAYER_NAME, b"Walls"),
+                    rec(T_LAYER_HIDDEN, &[1]),
+                ]),
+            )]),
         );
         let definition = rec(
             T_DEFINITION,
-            &cat(&[id(50), rec(T_DEF_NAME, b"Box"), def_geo, face(51, &[def_loop], None)]),
+            &cat(&[
+                id(50),
+                rec(T_DEF_NAME, b"Box"),
+                def_geo,
+                face(51, &[def_loop], None),
+            ]),
         );
         let def_list = rec(T_DEF_LIST, &rec(0x1770, &rec(0x1771, &definition)));
         let mut matrix = [0.0f64; 13];
@@ -986,7 +1178,13 @@ mod tests {
         let bad_face = face(99, &[lp(&[(999, 0), (998, 0), (997, 0)])], None);
         let root = rec(
             T_ROOT,
-            &cat(&[outer_geo, inner_geo, face(1, &[inner_loop, outer_loop], Some(7)), bad_face, instance]),
+            &cat(&[
+                outer_geo,
+                inner_geo,
+                face(1, &[inner_loop, outer_loop], Some(7)),
+                bad_face,
+                instance,
+            ]),
         );
         let model = rec(T_WRAPPER, &cat(&[materials, layers, def_list, root]));
         let xml = format!(
@@ -1007,7 +1205,11 @@ mod tests {
         assert_eq!(scene.definitions[0].name, "Box");
         assert_eq!(scene.definitions[0].geometry.faces.len(), 1);
         let root = &scene.definitions[1].geometry;
-        assert_eq!(root.faces.len(), 1, "malformed face skipped, valid face kept");
+        assert_eq!(
+            root.faces.len(),
+            1,
+            "malformed face skipped, valid face kept"
+        );
         let f = &root.faces[0];
         assert_eq!(f.outer.len(), 4);
         assert_eq!(f.holes.len(), 1);
@@ -1018,14 +1220,28 @@ mod tests {
         assert_eq!(f.color, [255, 0, 0, 191]);
         assert_eq!(root.edges.iter().filter(|e| e.hidden).count(), 2);
         assert!(scene.skipped >= 1 && !scene.warnings.is_empty());
-        assert_eq!(scene.materials[0].texture.as_deref(), Some("materials/Brick/b.png"));
+        assert_eq!(
+            scene.materials[0].texture.as_deref(),
+            Some("materials/Brick/b.png")
+        );
         assert!((scene.materials[0].opacity - 0.75).abs() < 1e-6);
         assert_eq!(scene.textures["materials/Brick/b.png"], b"PNGDATA");
-        assert_eq!(scene.tags, vec![Tag { name: "Walls".into(), visible: false }]);
+        assert_eq!(
+            scene.tags,
+            vec![Tag {
+                name: "Walls".into(),
+                visible: false
+            }]
+        );
         assert_eq!(scene.roots.len(), 1);
         let inst = &scene.definitions[scene.roots[0].definition].instances[0];
-        assert_eq!((inst.definition, inst.tag, inst.name.as_str()), (0, Some(0), "Box#1"));
-        let p = inst.transform.transform_point3(glam::DVec3::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            (inst.definition, inst.tag, inst.name.as_str()),
+            (0, Some(0), "Box#1")
+        );
+        let p = inst
+            .transform
+            .transform_point3(glam::DVec3::new(1.0, 0.0, 0.0));
         assert!((p - glam::DVec3::new(5.0, 1.0, 0.0)).length() < 1e-12);
         assert_eq!(scene.roots[0].definition, 1);
     }

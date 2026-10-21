@@ -170,7 +170,7 @@ pub(crate) fn prepare(
                 vertices,
                 soft: false,
                 smooth: false,
-                    hidden: false,
+                hidden: false,
             },
         );
     }

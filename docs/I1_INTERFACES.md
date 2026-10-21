@@ -25,3 +25,13 @@ Final integration: core `append_import` prepares graph/geometry changes in one d
 entry and preserves the previous timeline. The UI worker appends to its source snapshot,
 merges assets and prepares CPU render caches before publishing a result. A changed revision
 invalidates the result. XML depth is checked in a markup-aware preflight before DOM parsing.
+
+
+I2 additive extension: `BulkEdge` now has independent `smooth: bool` and
+`hidden: bool`; kernel `Edge.hidden` serde-defaults false for old files.
+`ImportedInstance` adds `material: Option<MaterialId>` and `hidden: bool` (defaults
+None/false), preserving placement paint/visibility in the common converter.
+`cindral_skp::read(&[u8])` is a separate raw inch/Z-up boundary; IO exposes
+`import_skp` / `import_skp_bytes`, returning `ImportedScene`. SKP dispatch disables
+triangle cleanup. The raw definition's face/tag assignments are adapted to tagged
+child containers before ordinary scene conversion.

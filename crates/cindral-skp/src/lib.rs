@@ -73,6 +73,9 @@ impl Scene {
     /// Record a skipped/unsupported item without unbounded diagnostic growth.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.skipped = self.skipped.saturating_add(1);
-        if self.warnings.len() < 256 { self.warnings.push(message.into().chars().take(1024).collect()); }
+        if self.warnings.len() < 256 {
+            self.warnings
+                .push(message.into().chars().take(1024).collect());
+        }
     }
 }
