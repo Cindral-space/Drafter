@@ -1,0 +1,18 @@
+[package]
+name = "cindral-skp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cindral-core = { path = "../cindral-core" }
+glam = "0.30"
+zip = { version = "3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+roxmltree = "0.20"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"

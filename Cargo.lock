@@ -437,6 +437,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "cindral-core",
+ "cindral-skp",
  "glam",
  "image",
  "ron",
@@ -458,6 +459,18 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "glam",
+]
+
+[[package]]
+name = "cindral-skp"
+version = "0.1.0"
+dependencies = [
+ "cindral-core",
+ "glam",
+ "proptest",
+ "roxmltree",
+ "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]
