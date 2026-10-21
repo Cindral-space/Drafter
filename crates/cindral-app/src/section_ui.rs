@@ -14,6 +14,10 @@ pub(crate) struct SectionUi {
     bounds_revision: Option<u64>,
 }
 impl DrafterApp {
+    pub(crate) fn section_cursor_active(&self) -> bool {
+        self.section_ui.placing || self.section_ui.moving
+    }
+
     /// Apply validated view effects without changing model geometry or history.
     pub fn set_view_environment(
         &mut self,

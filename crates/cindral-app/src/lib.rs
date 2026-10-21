@@ -299,6 +299,53 @@ impl DrafterApp {
         }
     }
 
+    fn paint_snap_overlay(&self, ui: &egui::Ui, response: &egui::Response, view: View) {
+        // Placement feedback belongs to drawing, and only while the canvas is in use.
+        let navigating = response.ctx.input(|i| {
+            i.pointer.button_down(PointerButton::Middle)
+                || i.smooth_scroll_delta != egui::Vec2::ZERO
+        });
+        if self.modifying || !response.hovered() || navigating {
+            return;
+        }
+        let Some(snap) = &self.snap else {
+            return;
+        };
+        let screen = |point| {
+            view.project(point)
+                .map(|p| response.rect.min + egui::vec2(p.x as f32, p.y as f32))
+        };
+        let painter = ui.painter().with_clip_rect(response.rect);
+        let Some(p) = screen(snap.position) else {
+            return;
+        };
+        if snap.kind == SnapKind::Plane {
+            // A quiet point shows the projected placement without implying a geometry snap.
+            painter.circle_filled(p, 2., self.viewport_ink().gamma_multiply(0.55));
+            return;
+        }
+        if let Some(guide) = snap.guide {
+            if let (Some(a), Some(b)) = (screen(guide[0]), screen(guide[1])) {
+                painter.line_segment(
+                    [a, b],
+                    egui::Stroke::new(1.0_f32, Color32::from_rgb(100, 164, 190)),
+                );
+            }
+        }
+        painter.circle_stroke(
+            p,
+            5.,
+            egui::Stroke::new(2.0_f32, Color32::from_rgb(250, 202, 114)),
+        );
+        painter.text(
+            p + egui::vec2(10., -10.),
+            egui::Align2::LEFT_BOTTOM,
+            snap_label(snap.kind),
+            egui::FontId::proportional(12.),
+            self.viewport_ink(),
+        );
+    }
+
     fn viewport_input(&mut self, response: &egui::Response) {
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
@@ -683,31 +730,9 @@ impl eframe::App for DrafterApp {
                         );
                     }
                 }
-                if let Some(snap) = &self.snap {
-                    if let Some(guide) = snap.guide {
-                        if let (Some(a), Some(b)) = (screen(guide[0]), screen(guide[1])) {
-                            ui.painter().line_segment(
-                                [a, b],
-                                egui::Stroke::new(1.0_f32, Color32::from_rgb(100, 164, 190)),
-                            );
-                        }
-                    }
-                    if let Some(p) = screen(snap.position) {
-                        ui.painter().circle_stroke(
-                            p,
-                            5.,
-                            egui::Stroke::new(2.0_f32, Color32::from_rgb(250, 202, 114)),
-                        );
-                        ui.painter().text(
-                            p + egui::vec2(10., -10.),
-                            egui::Align2::LEFT_BOTTOM,
-                            snap_label(snap.kind),
-                            egui::FontId::proportional(12.),
-                            self.viewport_ink(),
-                        );
-                    }
-                }
+                self.paint_snap_overlay(ui, &response, view);
                 self.orientation_indicator(ui, rect);
+                self.paint_tool_cursor(ui, &response);
             });
     }
 }

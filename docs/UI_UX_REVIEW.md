@@ -70,3 +70,17 @@ Validation: native desktop/compact captures, app and renderer tests, strict Clip
 ## Recovery dismissal
 
 The recovery dialog uses a title-bar × to dismiss the prompt while preserving snapshots. Each snapshot has Recover and a compact × action, with a tooltip identifying permanent discard. The File menu uses the same compact discard control. Discarding the final snapshot dismisses the empty prompt. Validation uses isolated temporary preview entries, strict Clippy, formatting and diff checks.
+
+## Contextual header menu review
+
+The header retains File, Edit, Camera, Draw, Tools, Window and Help. Menu shortcuts now use a separate aligned column instead of embedded spaces. File separates document actions from import, groups export formats in a submenu, and exposes the existing Save As shortcut. Camera uses the same “Fit model” wording as the toolbar.
+
+Save and Inspector occupy reserved space at the right of the toolbar; the active tool appears beside Undo, Redo and Fit model. Work-plane controls appear while drawing, segment counts appear for curves/polygons, and Paint labels its color control. At widths below 924 px (900 px inside header margins), contextual controls use a separate row so they cannot displace the persistent actions. Selecting the current work plane no longer cancels an in-progress drawing. Document names truncate into available space and retain their full tooltip.
+
+Validation: native 1280×800 and 720×480 captures; a headless layout regression checks menu/action visibility, text clipping and contextual plane/segment controls at 720, 900, 960 and 1280 px; app library tests; strict app Clippy; formatting and diff checks. Review captures: `.agent-out/ui-review/menu-after.png` and `menu-compact.png`. Existing tool-palette sizing edits are preserved.
+
+## Dropdown panels
+
+Dropdowns now share 30 px rows, restrained hover feedback, white rounded surfaces, and consistent minimum widths. Active Draw/Tools commands use the selection tint. Tools separates Selection, Modeling and Utilities; Camera separates projection, standard views and display controls. Help groups navigation and modeling instructions. Recovery snapshots move into a submenu with truncated filenames, full-path tooltips and a bounded scrolling list, so File stays compact as snapshots accumulate.
+
+Validation: native compact captures of File and Tools (`.agent-out/ui-review/dropdown-file.png` and `dropdown-tools.png`), plus headless input coverage for compact dropdown visibility, nested exports, choosing Circle, Escape dismissal, and clicking outside a submenu. App library tests, strict Clippy and formatting checks pass.

@@ -301,44 +301,77 @@ impl DrafterApp {
     pub(crate) fn file_menu(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         ui.menu_button("File", |ui| {
-            for (text, a) in [
-                ("New", Action::New),
-                ("Open…   Ctrl+O", Action::Open),
-                ("Save   Ctrl+S", Action::Save),
-                ("Save As…", Action::SaveAs),
-                ("Import OBJ…", Action::Import),
-                ("Export OBJ…", Action::Obj),
-                ("Export STL…", Action::Stl),
-                ("Export glTF 2.0…", Action::Gltf),
+            ui.set_min_width(240.);
+            for (text, shortcut, a) in [
+                ("New", "", Action::New),
+                ("Open…", "Ctrl+O", Action::Open),
+                ("Save", "Ctrl+S", Action::Save),
+                ("Save As…", "Ctrl+Shift+S", Action::SaveAs),
             ] {
-                if ui.button(text).clicked() {
+                if ui
+                    .add(egui::Button::new(text).shortcut_text(shortcut))
+                    .clicked()
+                {
                     action = Some(a);
                     ui.close();
                 }
             }
             ui.separator();
-            if ui.button("Refresh recovery snapshots").clicked() {
-                match cindral_io::recovery_files(&self.files.directory) {
-                    Ok(files) => self.files.candidates = files,
-                    Err(e) => self.error = Some(e.to_string()),
-                }
+            if ui.button("Import OBJ…").clicked() {
+                action = Some(Action::Import);
+                ui.close();
             }
-            for path in self.files.candidates.clone() {
-                ui.horizontal(|ui| {
-                    ui.label(path.file_name().unwrap_or_default().to_string_lossy());
-                    if ui.small_button("Recover").clicked() {
-                        action = Some(Action::Recover(path.clone()));
+            ui.menu_button("Export", |ui| {
+                for (text, a) in [
+                    ("OBJ…", Action::Obj),
+                    ("STL…", Action::Stl),
+                    ("glTF 2.0…", Action::Gltf),
+                ] {
+                    if ui.button(text).clicked() {
+                        action = Some(a);
                         ui.close();
                     }
-                    if ui
-                        .small_button("×")
-                        .on_hover_text("Discard this recovery snapshot permanently")
-                        .clicked()
-                    {
-                        action = Some(Action::Discard(path));
+                }
+            });
+            ui.separator();
+            ui.menu_button("Recovery snapshots", |ui| {
+                if ui.button("Refresh recovery snapshots").clicked() {
+                    match cindral_io::recovery_files(&self.files.directory) {
+                        Ok(files) => self.files.candidates = files,
+                        Err(e) => self.error = Some(e.to_string()),
                     }
-                });
-            }
+                }
+                if self.files.candidates.is_empty() {
+                    ui.label("No recovery snapshots found.");
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(210.)
+                    .show(ui, |ui| {
+                        for path in self.files.candidates.clone() {
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [180., 30.],
+                                    egui::Label::new(
+                                        path.file_name().unwrap_or_default().to_string_lossy(),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(path.display().to_string());
+                                if ui.small_button("Recover").clicked() {
+                                    action = Some(Action::Recover(path.clone()));
+                                    ui.close();
+                                }
+                                if ui
+                                    .add(egui::Button::new("×").min_size(egui::vec2(30., 30.)))
+                                    .on_hover_text("Discard this recovery snapshot permanently")
+                                    .clicked()
+                                {
+                                    action = Some(Action::Discard(path));
+                                }
+                            });
+                        }
+                    });
+            });
         });
         if let Some(action) = action {
             if let Err(e) = self.do_file_action(action) {
