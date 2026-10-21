@@ -185,6 +185,7 @@ fn append_component_sharing_and_tags_restore() {
 fn explicit_mesh_edges_do_not_restore_cleaned_diagonals() {
     let mut g = square();
     g.edges.push(BulkEdge {
+        smooth: false,
         vertices: [0, 2],
         ..Default::default()
     });
@@ -241,4 +242,17 @@ fn loose_append_preserves_existing_ids_and_branch_allocation_floor() {
     assert_eq!(h.model().to_data(), before);
     h.redo().unwrap();
     assert_eq!(h.model().faces().len(), 2);
+}
+
+#[test]
+fn imported_edge_flags_remain_independent_through_geometry_roundtrip() {
+    let mut geometry = square();
+    geometry.edges.push(BulkEdge { vertices: [0,1], soft: false, smooth: true, hidden: true });
+    let model = geometry.build(false, false).unwrap();
+    let edge = model.edges().values().find(|edge| edge.hidden).unwrap();
+    assert!(edge.smooth);
+    assert!(!edge.soft);
+    let data = model.to_data();
+    let restored = Model::from_data(data).unwrap();
+    assert_eq!(restored.edges(), model.edges());
 }

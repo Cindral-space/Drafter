@@ -55,6 +55,9 @@ pub struct Edge {
     pub soft: bool,
     /// Interpolate shading normals across this edge.
     pub smooth: bool,
+    /// Explicit user-hidden edge, independent of soft/smooth shading.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// A bounded planar region. Inner loops remove area from the outer loop.

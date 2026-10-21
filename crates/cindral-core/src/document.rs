@@ -1745,6 +1745,7 @@ impl DocumentHistory {
                     let e = model.edges.get_mut(id).ok_or(KernelError::MissingEntity)?;
                     e.soft |= edge.soft;
                     e.smooth |= edge.smooth;
+                    e.hidden |= edge.hidden;
                 } else {
                     let id = EdgeId::from_raw(model.allocate()?);
                     model.edges.insert(
@@ -1753,6 +1754,7 @@ impl DocumentHistory {
                             vertices: pair,
                             soft: edge.soft,
                             smooth: edge.smooth,
+                            hidden: edge.hidden,
                         },
                     );
                     pairs.insert(pair, id);

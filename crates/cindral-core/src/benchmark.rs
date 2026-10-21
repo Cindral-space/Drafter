@@ -48,6 +48,7 @@ pub fn tiled_squares(columns: usize, rows: usize) -> Result<Fixture, KernelError
                         vertices,
                         soft: false,
                         smooth: false,
+                    hidden: false,
                     },
                 );
             }

@@ -40,7 +40,9 @@ pub struct BulkEdge {
     pub vertices: [usize; 2],
     /// Soft seam.
     pub soft: bool,
-    /// Hidden seam (maps to the kernel's smooth/hidden display flag).
+    /// Interpolate normals independently of visibility.
+    pub smooth: bool,
+    /// Explicitly hidden edge.
     pub hidden: bool,
 }
 impl BulkGeometry {
@@ -172,6 +174,7 @@ impl BulkGeometry {
                                 vertices: pair,
                                 soft: false,
                                 smooth: false,
+                                hidden: false,
                             },
                         );
                         entry.insert(eid);
@@ -279,7 +282,8 @@ impl BulkGeometry {
             }
             if let Some(edge) = pairs.get(&pair).and_then(|id| model.edges.get_mut(id)) {
                 edge.soft |= e.soft;
-                edge.smooth |= e.hidden;
+                edge.smooth |= e.smooth;
+                edge.hidden |= e.hidden;
             } else if let std::collections::btree_map::Entry::Vacant(entry) = pairs.entry(pair) {
                 let id = EdgeId::from_raw(model.allocate()?);
                 model.edges.insert(
@@ -287,7 +291,8 @@ impl BulkGeometry {
                     Edge {
                         vertices: pair,
                         soft: e.soft,
-                        smooth: e.hidden,
+                        smooth: e.smooth,
+                        hidden: e.hidden,
                     },
                 );
                 entry.insert(id);

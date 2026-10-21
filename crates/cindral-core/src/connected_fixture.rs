@@ -75,6 +75,7 @@ pub fn connected_solid(segments: usize) -> Result<(History, FaceId), KernelError
                     vertices: pair,
                     soft: false,
                     smooth: false,
+                    hidden: false,
                 },
             );
             Ok(id)

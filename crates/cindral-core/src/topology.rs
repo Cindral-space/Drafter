@@ -12,7 +12,7 @@ impl Model {
         &mut self,
         a: VertexId,
         b: VertexId,
-        style: (bool, bool),
+        style: (bool, bool, bool),
         preferred: Option<EdgeId>,
     ) -> Result<(), KernelError> {
         if a == b || self.position(a)?.distance(self.position(b)?) <= TOLERANCE {
@@ -36,6 +36,7 @@ impl Model {
             vertices,
             soft: style.0,
             smooth: style.1,
+            hidden: style.2,
         };
         if indexed {
             let mut index = self.spatial.take().ok_or(KernelError::MissingEntity)?;
@@ -96,7 +97,7 @@ impl Model {
                     self.add_edge_ids(
                         pair[0],
                         pair[1],
-                        (edge.soft, edge.smooth),
+                        (edge.soft, edge.smooth, edge.hidden),
                         (index == 0).then_some(id),
                     )?;
                 }
@@ -104,7 +105,7 @@ impl Model {
         }
         self.sort_along(&mut cuts, start, end);
         for pair in cuts.windows(2) {
-            self.add_edge_ids(pair[0], pair[1], (false, false), None)?;
+            self.add_edge_ids(pair[0], pair[1], (false, false, false), None)?;
         }
         Ok(())
     }
@@ -136,7 +137,7 @@ impl Model {
                 }
                 let incident: Vec<_> = self.incident_edges(*vertex).collect();
                 if let [(id_a, a), (id_b, b)] = incident.as_slice() {
-                    if (a.soft, a.smooth) != (b.soft, b.smooth) {
+                    if (a.soft, a.smooth, a.hidden) != (b.soft, b.smooth, b.hidden) {
                         continue;
                     }
                     let Some(other_a) = a.vertices.iter().find(|id| *id != vertex) else {
@@ -156,7 +157,7 @@ impl Model {
                             *id_b,
                             *other_a,
                             *other_b,
-                            (a.soft, a.smooth),
+                            (a.soft, a.smooth, a.hidden),
                         ));
                         break;
                     }

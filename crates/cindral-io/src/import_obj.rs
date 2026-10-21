@@ -796,6 +796,7 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
                     vertices: pair,
                     soft: false,
                     smooth: false,
+                    hidden: false,
                 },
             );
         }
