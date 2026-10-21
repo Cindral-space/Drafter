@@ -287,6 +287,18 @@ impl Delta {
                 selection.edges.extend(spatial.query_edges(bounds));
                 faces.extend(spatial.query_faces(bounds));
             }
+            // A chord wholly inside one convex face cannot close a remote wire loop.
+            // Other edits still need the exterior-boundary traversal for Euler correctness.
+            let confined = if let Command::AddEdge { start, end } = command {
+                faces.iter().any(|id| {
+                    model
+                        .faces
+                        .get(id)
+                        .is_some_and(|f| convex_chord(model, f, *start, *end))
+                })
+            } else {
+                false
+            };
             // Follow loose wire components, not entire connected face meshes.
             // A closing segment may be far from the other sides of an open loop.
             let mut queue: Vec<_> = selection
@@ -296,7 +308,7 @@ impl Delta {
                     spatial
                         .edge_faces
                         .get(id)
-                        .is_none_or(|faces| faces.is_empty())
+                        .is_none_or(|faces| faces.is_empty() || (!confined && faces.len() == 1))
                 })
                 .copied()
                 .collect();
@@ -316,6 +328,9 @@ impl Delta {
                                 .filter(|set| !set.is_empty())
                             {
                                 faces.extend(boundary_faces);
+                                if !confined && boundary_faces.len() == 1 {
+                                    queue.push(*neighbor);
+                                }
                             } else {
                                 queue.push(*neighbor);
                             }
@@ -628,6 +643,38 @@ pub(crate) fn contains_face(model: &Model, face: &Face, point: DVec3) -> Result<
         }
     }
     Ok(true)
+}
+
+fn convex_chord(model: &Model, face: &Face, start: DVec3, end: DVec3) -> bool {
+    if !face.holes.is_empty()
+        || !(3..=64).contains(&face.outer.len())
+        || face.plane.signed_distance(start).abs() > crate::TOLERANCE
+        || face.plane.signed_distance(end).abs() > crate::TOLERANCE
+    {
+        return false;
+    }
+    let points: Vec<_> = face
+        .outer
+        .iter()
+        .filter_map(|id| model.vertices.get(id).map(|v| v.position))
+        .collect();
+    if points.len() != face.outer.len() {
+        return false;
+    }
+    for i in 0..points.len() {
+        let a = points[i];
+        let b = points[(i + 1) % points.len()];
+        let c = points[(i + 2) % points.len()];
+        let edge = b - a;
+        let tolerance = crate::TOLERANCE * edge.length();
+        if edge.cross(c - b).dot(face.plane.normal) < -tolerance
+            || edge.cross(start - a).dot(face.plane.normal) < -tolerance
+            || edge.cross(end - a).dot(face.plane.normal) < -tolerance
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn fast_paths_enabled() -> bool {

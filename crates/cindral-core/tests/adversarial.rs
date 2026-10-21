@@ -160,3 +160,27 @@ fn translated_collinear_overlaps_handle_float_roundoff() {
     assert_eq!(h.model().vertices().len(), 4);
     h.model().validate().unwrap();
 }
+
+#[test]
+fn exterior_boundary_traversal_closes_remote_arrangement_regions() {
+    let mut h = History::new();
+    for ((ax, ay), (bx, by)) in [
+        ((-3, 0), (2, 3)),
+        ((0, 0), (-3, 0)),
+        ((1, 0), (0, 2)),
+        ((-3, -2), (0, 2)),
+        ((0, -3), (1, 3)),
+        ((-3, 0), (1, 0)),
+    ] {
+        h.execute(line(
+            V::new(ax as f64, ay as f64, 0.),
+            V::new(bx as f64, by as f64, 0.),
+        ))
+        .unwrap();
+        let m = h.model();
+        let expected =
+            m.edges().len() as isize - m.vertices().len() as isize + components(&h) as isize;
+        assert_eq!(m.faces().len() as isize, expected);
+        m.validate().unwrap();
+    }
+}
