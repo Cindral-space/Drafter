@@ -1081,10 +1081,10 @@ impl DocumentHistory {
         Ok(result)
     }
     /// Construct an imported document with exactly one reversible import entry.
-    /// Geometry must be validated as mesh surfaces; crossings are preserved, not split.
+    /// Crossings are rejected with bounded validation work, never split during construction.
     pub fn from_import_data(data: DocumentData) -> Result<Self, KernelError> {
         let mut result = Self::from_data_impl(data, false)?;
-        for id in result.graph.definitions.keys() { result.history(*id).model().validate_mesh(false)?; }
+        for id in result.graph.definitions.keys() { result.history(*id).model().validate_mesh(true)?; }
         let steps: Vec<_> = result.graph.definitions.keys().copied().collect();
         for id in &steps { result.history_mut(*id)?.record_import(); }
         let delta = GraphDelta::between(&Self::new().graph, &result.graph);
@@ -1623,5 +1623,66 @@ impl DocumentHistory {
         }
         self.changed(dirty, true, appearance);
         Ok(true)
+    }
+}
+
+impl DocumentHistory {
+    /// Append validated imported definitions/geometry to the active context as one undo entry.
+    /// Intended for an import worker operating on a cloned history. Existing undo/redo is retained.
+    pub fn append_import(&mut self, data: DocumentData) -> Result<(), KernelError> {
+        if self.geometry_preview.is_some() || self.instance_preview.is_some() || self.organization_preview.is_some() {
+            return Err(invalid("finish the active preview before importing"));
+        }
+        let imported = Self::from_import_data(data)?;
+        let mut after = self.graph.clone();
+        after.next_id = after.next_id.max(self.high_water);
+        let mut alloc = || { let id=after.next_id;after.next_id+=1;id };
+        let definitions: BTreeMap<_,_> = imported.graph.definitions.keys().filter(|id| **id != DefinitionId(0)).map(|id|(*id,DefinitionId(alloc()))).collect();
+        let materials: BTreeMap<_,_> = imported.graph.materials.keys().map(|id|(*id,MaterialId(alloc()))).collect();
+        let tags: BTreeMap<_,_> = imported.graph.tags.keys().map(|id|(*id,TagId(alloc()))).collect();
+        for (id,m) in &imported.graph.materials { after.materials.insert(materials[id],m.clone()); }
+        for (id,t) in &imported.graph.tags { after.tags.insert(tags[id],t.clone()); }
+        let mut created = BTreeMap::new();
+        let active = self.active_definition();
+        for (id,info) in &imported.graph.definitions {
+            let target = if *id==DefinitionId(0) {active} else {definitions[id]};
+            let mut info=info.clone();
+            for node in info.instances.values_mut() {
+                node.id=InstanceId(after.next_id);after.next_id+=1;
+                node.definition=*definitions.get(&node.definition).ok_or(KernelError::MissingEntity)?;
+                node.material=node.material.map(|id|materials[&id]);node.tag=node.tag.map(|id|tags[&id]);
+            }
+            info.instances=info.instances.into_values().map(|n|(n.id,n)).collect();
+            if *id==DefinitionId(0) {
+                after.definitions.get_mut(&target).ok_or(KernelError::MissingEntity)?.instances.extend(info.instances);
+            } else {
+                after.definitions.insert(target,info);
+                let mut m=imported.history(*id).model().clone();
+                for face in m.faces.values_mut(){face.material=face.material.map(|id|materials[&id]);}
+                created.insert(target,m);
+            }
+        }
+        after.validate()?;
+        let mut checker=Self::new();checker.graph=after.clone();checker.occurrences()?;
+        let source=imported.model();
+        let root_replacement=if source.vertices().is_empty(){None}else{
+            let mut bulk=BulkGeometry::default();
+            for (model,remap) in [(self.model(),false),(source,true)] {
+                let mut indices=BTreeMap::new();
+                for (id,v) in model.vertices(){indices.insert(*id,bulk.vertices.len());bulk.vertices.push(v.position);}
+                for f in model.faces().values(){bulk.faces.push(BulkFace{outer:f.outer.iter().map(|v|indices[v]).collect(),holes:f.holes.iter().map(|r|r.iter().map(|v|indices[v]).collect()).collect(),color:f.color,material:f.material.map(|id|if remap {materials[&id]}else{id})});}
+                for e in model.edges().values(){bulk.edges.push(BulkEdge{vertices:e.vertices.map(|v|indices[&v]),soft:e.soft,hidden:e.smooth});}
+            }
+            let m=bulk.build(false,false)?;m.validate()?;Some(m)
+        };
+        let mut steps=Vec::new();
+        // Every operation below is on prepared values. Derived index construction is already done.
+        if let Some(model)=root_replacement {if self.history_mut(active)?.replace_import_model(model)? {steps.push(active);}}
+        for (id,model) in created {self.geometry.insert(id,History::from_model(model)?);}
+        let delta=GraphDelta::between(&self.graph,&after);
+        self.graph=after;self.high_water=self.high_water.max(self.graph.next_id);
+        let dirty=steps.iter().map(|id|(*id,self.history(*id).changes().clone())).collect();
+        self.undo.push(DocumentEntry::Organization{delta,steps});self.redo.clear();self.changed(dirty,true,true);
+        Ok(())
     }
 }

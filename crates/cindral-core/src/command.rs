@@ -318,6 +318,23 @@ impl History {
         self.redo.clear();
         Ok(true)
     }
+    pub(crate) fn replace_import_model(&mut self, mut model: Model) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
+        model.spatial = None;
+        model.next_id = model.next_id.max(self.high_water);
+        model.validate_mesh(false)?;
+        let delta = crate::transaction::Delta::between(&self.model, &model, self.model.next_id);
+        if delta.is_empty() {
+            return Ok(false);
+        }
+        delta.apply(&mut self.model, true)?;
+        self.high_water = self.high_water.max(delta.next_id());
+        self.revision += 1;
+        self.changes = delta.changes(self.revision);
+        self.undo.push(Entry { delta });
+        self.redo.clear();
+        Ok(true)
+    }
     /// Dirty entities from the most recent successful mutation, undo or redo.
     pub fn changes(&self) -> &crate::ChangeSet {
         &self.changes

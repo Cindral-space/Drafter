@@ -359,6 +359,7 @@ impl Model {
                 })
                 .collect(),
         );
+        let mut pair_budget = 5_000_000usize;
         for (i, (a, pa, pb)) in edges.iter().enumerate() {
             let bounds = rstar::AABB::from_corners(
                 (pa.min(*pb) - DVec3::splat(TOLERANCE)).to_array(),
@@ -369,6 +370,7 @@ impl Model {
                 if j <= i {
                     continue;
                 }
+                pair_budget = pair_budget.checked_sub(1).ok_or(KernelError::Capacity)?;
                 let (b, pc, pd) = edges[j];
                 for point in geometry::intersections(*pa, *pb, pc, pd) {
                     let shared = a

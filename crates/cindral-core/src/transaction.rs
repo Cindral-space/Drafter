@@ -296,7 +296,7 @@ impl Delta {
                     spatial
                         .edge_faces
                         .get(id)
-                        .is_none_or(|faces| faces.len() <= 1)
+                        .is_none_or(|faces| faces.is_empty())
                 })
                 .copied()
                 .collect();
@@ -316,9 +316,7 @@ impl Delta {
                                 .filter(|set| !set.is_empty())
                             {
                                 faces.extend(boundary_faces);
-                                if boundary_faces.len() <= 1 {
-                                    queue.push(*neighbor);
-                                }
+
                             } else {
                                 queue.push(*neighbor);
                             }

@@ -47,6 +47,13 @@ impl BulkGeometry {
     pub fn build_cancellable(self, merge: bool, soften: bool, cancelled: impl Fn() -> bool) -> Result<Model, KernelError> {
         let check = || if cancelled() { Err(KernelError::InvalidTopology("import cancelled".into())) } else { Ok(()) };
         if self.vertices.len() > 1_000_000 || self.faces.len() > 1_000_000 || self.edges.len() > 3_000_000 { return Err(KernelError::Capacity); }
+        let mut ring_work = 0usize;
+        for face in &self.faces {
+            for ring in std::iter::once(&face.outer).chain(&face.holes) {
+                ring_work = ring_work.checked_add(ring.len().checked_mul(ring.len()).ok_or(KernelError::Capacity)?).ok_or(KernelError::Capacity)?;
+                if ring_work > 64_000_000 { return Err(KernelError::Capacity); }
+            }
+        }
         let mut model = Model::default();
         let mut cells = HashMap::<[i64;3], Vec<VertexId>>::new();
         let mut ids = Vec::with_capacity(self.vertices.len());
