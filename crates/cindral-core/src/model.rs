@@ -332,63 +332,66 @@ impl Model {
             }
         }
         if intersections {
-        let intersection_span =
-            tracing::info_span!("validate.edge_pairs", edges = self.edges.len()).entered();
-        // Conservative R-tree broad phase; the exact tolerance-aware predicate below
-        // is unchanged. Expanded AABBs retain touching and shallow-angle cases.
-        let edges: Vec<_> = self
-            .edges
-            .values()
-            .map(|edge| {
-                Ok((
-                    edge,
-                    self.position(edge.vertices[0])?,
-                    self.position(edge.vertices[1])?,
-                ))
-            })
-            .collect::<Result<_, KernelError>>()?;
-        let tree = rstar::RTree::bulk_load(
-            edges
-                .iter()
-                .enumerate()
-                .map(|(i, (_, a, b))| {
-                    rstar::primitives::GeomWithData::new(
-                        rstar::primitives::Line::new(a.to_array(), b.to_array()),
-                        i,
-                    )
+            let intersection_span =
+                tracing::info_span!("validate.edge_pairs", edges = self.edges.len()).entered();
+            // Conservative R-tree broad phase; the exact tolerance-aware predicate below
+            // is unchanged. Expanded AABBs retain touching and shallow-angle cases.
+            let edges: Vec<_> = self
+                .edges
+                .values()
+                .map(|edge| {
+                    Ok((
+                        edge,
+                        self.position(edge.vertices[0])?,
+                        self.position(edge.vertices[1])?,
+                    ))
                 })
-                .collect(),
-        );
-        let mut pair_budget = 5_000_000usize;
-        for (i, (a, pa, pb)) in edges.iter().enumerate() {
-            let bounds = rstar::AABB::from_corners(
-                (pa.min(*pb) - DVec3::splat(TOLERANCE)).to_array(),
-                (pa.max(*pb) + DVec3::splat(TOLERANCE)).to_array(),
+                .collect::<Result<_, KernelError>>()?;
+            let tree = rstar::RTree::bulk_load(
+                edges
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, a, b))| {
+                        rstar::primitives::GeomWithData::new(
+                            rstar::primitives::Line::new(a.to_array(), b.to_array()),
+                            i,
+                        )
+                    })
+                    .collect(),
             );
-            for candidate in tree.locate_in_envelope_intersecting(&bounds) {
-                let j = candidate.data;
-                if j <= i {
-                    continue;
-                }
-                pair_budget = pair_budget.checked_sub(1).ok_or(KernelError::Capacity)?;
-                let (b, pc, pd) = edges[j];
-                for point in geometry::intersections(*pa, *pb, pc, pd) {
-                    let shared = a
-                        .vertices
-                        .iter()
-                        .filter(|id| b.vertices.contains(id))
-                        .any(|id| self.vertices[id].position.distance(point) <= TOLERANCE);
-                    if !shared {
-                        return Err(invalid("intersection has not been split"));
+            let mut pair_budget = 5_000_000usize;
+            for (i, (a, pa, pb)) in edges.iter().enumerate() {
+                let bounds = rstar::AABB::from_corners(
+                    (pa.min(*pb) - DVec3::splat(TOLERANCE)).to_array(),
+                    (pa.max(*pb) + DVec3::splat(TOLERANCE)).to_array(),
+                );
+                for candidate in tree.locate_in_envelope_intersecting(&bounds) {
+                    let j = candidate.data;
+                    if j <= i {
+                        continue;
+                    }
+                    pair_budget = pair_budget.checked_sub(1).ok_or(KernelError::Capacity)?;
+                    let (b, pc, pd) = edges[j];
+                    for point in geometry::intersections(*pa, *pb, pc, pd) {
+                        let shared = a
+                            .vertices
+                            .iter()
+                            .filter(|id| b.vertices.contains(id))
+                            .any(|id| self.vertices[id].position.distance(point) <= TOLERANCE);
+                        if !shared {
+                            return Err(invalid("intersection has not been split"));
+                        }
                     }
                 }
             }
-        }
-        drop(intersection_span);
+            drop(intersection_span);
         }
         let _faces_span = tracing::info_span!("validate.faces").entered();
         for (id, face) in &self.faces {
-            if !face.plane.normal.is_finite() || !face.plane.distance.is_finite() || (face.plane.normal.length() - 1.0).abs() > TOLERANCE {
+            if !face.plane.normal.is_finite()
+                || !face.plane.distance.is_finite()
+                || (face.plane.normal.length() - 1.0).abs() > TOLERANCE
+            {
                 return Err(invalid("non-unit face normal"));
             }
             for (index, ring) in std::iter::once(&face.outer)

@@ -90,4 +90,4 @@ mod sun;
 pub use sun::{sun_direction, valid_date};
 
 mod bulk;
-pub use bulk::{BulkGeometry, BulkFace, BulkEdge};
+pub use bulk::{BulkEdge, BulkFace, BulkGeometry};

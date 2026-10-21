@@ -316,7 +316,6 @@ impl Delta {
                                 .filter(|set| !set.is_empty())
                             {
                                 faces.extend(boundary_faces);
-
                             } else {
                                 queue.push(*neighbor);
                             }
