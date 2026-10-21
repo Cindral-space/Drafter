@@ -300,7 +300,7 @@ impl DrafterApp {
                     if field.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) { self.apply_measurement(); }
                     ui.label("Measurements"); ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let prompt = if self.modifying { match self.modify.kind() { ModifyKind::Select => "Select geometry · Shift adds · Drag a selection box", ModifyKind::TapeMeasure => "Measure: click two points to measure or create a guide", _ => "Select geometry, then drag · Type a value + Enter · Esc cancels" } } else { match self.tool.kind() { ToolKind::Line => "Line: click start, then end · Esc stops chain", ToolKind::Rectangle => "Rectangle: click first corner, then opposite corner", ToolKind::Circle => "Circle: click center, then radius", ToolKind::Arc => "Arc: click center, start, then end direction", ToolKind::Polygon => "Polygon: click center, then vertex" } };
+                        let prompt = if self.modifying { match self.modify.kind() { ModifyKind::Select => "Select geometry · Shift adds · Drag a selection box", ModifyKind::TapeMeasure => "Measure: click two points to measure or create a guide", _ => "Select geometry, then drag · Type a value + Enter · Esc cancels" } } else { match self.tool.kind() { ToolKind::Line => "Line: drag to draw or click start, then end · Esc stops chain", ToolKind::Rectangle => "Rectangle: drag to draw or click opposite corners", ToolKind::Circle => "Circle: click center, then radius", ToolKind::Arc => "Arc: click center, start, then end direction", ToolKind::Polygon => "Polygon: click center, then vertex" } };
                         ui.add(egui::Label::new(prompt).truncate());
                     });
                 });

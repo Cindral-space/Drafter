@@ -10,6 +10,8 @@ impl DrafterApp {
         self.modify.set_color(self.paint_color);
         self.tool.cancel();
         self.measurement.clear();
+        self.draw_press = None;
+        self.draw_drag = None;
     }
     pub(crate) fn cancel_modify(&mut self) {
         self.organization.drag = None;

@@ -43,6 +43,8 @@ pub struct DrafterApp {
     tool: ToolSession,
     axis_lock: Option<Axis>,
     snap: Option<Snap>,
+    draw_press: Option<Snap>,
+    draw_drag: Option<()>,
     measurement: String,
     error: Option<String>,
     scene: scene_cache::SceneCache,
@@ -75,6 +77,8 @@ impl Default for DrafterApp {
             tool: ToolSession::new(ToolKind::Line),
             axis_lock: None,
             snap: None,
+            draw_press: None,
+            draw_drag: None,
             measurement: String::new(),
             error: None,
             scene: scene_cache::SceneCache::default(),
@@ -133,6 +137,8 @@ impl DrafterApp {
         self.axis_lock = None;
         self.measurement.clear();
         self.snap = None;
+        self.draw_press = None;
+        self.draw_drag = None;
     }
     fn refresh_mesh(&mut self) {
         let active = self.history.active_definition();
@@ -294,6 +300,8 @@ impl DrafterApp {
     fn viewport_input(&mut self, response: &egui::Response) {
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
+        let drawing_drag = self.draw_drag.is_some()
+            || response.drag_started_by(PointerButton::Primary);
         if response.dragged_by(PointerButton::Middle) {
             let (delta, shift) = response
                 .ctx
@@ -313,8 +321,12 @@ impl DrafterApp {
         if !response.hovered() {
             if self.modifying && (self.modify.active() || self.selection_start.is_some()) {
                 self.modify_viewport_input(response);
+                return;
             }
-            return;
+            if !drawing_drag {
+                self.draw_press = None;
+                return;
+            }
         }
         let keyboard_free = !response.ctx.wants_keyboard_input();
         response.ctx.input(|i| {
@@ -376,6 +388,8 @@ impl DrafterApp {
                     self.measurement.clear();
                     self.axis_lock = None;
                     self.error = None;
+                    self.draw_press = None;
+                    self.draw_drag = None;
                 }
                 if i.key_pressed(Key::ArrowRight) {
                     self.axis_lock = if self.axis_lock == Some(Axis::X) {
@@ -476,31 +490,72 @@ impl DrafterApp {
                 self.apply_measurement();
             }
         });
-        if response.clicked_by(PointerButton::Primary) {
-            if let Some(snap) = self.snap.clone() {
-                if self.tool.anchors().is_empty() {
-                    if let Some(SnapEntity::Face(id)) = snap.entity {
-                        if let Some(face) = self.history.model().faces().get(&id) {
-                            if let Err(error) = self.tool.set_plane(DrawingPlane {
-                                origin: snap.position,
-                                normal: face.plane.normal,
-                            }) {
-                                self.error = Some(error.to_string());
-                            }
-                        }
-                    }
-                }
-                let before = self.tool.clone();
-                match self.tool.click(snap.position) {
-                    Ok(Some(command)) => {
-                        if !self.commit(command) {
-                            self.tool = before;
-                        }
-                    }
-                    Ok(None) => self.error = None,
-                    Err(error) => self.error = Some(error.to_string()),
+        if self.modifying {
+            self.draw_press = None;
+            self.draw_drag = None;
+            return;
+        }
+
+        if response
+            .ctx
+            .input(|i| i.pointer.button_pressed(PointerButton::Primary))
+        {
+            self.draw_press = self.snap.clone();
+        }
+
+        if response.drag_started_by(PointerButton::Primary)
+            && matches!(self.tool.kind(), ToolKind::Line | ToolKind::Rectangle)
+        {
+            let starts_with_anchor = !self.tool.anchors().is_empty();
+            self.draw_drag = Some(());
+            if !starts_with_anchor {
+                if let Some(start) = self.draw_press.clone().or_else(|| self.snap.clone()) {
+                    self.click_tool_at(start);
                 }
             }
+        }
+
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if self.draw_drag.take().is_some() {
+                if let Some(end) = self.snap.clone() {
+                    self.click_tool_at(end);
+                }
+                self.draw_press = None;
+                return;
+            }
+            self.draw_press = None;
+        }
+
+        if response.clicked_by(PointerButton::Primary) {
+            if let Some(snap) = self.snap.clone() {
+                self.click_tool_at(snap);
+            }
+            self.draw_press = None;
+        }
+    }
+
+    fn click_tool_at(&mut self, snap: Snap) {
+        if self.tool.anchors().is_empty() {
+            if let Some(SnapEntity::Face(id)) = snap.entity {
+                if let Some(face) = self.history.model().faces().get(&id) {
+                    if let Err(error) = self.tool.set_plane(DrawingPlane {
+                        origin: snap.position,
+                        normal: face.plane.normal,
+                    }) {
+                        self.error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+        let before = self.tool.clone();
+        match self.tool.click(snap.position) {
+            Ok(Some(command)) => {
+                if !self.commit(command) {
+                    self.tool = before;
+                }
+            }
+            Ok(None) => self.error = None,
+            Err(error) => self.error = Some(error.to_string()),
         }
     }
 }

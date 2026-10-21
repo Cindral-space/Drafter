@@ -80,7 +80,7 @@ This renders a 500,000-triangle shaded heightfield with depth at 1280×800. See 
 
 ## Drawing (M3)
 
-Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Click successive anchors, or type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The top toolbar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
+Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Drag to draw a line or rectangle in one gesture, or click successive anchors; the click workflow remains available for precise placement. Type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The top toolbar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
 
 Inference and tools are CPU-only libraries with independent tests. To capture the shaded demo and exercise incremental GPU buffer growth, append `--incremental` after the capture path in the capture example command.
 
