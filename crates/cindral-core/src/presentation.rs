@@ -41,9 +41,9 @@ impl Default for ViewStyle {
             profiles: false,
             soft_edges: false,
             smooth_edges: false,
-            background: [239, 239, 228],
-            sky: Some([199, 222, 235]),
-            ground: Some([230, 231, 216]),
+            background: [237, 240, 245],
+            sky: Some([229, 235, 244]),
+            ground: Some([237, 240, 245]),
         }
     }
 }

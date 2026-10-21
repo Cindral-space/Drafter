@@ -219,7 +219,7 @@ impl DrafterApp {
     }
     pub(crate) fn presentation_panel(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Styles & Scenes")
-            .default_open(false)
+            .default_open(true)
             .show(ui, |ui| {
                 let before = self.presentation.style.clone();
                 let style = &mut self.presentation.style;

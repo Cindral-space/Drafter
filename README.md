@@ -28,7 +28,7 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 
 ## Modeling workspace
 
-The editor uses a light modeling workspace with a compact tool palette on the left and a resizable **Default Tray** on the right. Collapse tray sections or hide the tray with **Window → Default Tray**. Camera views and projection are in **Camera**; construction planes and curve segment counts are in the top toolbar. Measurements stay at the bottom right. The native editor starts with Select; **Space** returns to Select.
+The editor uses a neutral modeling canvas, a light two-column tool palette, and a flat, resizable **Inspector**. All 16 drawing and modification tools have visible icons and captions; hover for keyboard shortcuts. The **Model** inspector tab contains Outliner, Tags and Materials; **Appearance** contains styles, scenes, sections and shadows. Selection details appear when geometry is selected, and the Outliner opens when a group or component is selected. Close the inspector with **×** beside its tabs; reopen it from the **Inspector** toolbar button or **Window → Model inspector**. The visible **File, Edit, Camera, Draw, Tools, Window and Help** menus retain the familiar desktop layout. The toolbar provides Undo/Redo, Fit model, segmented work-plane controls, Inspector and Save; segment counts and paint color appear for their respective tools. **Camera** includes standard views, projection and a construction-grid toggle. The grid starts hidden, with muted world axes and a small orientation indicator. The header shows the document name and Unsaved, Modified or Saved state; recovery autosaves do not mark a draft as saved. Dimensions stay at the bottom right. The native editor starts with Select; **Space** returns to Select.
 
 See the [UI/UX review](docs/UI_UX_REVIEW.md) for findings, changes and validation.
 
@@ -52,7 +52,7 @@ WGPU_BACKEND=opengl cargo run -p cindral-app
 | Fit model / construction area | F or Zoom extents |
 | Isometric / front / right / top | 0 / 1 / 3 / 7 |
 | Toggle projection | 5 |
-| All standard views | Camera menu |
+| All standard views | Camera |
 
 Keyboard shortcuts apply while the pointer is over the viewport. Grid spacing is one meter. Extents fits model bounds, or the central 20 × 20 meter area when empty.
 

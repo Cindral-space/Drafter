@@ -14,6 +14,9 @@ struct AutosaveJob {
 }
 pub(crate) struct FileState {
     path: Option<PathBuf>,
+    saved_values: Option<DraftBundle>,
+    checked_save_revision: Option<(u64, u64)>,
+    modified: bool,
     pub(crate) fit: bool,
     pub(crate) textures: BTreeMap<String, TextureAsset>,
     directory: PathBuf,
@@ -64,6 +67,9 @@ impl Default for FileState {
         let snapshot = snapshot_path(&directory, 0);
         Self {
             path: None,
+            saved_values: None,
+            checked_save_revision: None,
+            modified: false,
             fit: false,
             textures: BTreeMap::new(),
             directory,
@@ -150,6 +156,9 @@ impl DrafterApp {
         self.files.snapshot = snapshot_path(&self.files.directory, self.files.generation);
         self.files.last_time = Instant::now();
         self.files.last_revision = None;
+        self.files.saved_values = None;
+        self.files.checked_save_revision = None;
+        self.files.modified = false;
     }
     fn apply_file(&mut self, bundle: DraftBundle, path: Option<PathBuf>) -> cindral_io::Result<()> {
         self.set_document_data(bundle.document)?;
@@ -167,6 +176,10 @@ impl DrafterApp {
             |p| format!("Opened {}", p.display()),
         );
         self.files.last_revision = self.files.path.as_ref().map(|_| self.file_revision());
+        if self.files.path.is_some() {
+            self.files.saved_values = Some(self.file_values());
+            self.files.checked_save_revision = Some(self.file_revision());
+        }
         self.error = None;
         Ok(())
     }
@@ -182,7 +195,11 @@ impl DrafterApp {
     pub fn save_path(&mut self, path: &Path) -> cindral_io::Result<()> {
         self.cancel_modify();
         self.tool.cancel();
-        cindral_io::save_draft(path, &self.file_values())?;
+        let values = self.file_values();
+        cindral_io::save_draft(path, &values)?;
+        self.files.saved_values = Some(values);
+        self.files.checked_save_revision = Some(self.file_revision());
+        self.files.modified = false;
         self.files.path = Some(path.to_owned());
         self.files.last_revision = Some(self.file_revision());
         self.files.status = format!("Saved {}", path.display());
@@ -282,16 +299,6 @@ impl DrafterApp {
         Ok(())
     }
     pub(crate) fn file_menu(&mut self, ui: &mut egui::Ui) {
-        if !self.files.checked {
-            self.files.checked = true;
-            match cindral_io::recovery_files(&self.files.directory) {
-                Ok(files) => {
-                    self.files.offer = !files.is_empty();
-                    self.files.candidates = files;
-                }
-                Err(e) => self.error = Some(e.to_string()),
-            }
-        }
         let mut action = None;
         ui.menu_button("File", |ui| {
             for (text, a) in [
@@ -323,13 +330,34 @@ impl DrafterApp {
                         action = Some(Action::Recover(path.clone()));
                         ui.close();
                     }
-                    if ui.small_button("Discard").clicked() {
+                    if ui
+                        .small_button("×")
+                        .on_hover_text("Discard this recovery snapshot permanently")
+                        .clicked()
+                    {
                         action = Some(Action::Discard(path));
                     }
                 });
             }
         });
-        let shortcut = ui.ctx().input(|i| {
+        if let Some(action) = action {
+            if let Err(e) = self.do_file_action(action) {
+                self.error = Some(e.to_string());
+            }
+        }
+    }
+    pub(crate) fn file_tick(&mut self, ctx: &egui::Context) {
+        if !self.files.checked {
+            self.files.checked = true;
+            match cindral_io::recovery_files(&self.files.directory) {
+                Ok(files) => {
+                    self.files.offer = !files.is_empty();
+                    self.files.candidates = files;
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            }
+        }
+        let shortcut = ctx.input(|i| {
             if i.modifiers.command && i.key_pressed(Key::S) {
                 Some(if i.modifiers.shift {
                     Action::SaveAs
@@ -342,10 +370,48 @@ impl DrafterApp {
                 None
             }
         });
-        if let Some(action) = action.or(shortcut) {
+        if let Some(action) = shortcut {
             if let Err(e) = self.do_file_action(action) {
                 self.error = Some(e.to_string());
             }
+        }
+        self.refresh_save_state();
+    }
+    fn refresh_save_state(&mut self) {
+        let revision = self.file_revision();
+        if self.files.checked_save_revision == Some(revision)
+            || self.modify.active()
+            || self.organization.drag.is_some()
+        {
+            return;
+        }
+        if let Some(saved) = &self.files.saved_values {
+            let mut current = self.history.to_data();
+            // Undo keeps identity allocators monotonic; allocator growth alone is not an edit.
+            current.next_id = saved.document.next_id;
+            for (id, definition) in &mut current.definitions {
+                if let Some(before) = saved.document.definitions.get(id) {
+                    definition.geometry.next_id = before.geometry.next_id;
+                }
+            }
+            self.files.modified = saved.presentation != self.presentation
+                || saved.textures != self.files.textures
+                || saved.document != current;
+        }
+        self.files.checked_save_revision = Some(revision);
+    }
+    pub(crate) fn document_save_label(&self) -> &'static str {
+        if self.files.path.is_none() {
+            "Unsaved"
+        } else if self.files.modified {
+            "Modified"
+        } else {
+            "Saved"
+        }
+    }
+    pub(crate) fn save_document(&mut self) {
+        if let Err(e) = self.do_file_action(Action::Save) {
+            self.error = Some(e.to_string());
         }
     }
     pub(crate) fn recovery_window(&mut self, ctx: &egui::Context) {
@@ -353,18 +419,33 @@ impl DrafterApp {
             return;
         }
         let mut action = None;
-        let mut dismiss = false;
-        egui::Window::new("Recover a draft").collapsible(false).show(ctx,|ui|{
-            ui.label("A previous session left recovery snapshots. Recover opens a new unsaved draft.");
-            for path in self.files.candidates.clone(){ui.horizontal(|ui|{ui.label(path.file_name().unwrap_or_default().to_string_lossy());if ui.button("Recover").clicked(){action=Some(Action::Recover(path));}});}
-            if ui.button("Continue without recovering").clicked(){dismiss=true;}
-        });
-        if dismiss {
-            self.files.offer = false;
-        }
+        let mut open = true;
+        egui::Window::new("Recover a draft")
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label("A previous session left recovery snapshots. Recover opens a new unsaved draft.");
+                for path in self.files.candidates.clone() {
+                    ui.horizontal(|ui| {
+                        ui.label(path.file_name().unwrap_or_default().to_string_lossy());
+                        if ui.button("Recover").clicked() {
+                            action = Some(Action::Recover(path.clone()));
+                        }
+                        if ui.add(egui::Button::new("×").frame(false).min_size(egui::vec2(28., 28.)))
+                            .on_hover_text("Discard this recovery snapshot permanently")
+                            .clicked() {
+                            action = Some(Action::Discard(path));
+                        }
+                    });
+                }
+            });
+        self.files.offer = open;
         if let Some(action) = action {
             if let Err(e) = self.do_file_action(action) {
                 self.error = Some(e.to_string());
+            }
+            if self.files.candidates.is_empty() {
+                self.files.offer = false;
             }
         }
     }
@@ -430,6 +511,16 @@ impl DrafterApp {
             Duration::from_secs(1)
         });
     }
+    pub(crate) fn document_title(&self) -> String {
+        self.files
+            .path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map_or_else(
+                || "Untitled draft".to_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+    }
     pub(crate) fn file_status(&self) -> &str {
         &self.files.status
     }
@@ -485,6 +576,104 @@ mod tests {
             })
             .unwrap();
         app
+    }
+    #[test]
+    fn saved_state_tracks_edits_and_is_not_cleared_by_recovery_autosave() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        assert_eq!(editor.document_save_label(), "Unsaved");
+        let path = directory.path().join("state.cdraft");
+        editor.save_path(&path).unwrap();
+        assert_eq!(editor.document_save_label(), "Saved");
+        let original = editor.view_style().clone();
+        editor.set_view_style(cindral_core::ViewStyle {
+            mode: cindral_core::StyleMode::XRay,
+            ..original.clone()
+        });
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Modified");
+        let (sender, receiver) = mpsc::channel();
+        editor.files.interval = Duration::MAX;
+        editor.files.job = Some(AutosaveJob {
+            generation: editor.files.generation,
+            revision: editor.file_revision(),
+            receiver,
+        });
+        sender.send(Ok(editor.files.snapshot.clone())).unwrap();
+        editor.autosave_tick(&egui::Context::default());
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Modified");
+        editor.set_view_style(original);
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Saved");
+        editor
+            .history
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::Z,
+            })
+            .unwrap();
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Modified");
+        editor.history.undo().unwrap();
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Saved");
+        editor.history.redo().unwrap();
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Modified");
+        editor.save_path(&path).unwrap();
+        assert_eq!(editor.document_save_label(), "Saved");
+        editor.open_path(&path).unwrap();
+        assert_eq!(editor.document_save_label(), "Saved");
+        let face = *editor.model().faces().keys().next().unwrap();
+        editor.select_connected(cindral_tools::Hit::Face(face));
+        let group = editor
+            .create_container(cindral_core::DefinitionKind::Group)
+            .unwrap();
+        editor.save_path(&path).unwrap();
+        editor.enter_context(group).unwrap();
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Saved");
+        editor.exit_context().unwrap();
+        editor.refresh_save_state();
+        assert_eq!(editor.document_save_label(), "Saved");
+    }
+    #[test]
+    fn save_shortcut_works_with_application_menu_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut source = app(directory.path());
+        let path = directory.path().join("shortcut.cdraft");
+        source.save_path(&path).unwrap();
+        source
+            .history
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::Z,
+            })
+            .unwrap();
+        let ctx = egui::Context::default();
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let _ = ctx.run(
+            egui::RawInput {
+                modifiers,
+                events: vec![egui::Event::Key {
+                    key: Key::S,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ctx| source.workspace_header(ctx),
+        );
+        assert!(source.error.is_none());
+        let bundle = cindral_io::load_draft(&path).unwrap();
+        assert_eq!(bundle, source.file_values());
     }
     #[test]
     fn save_open_and_crash_recovery_reset_history_without_losing_values() {

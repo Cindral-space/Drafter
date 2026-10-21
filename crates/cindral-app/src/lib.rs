@@ -23,6 +23,7 @@ use std::sync::Arc;
 pub struct DrafterApp {
     files: files_ui::FileState,
     show_tray: bool,
+    show_grid: bool,
     presentation: cindral_core::Presentation,
     presentation_ui: presentation_ui::PresentationUi,
     presentation_serial: u64,
@@ -57,6 +58,7 @@ impl Default for DrafterApp {
         Self {
             files: files_ui::FileState::default(),
             show_tray: true,
+            show_grid: false,
             presentation: Default::default(),
             presentation_ui: Default::default(),
             presentation_serial: 0,
@@ -300,8 +302,8 @@ impl DrafterApp {
     fn viewport_input(&mut self, response: &egui::Response) {
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
-        let drawing_drag = self.draw_drag.is_some()
-            || response.drag_started_by(PointerButton::Primary);
+        let drawing_drag =
+            self.draw_drag.is_some() || response.drag_started_by(PointerButton::Primary);
         if response.dragged_by(PointerButton::Middle) {
             let (delta, shift) = response
                 .ctx
@@ -597,42 +599,7 @@ impl eframe::App for DrafterApp {
         self.autosave_tick(ctx);
         self.scene_tabs(ctx);
         self.tool_palette(ctx);
-        if self.show_tray {
-            egui::SidePanel::right("default_tray")
-                .default_width(280.)
-                .width_range(250. ..=420.)
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong("Default Tray");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Hide").clicked() {
-                                self.show_tray = false;
-                            }
-                        });
-                    });
-                    ui.separator();
-                    egui::ScrollArea::vertical()
-                        .id_salt("tray_scroll")
-                        .show(ui, |ui| {
-                            egui::CollapsingHeader::new("Entity Info")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.label(format!(
-                                        "{} edges · {} faces selected",
-                                        self.selection.edges.len(),
-                                        self.selection.faces.len()
-                                    ));
-                                    ui.weak(format!(
-                                        "Model: {} edges · {} faces",
-                                        self.history.model().edges().len(),
-                                        self.history.model().faces().len()
-                                    ));
-                                });
-                            self.organization_panel(ui);
-                            self.presentation_panel(ui);
-                        });
-                });
-        }
+        self.model_inspector(ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_rgb(
                 self.presentation.style.background[0],
@@ -669,6 +636,7 @@ impl eframe::App for DrafterApp {
                         rect,
                         GridCallback {
                             view_projection: matrix.to_cols_array_2d(),
+                            show_grid: self.show_grid,
                         },
                     ));
                 self.prepare_sections();
@@ -739,6 +707,7 @@ impl eframe::App for DrafterApp {
                         );
                     }
                 }
+                self.orientation_indicator(ui, rect);
             });
     }
 }

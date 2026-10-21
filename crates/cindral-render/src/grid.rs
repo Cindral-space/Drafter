@@ -122,21 +122,23 @@ fn grid_vertices() -> Vec<Vertex> {
         }
         let value = i as f32;
         let color = if i % 5 == 0 {
-            [0.72, 0.74, 0.68]
+            [0.79, 0.82, 0.87]
         } else {
-            [0.83, 0.84, 0.78]
+            [0.88, 0.90, 0.93]
         };
         line([value, -50.0, 0.0], [value, 50.0, 0.0], color);
         line([-50.0, value, 0.0], [50.0, value, 0.0], color);
     }
-    line([-50.0, 0.0, 0.0], [50.0, 0.0, 0.0], [0.8, 0.12, 0.15]);
-    line([0.0, -50.0, 0.0], [0.0, 50.0, 0.0], [0.14, 0.62, 0.34]);
-    line([0.0, 0.0, -50.0], [0.0, 0.0, 50.0], [0.15, 0.4, 0.95]);
+    line([-50.0, 0.0, 0.0], [50.0, 0.0, 0.0], [0.75, 0.56, 0.59]);
+    line([0.0, -50.0, 0.0], [0.0, 50.0, 0.0], [0.49, 0.66, 0.56]);
+    line([0.0, 0.0, -50.0], [0.0, 0.0, 50.0], [0.53, 0.63, 0.79]);
     vertices
 }
 
 /// Camera snapshot passed to the GPU callback for one viewport.
 pub struct GridCallback {
+    /// Draw meter grid lines in addition to the world axes.
+    pub show_grid: bool,
     /// Column-major view-projection matrix using wgpu's 0..1 depth range.
     pub view_projection: [[f32; 4]; 4],
 }
@@ -170,7 +172,8 @@ impl CallbackTrait for GridCallback {
             pass.set_pipeline(&grid.pipeline);
             pass.set_bind_group(0, &grid.bind_group, &[]);
             pass.set_vertex_buffer(0, grid.vertices.slice(..));
-            pass.draw(0..grid.count, 0..1);
+            let start = if self.show_grid { 0 } else { grid.count - 6 };
+            pass.draw(start..grid.count, 0..1);
         }
     }
 }

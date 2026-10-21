@@ -6,7 +6,7 @@ Reviewed and updated on 2026-10-21. The reference is SketchUp's desktop workspac
 
 | Finding | Change |
 | --- | --- |
-| Two left panels plus a right panel squeeze the canvas to about 657 px at 1280 px window width. | One 110 px tool palette and one resizable, hideable 280 px tray give the canvas about 888 px, approximately 35% wider. |
+| Two left panels plus a right panel squeeze the canvas to about 657 px at 1280 px window width. | A narrow tool rail and a resizable, hideable inspector leave most of the window available for modeling. |
 | Drawing tools, modification tools and camera controls lack a consistent hierarchy. | Modeling tools share a captioned icon palette; File, Edit, Camera, Draw, Tools, Window and Help menus organize other actions. |
 | Every style, material and tag control appears at once. | Entity Info, Outliner, Tags, Materials and Styles & Scenes use collapsible tray sections with a shared scrollbar. |
 | Dark chrome, background and grid compete with geometry. | Light chrome, a pale sky/ground environment, subdued grid and contrasting model edges establish a clearer hierarchy. Saved document styles remain authoritative when opened. |
@@ -26,3 +26,47 @@ Reviewed and updated on 2026-10-21. The reference is SketchUp's desktop workspac
 This update uses the existing modeling engine. Orbit and pan remain middle-mouse gestures; dedicated drag-based Orbit/Pan tools are a possible later improvement. Tool icons include captions and hover labels; some symbols can be refined further as the interface evolves.
 
 Reference: [SketchUp: Managing dialog boxes in Windows](https://help.sketchup.com/en/sketchup/managing-dialog-boxes-windows).
+
+## Modern workspace redesign
+
+The second pass replaces the caption grid with a 64 px dark tool rail. Original vector symbols use consistent strokes; hover text and accessible names identify every tool, and the current tool appears in the contextual toolbar. Copy, Scale, Offset and Follow Me have distinct symbols. The document header consolidates menus and exposes Save and Inspector directly. Drawing plane and segment controls appear only while drawing.
+
+The inspector separates Model and Appearance into tabs, with rounded cards for selection and document information. Empty Outliner content explains what belongs there, and grouping actions are disabled until geometry is selected. File identity moves to the header, allowing a single status row in ordinary use. The new default environment and grid use neutral cool grays; loaded document styles still take precedence.
+
+File shortcuts and startup recovery discovery run independently of menu visibility. A regression test saves a modified document through Ctrl+S with the application menu closed and verifies the file contents.
+
+Validation captures: `.agent-out/ui-review/modern.png` (1280×800) and `modern-compact.png` (720×480). At compact heights the tool rail and inspector scroll to keep all controls accessible. Workspace tests, strict Clippy, formatting and diff checks are run for the redesign.
+
+## Simplification pass
+
+The next pass removes decorative inspector cards, the repeated Inspector heading, the empty selection card and document counters. Model and Appearance remain directly accessible; selection details appear only when relevant, and an empty Outliner starts collapsed. The header has one row during selection and modification, with drawing controls added only when needed. Save and Inspector use quiet text controls.
+
+The primary rail contains common modeling tools; the overflow menu retains every drawing and modification action. The construction grid is off by default and can be enabled under View. World axes remain visible, and toggling the grid changes only the submitted line range, without rebuilding GPU buffers or changing document geometry.
+
+Validation: native OpenGL captures at 1280×800 and 720×480, app and renderer tests, strict Clippy for both affected crates, formatting and diff checks. Captures are saved as `.agent-out/ui-review/clean.png` and `clean-compact.png`.
+
+## Tool palette preference
+
+Restored all 16 tools in the familiar two-column arrangement with visible captions, following user feedback about SketchUp familiarity. There is no overflow menu. The clean single-row header, flat inspector and optional construction grid remain. The palette scrolls at compact heights.
+
+Validation: native captures at 1280×800 and 720×480, strict app Clippy, formatting and diff checks. Updated captures: `.agent-out/ui-review/full-tools.png` and `full-tools-compact.png`.
+
+## Header preference
+
+Restored the visible File, Edit, Camera, Draw, Tools, Window and Help menus plus the familiar toolbar, following feedback to preserve the earlier organization. Styling uses consistent menu spacing, quiet Undo/Redo and Fit model actions, a softly grouped XY/XZ/YZ plane selector, subtle separation between rows, and a restrained brand/document area. Inspector and Save remain directly accessible. The Camera menu retains the construction-grid toggle. Tool options, file shortcuts and startup recovery continue to use the existing handlers.
+
+Validation: strict app Clippy, formatting and diff checks, the save-shortcut regression test, and native desktop/compact captures saved as `.agent-out/ui-review/header.png` and `header-compact.png`.
+
+## Restored layout polish
+
+Kept the visible menus, toolbar and all 16 tools in two columns. The palette now uses a light surface, darker vector strokes and 11 px captions in larger cells, with a soft violet active state. The header emphasizes the document title and exposes Unsaved, Modified or Saved state at both desktop and compact widths.
+
+The inspector has a compact document summary and selection prompt. Selecting a group/component reveals the Outliner, while Appearance opens with style controls expanded. World-axis colors are subdued and a camera-aligned XYZ indicator sits in the canvas corner.
+
+Save-state checks compare file contents against the last explicit save/open baseline only when the revision changes, and defer comparisons during active drags. Recovery autosaves remain separate from explicit save state. A regression test covers save, presentation edits, restoration, geometry edits, recovery autosave and reopen.
+
+Validation: native desktop/compact captures, app and renderer tests, strict Clippy for affected crates, formatting and diff checks. Captures: `.agent-out/ui-review/polished.png` and `polished-compact.png`.
+
+## Recovery dismissal
+
+The recovery dialog uses a title-bar × to dismiss the prompt while preserving snapshots. Each snapshot has Recover and a compact × action, with a tooltip identifying permanent discard. The File menu uses the same compact discard control. Discarding the final snapshot dismisses the empty prompt. Validation uses isolated temporary preview entries, strict Clippy, formatting and diff checks.

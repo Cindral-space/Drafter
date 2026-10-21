@@ -241,8 +241,18 @@ impl DrafterApp {
         let mut selected = None;
         let mut enter = None;
         let mut expanded = None;
+        let selection_id = ui.make_persistent_id("outliner_selection");
+        let previous = ui.ctx().data(|data| {
+            data.get_temp::<Option<InstancePath>>(selection_id)
+                .flatten()
+        });
+        let reveal_selection =
+            self.organization.selected.is_some() && previous != self.organization.selected;
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(selection_id, self.organization.selected.clone()));
         egui::CollapsingHeader::new("Outliner")
-            .default_open(true)
+            .default_open(!self.organization.rows.is_empty())
+            .open(reveal_selection.then_some(true))
             .show(ui, |ui| {
                 let label = if self.history.context().is_empty() {
                     "Document".to_owned()
@@ -254,17 +264,29 @@ impl DrafterApp {
                             .map_or("context", |n| n.name.as_str())
                     )
                 };
-                ui.horizontal(|ui| {
-                    ui.label(label);
-                    if !self.history.context().is_empty() && ui.small_button("Exit").clicked() {
-                        enter = Some(
-                            self.history.context()[..self.history.context().len() - 1].to_vec(),
-                        );
-                    }
-                });
-                let root = ui.add(
-                    egui::Label::new("Document — drop to reparent").sense(egui::Sense::hover()),
-                );
+                if !self.history.context().is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        if ui.small_button("Exit").clicked() {
+                            enter = Some(
+                                self.history.context()[..self.history.context().len() - 1].to_vec(),
+                            );
+                        }
+                    });
+                }
+                let root = ui
+                    .add(egui::Label::new("Document").sense(egui::Sense::hover()))
+                    .on_hover_text(
+                        "Drop a group or component here to move it to the document root",
+                    );
+                if self.organization.rows.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("Groups and components will appear here.").weak(),
+                        )
+                        .wrap(),
+                    );
+                }
                 if let Some(payload) = root.dnd_release_payload::<InstancePath>() {
                     commands.push(Org::Reparent {
                         path: (*payload).clone(),
@@ -330,15 +352,24 @@ impl DrafterApp {
                             });
                         }
                     });
+                let can_group = !self.selection.vertex_ids(self.history.model()).is_empty();
                 ui.horizontal(|ui| {
-                    if ui.button("Group selection").clicked() {
+                    if ui
+                        .add_enabled(can_group, egui::Button::new("Group selection"))
+                        .on_disabled_hover_text("Select geometry to create a group")
+                        .clicked()
+                    {
                         commands.push(Org::Create {
                             kind: DefinitionKind::Group,
                             name: "Group".into(),
                             vertices: self.selection.vertex_ids(self.history.model()),
                         });
                     }
-                    if ui.button("Component").clicked() {
+                    if ui
+                        .add_enabled(can_group, egui::Button::new("Component"))
+                        .on_disabled_hover_text("Select geometry to create a component")
+                        .clicked()
+                    {
                         commands.push(Org::Create {
                             kind: DefinitionKind::Component,
                             name: "Component".into(),
