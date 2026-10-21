@@ -250,7 +250,7 @@ fn check_extensions(
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     if let Some(req) = root.get("extensionsRequired").and_then(Value::as_array) {
-        for ext in req {
+        if let Some(ext) = req.first() {
             let name = ext.as_str().unwrap_or("unknown");
             return Err(IoError::Invalid(format!(
                 "unsupported required glTF extension: {name}"
@@ -1004,10 +1004,10 @@ fn parse_materials_and_textures(
             .get(&slot)
             .ok_or_else(|| IoError::Invalid("missing imported texture".into()))?;
         let mut pixels = crate::decode_texture(asset)?;
-        if pixels.rgba.chunks_exact(4).all(|p| p[3] == 255) {
+        if pixels.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255) {
             continue;
         }
-        for pixel in pixels.rgba.chunks_exact_mut(4) {
+        for pixel in pixels.rgba.as_chunks_mut::<4>().0 {
             pixel[3] = 255;
         }
         let image = image::RgbaImage::from_raw(pixels.width, pixels.height, pixels.rgba)
@@ -1173,7 +1173,7 @@ fn parse_meshes(
                 return Err(IoError::Invalid("total triangles exceed 1M limit".into()));
             }
 
-            for tri in tri_indices.chunks_exact(3) {
+            for tri in tri_indices.as_chunks::<3>().0 {
                 let (i0, i1, i2) = (tri[0], tri[1], tri[2]);
                 if i0 >= positions.len() || i1 >= positions.len() || i2 >= positions.len() {
                     return Err(IoError::Invalid(

@@ -164,7 +164,7 @@ impl BulkGeometry {
                 for (a, b) in r.iter().zip(r.iter().cycle().skip(1)).take(r.len()) {
                     let mut pair = [*a, *b];
                     pair.sort();
-                    if !pairs.contains_key(&pair) {
+                    if let std::collections::btree_map::Entry::Vacant(entry) = pairs.entry(pair) {
                         let eid = EdgeId::from_raw(model.allocate()?);
                         model.edges.insert(
                             eid,
@@ -174,7 +174,7 @@ impl BulkGeometry {
                                 smooth: false,
                             },
                         );
-                        pairs.insert(pair, eid);
+                        entry.insert(eid);
                     }
                     adjacency.entry(pair).or_default().push(fid);
                 }

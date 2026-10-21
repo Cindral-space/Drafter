@@ -363,8 +363,7 @@ pub fn convert_scene(
         .instances = roots;
     data.next_id = next;
     // Validate the graph before traversing it (including cycles and expanded occurrence cap).
-    let history;
-    if options.as_component {
+    let history = if options.as_component {
         let root = data
             .definitions
             .get_mut(&DefinitionId(0))
@@ -399,7 +398,7 @@ pub fn convert_scene(
                     hidden: false,
                 },
             );
-        history = DocumentHistory::from_import_data(data)?;
+        DocumentHistory::from_import_data(data)?
     } else {
         let source = DocumentHistory::from_import_data(data)?;
         let mut flat = BulkGeometry::default();
@@ -453,8 +452,8 @@ pub fn convert_scene(
                 control.is_cancelled()
             })?
             .to_data();
-        history = DocumentHistory::from_import_data(data)?;
-    }
+        DocumentHistory::from_import_data(data)?
+    };
     let data = history.to_data();
     let mut report = ImportReport {
         warnings: scene.warnings,

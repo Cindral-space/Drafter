@@ -239,7 +239,7 @@ fn opaque_texture_default_and_inferred_root_do_not_duplicate_children() {
     let scene = import_gltf_bytes(&serde_json::to_vec(&value).unwrap(), None, &control).unwrap();
     assert_eq!(scene.materials[0].opacity, 1.);
     let image = decode_texture(scene.textures.values().next().unwrap()).unwrap();
-    assert!(image.rgba.chunks_exact(4).all(|p| p[3] == 255));
+    assert!(image.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     let imported = convert_scene(scene, &ImportOptions::default(), &control).unwrap();
     assert_eq!(metrics(&imported.history).1, 1);
     value["meshes"][0]["primitives"][0]["mode"] = serde_json::json!(0);

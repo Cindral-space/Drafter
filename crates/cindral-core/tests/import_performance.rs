@@ -3,6 +3,7 @@ use cindral_core::*;
 use std::time::{Duration, Instant};
 #[test]
 #[ignore = "100k triangle timing requires --release --ignored --nocapture"]
+#[allow(clippy::assertions_on_constants)]
 fn import_100k_triangles_and_edit() {
     assert!(!cfg!(debug_assertions), "benchmark requires --release");
     let mut g = BulkGeometry::default();

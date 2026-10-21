@@ -5,6 +5,7 @@ use cindral_io::*;
 use std::time::{Duration, Instant};
 #[test]
 #[ignore = "run --release --ignored --nocapture for 100k triangle benchmark"]
+#[allow(clippy::assertions_on_constants)]
 fn gltf_100k_triangles() {
     assert!(!cfg!(debug_assertions), "benchmark requires release");
     let mut bytes = Vec::new();

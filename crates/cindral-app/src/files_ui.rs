@@ -1267,6 +1267,7 @@ mod tests {
     }
     #[test]
     #[ignore = "run in release mode for 100k-triangle kernel and CPU mesh latency"]
+    #[allow(clippy::assertions_on_constants)]
     fn imported_100k_interactive_mesh_update() {
         assert!(!cfg!(debug_assertions), "benchmark requires --release");
         let mut geometry = cindral_core::BulkGeometry::default();
