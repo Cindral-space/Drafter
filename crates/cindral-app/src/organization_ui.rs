@@ -229,7 +229,7 @@ impl DrafterApp {
         self.organization.rows = rows;
         self.organization.revision = Some(self.history.revision());
     }
-    pub(crate) fn organization_panel(&mut self, ctx: &egui::Context) {
+    pub(crate) fn organization_panel(&mut self, ui: &mut egui::Ui) {
         if self.organization.revision.is_none()
             || self.organization.revision != Some(self.history.revision())
                 && self.history.document_changes().instances
@@ -241,12 +241,9 @@ impl DrafterApp {
         let mut selected = None;
         let mut enter = None;
         let mut expanded = None;
-        egui::SidePanel::right("outliner")
-            .default_width(245.)
-            .width_range(210.0..=420.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.heading("Outliner");
+        egui::CollapsingHeader::new("Outliner")
+            .default_open(true)
+            .show(ui, |ui| {
                 let label = if self.history.context().is_empty() {
                     "Document".to_owned()
                 } else {
@@ -389,161 +386,147 @@ impl DrafterApp {
                         });
                     }
                 }
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .id_salt("metadata_controls")
-                    .show(ui, |ui| {
-                        ui.heading("Tags");
-                        let tags = self
-                            .history
-                            .tags()
-                            .iter()
-                            .map(|(id, t)| (*id, t.clone()))
-                            .collect::<Vec<_>>();
-                        for (id, tag) in tags {
-                            ui.horizontal(|ui| {
-                                let mut visible = tag.visible;
-                                if ui.checkbox(&mut visible, "").changed() {
-                                    commands.push(Org::TagVisibility { id, visible });
-                                }
-                                if ui
-                                    .selectable_label(self.organization.tag == Some(id), &tag.name)
-                                    .clicked()
-                                {
-                                    self.organization.tag = Some(id);
-                                    self.organization.tag_name = tag.name.clone();
-                                }
-                                if ui.small_button("Delete").clicked() {
-                                    commands.push(Org::DeleteTag(id));
-                                }
-                            });
-                        }
-                        ui.text_edit_singleline(&mut self.organization.tag_name);
-                        ui.horizontal(|ui| {
-                            if ui.small_button("New tag").clicked() {
-                                commands.push(Org::CreateTag(self.organization.tag_name.clone()));
-                            }
-                            if ui.small_button("Rename tag").clicked() {
-                                if let Some(id) = self.organization.tag {
-                                    commands.push(Org::RenameTag {
-                                        id,
-                                        name: self.organization.tag_name.clone(),
-                                    });
-                                }
-                            }
+            });
+        egui::CollapsingHeader::new("Tags").show(ui, |ui| {
+            let tags = self
+                .history
+                .tags()
+                .iter()
+                .map(|(id, t)| (*id, t.clone()))
+                .collect::<Vec<_>>();
+            for (id, tag) in tags {
+                ui.horizontal(|ui| {
+                    let mut visible = tag.visible;
+                    if ui.checkbox(&mut visible, "").changed() {
+                        commands.push(Org::TagVisibility { id, visible });
+                    }
+                    if ui
+                        .selectable_label(self.organization.tag == Some(id), &tag.name)
+                        .clicked()
+                    {
+                        self.organization.tag = Some(id);
+                        self.organization.tag_name = tag.name.clone();
+                    }
+                    if ui.small_button("Delete").clicked() {
+                        commands.push(Org::DeleteTag(id));
+                    }
+                });
+            }
+            ui.text_edit_singleline(&mut self.organization.tag_name);
+            ui.horizontal(|ui| {
+                if ui.small_button("New tag").clicked() {
+                    commands.push(Org::CreateTag(self.organization.tag_name.clone()));
+                }
+                if ui.small_button("Rename tag").clicked() {
+                    if let Some(id) = self.organization.tag {
+                        commands.push(Org::RenameTag {
+                            id,
+                            name: self.organization.tag_name.clone(),
                         });
-                        if let Some(path) = self.organization.selected.clone() {
-                            ui.horizontal(|ui| {
-                                if ui.small_button("Assign tag").clicked() {
-                                    commands.push(Org::AssignTag {
-                                        path: path.clone(),
-                                        tag: self.organization.tag,
-                                    });
-                                }
-                                if ui.small_button("Untag").clicked() {
-                                    commands.push(Org::AssignTag { path, tag: None });
-                                }
-                            });
-                        }
-                        ui.separator();
-                        ui.heading("Materials");
-                        let materials = self
-                            .history
-                            .materials()
-                            .iter()
-                            .map(|(id, m)| (*id, m.clone()))
-                            .collect::<Vec<_>>();
-                        let label = self
-                            .organization
-                            .material
-                            .and_then(|id| self.history.materials().get(&id))
-                            .map_or("Default / legacy color", |m| m.name.as_str());
-                        egui::ComboBox::from_id_salt("paint_material")
-                            .selected_text(label)
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        self.organization.material.is_none(),
-                                        "Default",
-                                    )
-                                    .clicked()
-                                {
-                                    self.organization.material = None;
-                                }
-                                for (id, m) in &materials {
-                                    if ui
-                                        .selectable_label(
-                                            self.organization.material == Some(*id),
-                                            &m.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.organization.material = Some(*id);
-                                        self.organization.material_name = m.name.clone();
-                                        self.organization.color = m.color;
-                                        self.organization.opacity = m.opacity;
-                                        self.organization.texture =
-                                            m.texture.clone().unwrap_or_default();
-                                    }
-                                }
-                            });
-                        ui.text_edit_singleline(&mut self.organization.material_name);
-                        ui.color_edit_button_rgb(&mut self.organization.color);
-                        ui.add(
-                            egui::Slider::new(&mut self.organization.opacity, 0.0..=1.)
-                                .text("Opacity"),
-                        );
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.organization.texture)
-                                .hint_text("Texture asset slot"),
-                        );
+                    }
+                }
+            });
+            if let Some(path) = self.organization.selected.clone() {
+                ui.horizontal(|ui| {
+                    if ui.small_button("Assign tag").clicked() {
+                        commands.push(Org::AssignTag {
+                            path: path.clone(),
+                            tag: self.organization.tag,
+                        });
+                    }
+                    if ui.small_button("Untag").clicked() {
+                        commands.push(Org::AssignTag { path, tag: None });
+                    }
+                });
+            }
+        });
+        egui::CollapsingHeader::new("Materials").show(ui, |ui| {
+            let materials = self
+                .history
+                .materials()
+                .iter()
+                .map(|(id, m)| (*id, m.clone()))
+                .collect::<Vec<_>>();
+            let label = self
+                .organization
+                .material
+                .and_then(|id| self.history.materials().get(&id))
+                .map_or("Default material", |m| m.name.as_str());
+            egui::ComboBox::from_id_salt("paint_material")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.organization.material.is_none(), "Default")
+                        .clicked()
+                    {
+                        self.organization.material = None;
+                    }
+                    for (id, m) in &materials {
                         if ui
-                            .add_enabled(
-                                self.organization.material.is_some(),
-                                egui::Button::new("Load PNG/JPEG texture…"),
-                            )
+                            .selectable_label(self.organization.material == Some(*id), &m.name)
                             .clicked()
                         {
-                            self.load_material_texture();
+                            self.organization.material = Some(*id);
+                            self.organization.material_name = m.name.clone();
+                            self.organization.color = m.color;
+                            self.organization.opacity = m.opacity;
+                            self.organization.texture = m.texture.clone().unwrap_or_default();
                         }
-                        let material = Material {
-                            name: self.organization.material_name.clone(),
-                            color: self.organization.color,
-                            opacity: self.organization.opacity,
-                            texture: (!self.organization.texture.trim().is_empty())
-                                .then(|| self.organization.texture.clone()),
-                        };
-                        ui.horizontal(|ui| {
-                            if ui.small_button("New material").clicked() {
-                                commands.push(Org::CreateMaterial(material.clone()));
-                            }
-                            if let Some(id) = self.organization.material {
-                                if ui.small_button("Update").clicked() {
-                                    commands.push(Org::UpdateMaterial {
-                                        id,
-                                        material: material.clone(),
-                                    });
-                                }
-                                if ui.small_button("Delete").clicked() {
-                                    commands.push(Org::DeleteMaterial(id));
-                                }
-                            }
+                    }
+                });
+            ui.text_edit_singleline(&mut self.organization.material_name);
+            ui.color_edit_button_rgb(&mut self.organization.color);
+            ui.add(egui::Slider::new(&mut self.organization.opacity, 0.0..=1.).text("Opacity"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.organization.texture)
+                    .hint_text("Texture asset slot"),
+            );
+            if ui
+                .add_enabled(
+                    self.organization.material.is_some(),
+                    egui::Button::new("Load PNG/JPEG texture…"),
+                )
+                .clicked()
+            {
+                self.load_material_texture();
+            }
+            let material = Material {
+                name: self.organization.material_name.clone(),
+                color: self.organization.color,
+                opacity: self.organization.opacity,
+                texture: (!self.organization.texture.trim().is_empty())
+                    .then(|| self.organization.texture.clone()),
+            };
+            ui.horizontal(|ui| {
+                if ui.small_button("New material").clicked() {
+                    commands.push(Org::CreateMaterial(material.clone()));
+                }
+                if let Some(id) = self.organization.material {
+                    if ui.small_button("Update").clicked() {
+                        commands.push(Org::UpdateMaterial {
+                            id,
+                            material: material.clone(),
                         });
-                        if ui.button("Paint selected").clicked() {
-                            if let Some(path) = self.organization.selected.clone() {
-                                commands.push(Org::PaintInstance {
-                                    path,
-                                    material: self.organization.material,
-                                });
-                            } else if !self.selection.faces.is_empty() {
-                                commands.push(Org::PaintFaces {
-                                    faces: self.selection.faces.iter().copied().collect(),
-                                    material: self.organization.material,
-                                });
-                            }
-                        }
-                    });
+                    }
+                    if ui.small_button("Delete").clicked() {
+                        commands.push(Org::DeleteMaterial(id));
+                    }
+                }
             });
+            if ui.button("Paint selected").clicked() {
+                if let Some(path) = self.organization.selected.clone() {
+                    commands.push(Org::PaintInstance {
+                        path,
+                        material: self.organization.material,
+                    });
+                } else if !self.selection.faces.is_empty() {
+                    commands.push(Org::PaintFaces {
+                        faces: self.selection.faces.iter().copied().collect(),
+                        material: self.organization.material,
+                    });
+                }
+            }
+        });
         if let Some(path) = expanded {
             if !self.organization.expanded.remove(&path) {
                 self.organization.expanded.insert(path);

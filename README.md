@@ -26,6 +26,12 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 - [x] M7a: Styles and Scenes
 - [x] M7b: section planes and shadows
 
+## Modeling workspace
+
+The editor uses a light modeling workspace with a compact tool palette on the left and a resizable **Default Tray** on the right. Collapse tray sections or hide the tray with **Window → Default Tray**. Camera views and projection are in **Camera**; construction planes and curve segment counts are in the top toolbar. Measurements stay at the bottom right. The native editor starts with Select; **Space** returns to Select.
+
+See the [UI/UX review](docs/UI_UX_REVIEW.md) for findings, changes and validation.
+
 ## Run the viewport
 
 ```sh
@@ -46,7 +52,7 @@ WGPU_BACKEND=opengl cargo run -p cindral-app
 | Fit model / construction area | F or Zoom extents |
 | Isometric / front / right / top | 0 / 1 / 3 / 7 |
 | Toggle projection | 5 |
-| All standard views | View sidebar |
+| All standard views | Camera menu |
 
 Keyboard shortcuts apply while the pointer is over the viewport. Grid spacing is one meter. Extents fits model bounds, or the central 20 × 20 meter area when empty.
 
@@ -74,13 +80,13 @@ This renders a 500,000-triangle shaded heightfield with depth at 1280×800. See 
 
 ## Drawing (M3)
 
-Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Click successive anchors, or type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The sidebar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
+Choose Line (L), Rectangle (R), Circle (C), Arc (A) or Polygon (P). Click successive anchors, or type a measurement and press Enter after the first anchor. Examples: `5m`, `120cm`, `2m,3m` for rectangles, `90deg` after an arc start. Arc clicks specify center, start and end direction. Escape cancels; Ctrl+Z / Ctrl+Shift+Z undo/redo. Arrow Right/Left/Up lock X/Y/Z; Down unlocks. The top toolbar chooses XY/XZ/YZ construction planes and curve segment counts. Hover geometry for snap markers and guides.
 
 Inference and tools are CPU-only libraries with independent tests. To capture the shaded demo and exercise incremental GPU buffer growth, append `--incremental` after the capture path in the capture example command.
 
 ## Modify (M4)
 
-Choose a modify tool in the sidebar. Select by clicking, drag left-to-right to enclose geometry, drag right-to-left to cross it, or triple-click for connected geometry. Shift adds to selection; amber outlines show the selection.
+Choose a modify tool in the left palette. Select by clicking, drag left-to-right to enclose geometry, drag right-to-left to cross it, or triple-click for connected geometry. Shift adds to selection; amber outlines show the selection.
 
 Drag Push/Pull, Move/Copy, Rotate or Scale for a live preview; release commits one undo step, and Escape cancels. Alternatively click an anchor, type a value and press Enter: `2m`, `-50cm`, `90deg`, `2x` or `150%`. Rotation/scaling use the selection center as the pivot. Arrow locks and inference guide placement. Nonplanar deformations are rejected atomically.
 

@@ -122,9 +122,9 @@ fn grid_vertices() -> Vec<Vertex> {
         }
         let value = i as f32;
         let color = if i % 5 == 0 {
-            [0.19, 0.23, 0.27]
+            [0.72, 0.74, 0.68]
         } else {
-            [0.12, 0.15, 0.19]
+            [0.83, 0.84, 0.78]
         };
         line([value, -50.0, 0.0], [value, 50.0, 0.0], color);
         line([-50.0, value, 0.0], [50.0, value, 0.0], color);

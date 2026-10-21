@@ -122,7 +122,13 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         multisampling: 4,
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size(
+            if std::env::args().any(|arg| arg == "--compact") {
+                [720., 480.]
+            } else {
+                [1280., 800.]
+            },
+        ),
         ..Default::default()
     };
     eframe::run_native(

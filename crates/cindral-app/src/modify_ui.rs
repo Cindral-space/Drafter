@@ -413,7 +413,7 @@ impl DrafterApp {
                     }
                 ),
                 egui::FontId::monospace(15.),
-                Color32::WHITE,
+                self.viewport_ink(),
             );
         }
     }

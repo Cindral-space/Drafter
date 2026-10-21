@@ -14,13 +14,15 @@ mod presentation_ui;
 mod scene_cache;
 mod section_ui;
 mod shadow_ui;
-use eframe::egui::{self, Color32, Key, PointerButton, RichText};
+mod workspace_ui;
+use eframe::egui::{self, Color32, Key, PointerButton};
 use glam::Vec2;
 use std::sync::Arc;
 
 /// Editor state; geometry changes are committed only through core commands.
 pub struct DrafterApp {
     files: files_ui::FileState,
+    show_tray: bool,
     presentation: cindral_core::Presentation,
     presentation_ui: presentation_ui::PresentationUi,
     presentation_serial: u64,
@@ -52,6 +54,7 @@ impl Default for DrafterApp {
     fn default() -> Self {
         Self {
             files: files_ui::FileState::default(),
+            show_tray: true,
             presentation: Default::default(),
             presentation_ui: Default::default(),
             presentation_serial: 0,
@@ -101,13 +104,11 @@ impl DrafterApp {
             render.target_format,
             4,
         ));
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.visuals = egui::Visuals::dark();
-        style.visuals.panel_fill = Color32::from_rgb(24, 29, 36);
-        style.visuals.selection.bg_fill = Color32::from_rgb(42, 105, 103);
-        style.visuals.widgets.active.bg_fill = Color32::from_rgb(42, 105, 103);
-        cc.egui_ctx.set_style(style);
-        Ok(Self::default())
+        workspace_ui::configure_style(&cc.egui_ctx);
+        Ok(Self {
+            modifying: true,
+            ..Self::default()
+        })
     }
     fn extents(&mut self, aspect: f32) {
         let (min, max) = self
@@ -249,6 +250,14 @@ impl DrafterApp {
         }
     }
 
+    fn viewport_ink(&self) -> Color32 {
+        let [r, g, b] = self.presentation.style.background;
+        if u32::from(r) * 2126 + u32::from(g) * 7152 + u32::from(b) * 722 > 128 * 10000 {
+            Color32::from_rgb(37, 48, 58)
+        } else {
+            Color32::WHITE
+        }
+    }
     fn paint_environment(&self, ui: &egui::Ui, rect: egui::Rect) {
         let style = &self.presentation.style;
         // With Z up and no camera roll, the infinite ground horizon is horizontal.
@@ -307,6 +316,54 @@ impl DrafterApp {
             }
             return;
         }
+        let keyboard_free = !response.ctx.wants_keyboard_input();
+        response.ctx.input(|i| {
+            if let Some(position) = i.pointer.hover_pos() {
+                let cursor = Vec2::new(
+                    2. * (position.x - rect.left()) / rect.width() - 1.,
+                    1. - 2. * (position.y - rect.top()) / rect.height(),
+                );
+                self.camera.zoom(i.smooth_scroll_delta.y, cursor, aspect);
+            }
+            if keyboard_free
+                && self.measurement.is_empty()
+                && !i.modifiers.command
+                && !i.modifiers.alt
+            {
+                for (key, kind) in [
+                    (Key::L, ToolKind::Line),
+                    (Key::R, ToolKind::Rectangle),
+                    (Key::C, ToolKind::Circle),
+                    (Key::A, ToolKind::Arc),
+                    (Key::P, ToolKind::Polygon),
+                ] {
+                    if i.key_pressed(key) {
+                        self.set_tool(kind);
+                    }
+                }
+                if i.key_pressed(Key::Space) {
+                    self.choose_modify(ModifyKind::Select);
+                }
+                if i.key_pressed(Key::F) {
+                    self.extents(aspect);
+                }
+                if !self.modify.active() && self.tool.anchor().is_none() {
+                    for (key, view) in [
+                        (Key::Num0, StandardView::Iso),
+                        (Key::Num1, StandardView::Front),
+                        (Key::Num3, StandardView::Right),
+                        (Key::Num7, StandardView::Top),
+                    ] {
+                        if i.key_pressed(key) {
+                            self.camera.set_view(view);
+                        }
+                    }
+                    if i.key_pressed(Key::Num5) {
+                        toggle_projection(&mut self.camera);
+                    }
+                }
+            }
+        });
         if self.modifying {
             self.modify_viewport_input(response);
             return;
@@ -352,44 +409,12 @@ impl DrafterApp {
                     self.history_step(true);
                     return;
                 }
-                if self.measurement.is_empty() {
-                    for (key, kind) in [
-                        (Key::L, ToolKind::Line),
-                        (Key::R, ToolKind::Rectangle),
-                        (Key::C, ToolKind::Circle),
-                        (Key::A, ToolKind::Arc),
-                        (Key::P, ToolKind::Polygon),
-                    ] {
-                        if i.key_pressed(key) {
-                            self.set_tool(kind);
-                        }
-                    }
-                    if i.key_pressed(Key::F) {
-                        self.extents(aspect);
-                    }
-                    if self.tool.anchor().is_none() && i.key_pressed(Key::Num0) {
-                        self.camera.set_view(StandardView::Iso);
-                    }
-                    if self.tool.anchor().is_none() && i.key_pressed(Key::Num1) {
-                        self.camera.set_view(StandardView::Front);
-                    }
-                    if self.tool.anchor().is_none() && i.key_pressed(Key::Num3) {
-                        self.camera.set_view(StandardView::Right);
-                    }
-                    if self.tool.anchor().is_none() && i.key_pressed(Key::Num7) {
-                        self.camera.set_view(StandardView::Top);
-                    }
-                    if self.tool.anchor().is_none() && i.key_pressed(Key::Num5) {
-                        toggle_projection(&mut self.camera);
-                    }
-                }
             }
             if let Some(position) = i.pointer.hover_pos() {
                 let cursor = Vec2::new(
                     2.0 * (position.x - rect.left()) / rect.width() - 1.0,
                     1.0 - 2.0 * (position.y - rect.top()) / rect.height(),
                 );
-                self.camera.zoom(i.smooth_scroll_delta.y, cursor, aspect);
                 let (origin, direction) = self.camera.ray(cursor, aspect);
                 let view = View {
                     matrix: self.camera.view_projection(aspect).as_dmat4()
@@ -485,15 +510,6 @@ fn toggle_projection(camera: &mut Camera) {
         Projection::Orthographic => Projection::Perspective,
     };
 }
-fn tool_label(kind: ToolKind) -> &'static str {
-    match kind {
-        ToolKind::Line => "Line",
-        ToolKind::Rectangle => "Rectangle",
-        ToolKind::Circle => "Circle",
-        ToolKind::Arc => "Arc",
-        ToolKind::Polygon => "Polygon",
-    }
-}
 fn snap_label(kind: SnapKind) -> &'static str {
     match kind {
         SnapKind::Endpoint => "Endpoint",
@@ -520,195 +536,48 @@ impl eframe::App for DrafterApp {
             self.camera.pitch,
             self.camera.projection,
         );
-        egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                self.file_menu(ui);
-                ui.label(
-                    RichText::new("CINDRAL DRAFTER")
-                        .strong()
-                        .size(20.)
-                        .color(Color32::from_rgb(112, 217, 195)),
-                );
-                ui.separator();
-                for (kind, shortcut) in [
-                    (ToolKind::Line, "L"),
-                    (ToolKind::Rectangle, "R"),
-                    (ToolKind::Circle, "C"),
-                    (ToolKind::Arc, "A"),
-                    (ToolKind::Polygon, "P"),
-                ] {
-                    if ui
-                        .selectable_label(
-                            !self.modifying && self.tool.kind() == kind,
-                            format!("{}  {shortcut}", tool_label(kind)),
-                        )
-                        .clicked()
-                    {
-                        self.set_tool(kind);
-                    }
-                }
-                if ui
-                    .add_enabled(self.history.undo_depth() > 0, egui::Button::new("Undo"))
-                    .clicked()
-                {
-                    self.history_step(false);
-                }
-                if ui
-                    .add_enabled(self.history.redo_depth() > 0, egui::Button::new("Redo"))
-                    .clicked()
-                {
-                    self.history_step(true);
-                }
-            });
-        });
-        egui::TopBottomPanel::bottom("status").show(ctx,|ui| {
-            ui.horizontal(|ui| {
-                ui.label(if self.modifying {"Modify: select geometry, drag; Escape cancels; type value + Enter"} else {match self.tool.kind() {ToolKind::Line=>"Line: start, end; Esc stops chain",ToolKind::Rectangle=>"Rectangle: first corner, opposite corner",ToolKind::Circle=>"Circle: center, radius",ToolKind::Arc=>"Arc: center, start, end direction",ToolKind::Polygon=>"Polygon: center, vertex"}});
-                ui.separator();ui.label("Measurements");
-                let field=ui.add(egui::TextEdit::singleline(&mut self.measurement).desired_width(145.).hint_text(if self.modifying {match self.modify.kind(){ModifyKind::Rotate=>"angle / deg",ModifyKind::Scale=>"factor / x / %",_=>"distance"}} else {match self.tool.kind(){ToolKind::Rectangle=>"width,height",ToolKind::Arc=>"degrees",_=>"length / radius"}}));
-                if field.lost_focus() && ctx.input(|i|i.key_pressed(Key::Enter)) {self.apply_measurement();}
-            });
-            ui.label(self.file_status());
-            if let Some(error)=&self.error {ui.colored_label(Color32::LIGHT_RED,error);}
-            else {ui.label("MMB orbit · Shift+MMB pan · Scroll zoom · Arrows lock X/Y/Z · Esc cancel · Type a value, Enter");}
-        });
+        self.workspace_header(ctx);
+        self.workspace_status(ctx);
         self.recovery_window(ctx);
         self.autosave_tick(ctx);
-        self.presentation_panel(ctx);
-        self.organization_panel(ctx);
-        egui::SidePanel::left("navigation")
-            .exact_width(174.)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("Modify");
-                for kind in [
-                    ModifyKind::Select,
-                    ModifyKind::PushPull,
-                    ModifyKind::Move,
-                    ModifyKind::Copy,
-                    ModifyKind::Rotate,
-                    ModifyKind::Scale,
-                    ModifyKind::Offset,
-                    ModifyKind::FollowMe,
-                    ModifyKind::Eraser,
-                    ModifyKind::TapeMeasure,
-                    ModifyKind::PaintBucket,
-                ] {
-                    if ui
-                        .selectable_label(
-                            self.modifying && self.modify.kind() == kind,
-                            match kind {
-                                ModifyKind::Select => "Select",
-                                ModifyKind::PushPull => "Push / Pull",
-                                ModifyKind::Move => "Move",
-                                ModifyKind::Copy => "Copy",
-                                ModifyKind::Rotate => "Rotate",
-                                ModifyKind::Scale => "Scale",
-                                ModifyKind::Offset => "Offset",
-                                ModifyKind::FollowMe => "Follow Me",
-                                ModifyKind::Eraser => "Eraser",
-                                ModifyKind::TapeMeasure => "Tape Measure",
-                                ModifyKind::PaintBucket => "Paint Bucket",
-                            },
-                        )
-                        .clicked()
-                    {
-                        self.choose_modify(kind);
-                    }
-                }
-                if self.modifying && self.modify.kind() == ModifyKind::PaintBucket {
-                    let mut color = [
-                        self.paint_color[0],
-                        self.paint_color[1],
-                        self.paint_color[2],
-                    ];
-                    if ui.color_edit_button_srgb(&mut color).changed() {
-                        self.paint_color = [color[0], color[1], color[2], 255];
-                        self.modify.set_color(self.paint_color);
-                    }
-                }
-                ui.separator();
-                ui.heading("View");
-                ui.selectable_value(
-                    &mut self.camera.projection,
-                    Projection::Perspective,
-                    "Perspective",
-                );
-                ui.selectable_value(
-                    &mut self.camera.projection,
-                    Projection::Orthographic,
-                    "Orthographic",
-                );
-                for (label, view) in [
-                    ("Isometric  0", StandardView::Iso),
-                    ("Top  7", StandardView::Top),
-                    ("Bottom", StandardView::Bottom),
-                    ("Front  1", StandardView::Front),
-                    ("Back", StandardView::Back),
-                    ("Left", StandardView::Left),
-                    ("Right  3", StandardView::Right),
-                ] {
-                    if ui
-                        .add_sized([150., 25.], egui::Button::new(label))
-                        .clicked()
-                    {
-                        self.camera.set_view(view);
-                    }
-                }
-                if ui.button("Zoom extents  F").clicked() {
-                    let size = ctx.available_rect().size();
-                    self.extents(size.x / size.y.max(1.));
-                }
-                ui.separator();
-                ui.label("Work plane");
-                ui.horizontal(|ui| {
-                    for (label, normal) in [("XY", DVec3::Z), ("XZ", -DVec3::Y), ("YZ", DVec3::X)] {
-                        if ui.button(label).clicked() {
-                            self.work_plane = DrawingPlane {
-                                origin: DVec3::ZERO,
-                                normal,
-                            };
-                            self.tool.cancel();
-                            if let Err(error) = self.tool.set_plane(self.work_plane) {
-                                self.error = Some(error.to_string());
-                            }
-                        }
-                    }
-                });
-                if matches!(
-                    self.tool.kind(),
-                    ToolKind::Circle | ToolKind::Arc | ToolKind::Polygon
-                ) {
-                    let mut count = self.tool.segments();
+        self.scene_tabs(ctx);
+        self.tool_palette(ctx);
+        if self.show_tray {
+            egui::SidePanel::right("default_tray")
+                .default_width(280.)
+                .width_range(250. ..=420.)
+                .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("Segments");
-                        if ui
-                            .add(egui::DragValue::new(&mut count).range(3..=256))
-                            .changed()
-                        {
-                            if let Err(error) = self.tool.set_segments(count) {
-                                self.error = Some(error.to_string());
+                        ui.strong("Default Tray");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Hide").clicked() {
+                                self.show_tray = false;
                             }
-                        }
+                        });
                     });
-                }
-                ui.separator();
-                ui.label(format!("{} edges", self.history.model().edges().len()));
-                ui.label(format!("{} faces", self.history.model().faces().len()));
-                if let Some(snap) = &self.snap {
-                    ui.label(snap_label(snap.kind));
-                }
-                if let Some(axis) = self.axis_lock {
-                    ui.label(format!(
-                        "{} axis locked",
-                        match axis {
-                            Axis::X => "Red",
-                            Axis::Y => "Green",
-                            Axis::Z => "Blue",
-                        }
-                    ));
-                }
-            });
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .id_salt("tray_scroll")
+                        .show(ui, |ui| {
+                            egui::CollapsingHeader::new("Entity Info")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.label(format!(
+                                        "{} edges · {} faces selected",
+                                        self.selection.edges.len(),
+                                        self.selection.faces.len()
+                                    ));
+                                    ui.weak(format!(
+                                        "Model: {} edges · {} faces",
+                                        self.history.model().edges().len(),
+                                        self.history.model().faces().len()
+                                    ));
+                                });
+                            self.organization_panel(ui);
+                            self.presentation_panel(ui);
+                        });
+                });
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_rgb(
                 self.presentation.style.background[0],
@@ -757,7 +626,13 @@ impl eframe::App for DrafterApp {
                                 (rect.width() * ctx.pixels_per_point()).round() as u32,
                                 (rect.height() * ctx.pixels_per_point()).round() as u32,
                             ],
-                            update: self.pending.take(),
+                            // Layout may request another egui pass. Keep uploads queued
+                            // until a pass that will actually reach the GPU renderer.
+                            update: if ctx.will_discard() {
+                                self.pending.clone()
+                            } else {
+                                self.pending.take()
+                            },
                             style: self.presentation.style.clone(),
                             section: self.presentation.sections.cut().cloned(),
                             caps: self.section_ui.caps.clone(),
@@ -805,7 +680,7 @@ impl eframe::App for DrafterApp {
                             egui::Align2::LEFT_BOTTOM,
                             snap_label(snap.kind),
                             egui::FontId::proportional(12.),
-                            Color32::WHITE,
+                            self.viewport_ink(),
                         );
                     }
                 }
@@ -900,6 +775,40 @@ mod input_tests {
             egui::Modifiers::NONE,
         );
         assert_ne!(app.camera.projection, original);
+    }
+
+    #[test]
+    fn selection_mode_keeps_drawing_shortcuts_and_scroll_zoom() {
+        let mut app = DrafterApp::default();
+        app.choose_modify(ModifyKind::Select);
+        let ctx = egui::Context::default();
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(300., 200.))],
+            egui::Modifiers::NONE,
+        );
+        let distance = app.camera.distance;
+        frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(egui::pos2(300., 200.)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0., 80.),
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            egui::Modifiers::NONE,
+        );
+        assert_ne!(app.camera.distance, distance);
+        frame(&mut app, &ctx, vec![key(Key::R)], egui::Modifiers::NONE);
+        assert!(!app.modifying);
+        assert_eq!(app.tool.kind(), ToolKind::Rectangle);
+        frame(&mut app, &ctx, vec![key(Key::Space)], egui::Modifiers::NONE);
+        assert!(app.modifying);
+        assert_eq!(app.modify.kind(), ModifyKind::Select);
     }
 
     #[test]
