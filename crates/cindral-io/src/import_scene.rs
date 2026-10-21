@@ -79,6 +79,10 @@ pub struct ImportedInstance {
     pub transform: DMat4,
     /// Optional tag table index.
     pub tag: Option<usize>,
+    /// Optional instance paint inherited by unpainted faces.
+    pub material: Option<MaterialId>,
+    /// Placement visibility independent of tags.
+    pub hidden: bool,
 }
 impl Default for ImportedInstance {
     fn default() -> Self {
@@ -87,6 +91,8 @@ impl Default for ImportedInstance {
             definition: 0,
             transform: DMat4::IDENTITY,
             tag: None,
+            material: None,
+            hidden: false,
         }
     }
 }
@@ -328,8 +334,8 @@ pub fn convert_scene(
                     definition: DefinitionId(n.definition as u64 + 1),
                     transform: basis * n.transform * inverse,
                     tag: n.tag.map(|i| TagId(i as u64 + 1)),
-                    material: None,
-                    hidden: false,
+                    material: n.material,
+                    hidden: n.hidden,
                 },
             );
         }
@@ -428,7 +434,7 @@ pub fn convert_scene(
                         .iter()
                         .map(|r| r.iter().map(|v| map[v]).collect())
                         .collect(),
-                    material: f.material,
+                    material: f.material.or(occurrence.material),
                     color: f.color,
                 });
             }
@@ -436,7 +442,8 @@ pub fn convert_scene(
                 flat.edges.push(BulkEdge {
                     vertices: e.vertices.map(|v| map[&v]),
                     soft: e.soft,
-                    hidden: e.smooth,
+                    smooth: e.smooth,
+                    hidden: e.hidden,
                 });
             }
         }
@@ -491,9 +498,15 @@ pub fn import_file(
         "gltf" | "glb" => crate::import_gltf(path, control)?,
         "dae" => crate::import_dae(path, control)?,
         "obj" => crate::import_obj_scene(path, control)?,
+        "skp" => crate::import_skp(path, control)?,
         _ => return Err(IoError::Invalid("unsupported import format".into())),
     };
-    convert_scene(scene, options, control)
+    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
+        let options = ImportOptions { merge_coplanar: false, soften_coplanar: false, ..options.clone() };
+        convert_scene(scene, &options, control)
+    } else {
+        convert_scene(scene, options, control)
+    }
 }
 pub(crate) fn scene_from_bundle(bundle: crate::DraftBundle) -> ImportedScene {
     let d = bundle.document;
@@ -555,7 +568,8 @@ pub(crate) fn scene_from_bundle(bundle: crate::DraftBundle) -> ImportedScene {
                     .map(|e| BulkEdge {
                         vertices: e.vertices.map(|v| map[&v]),
                         soft: e.soft,
-                        hidden: e.smooth,
+                        smooth: e.smooth,
+                    hidden: e.hidden,
                     })
                     .collect(),
             },
@@ -567,6 +581,8 @@ pub(crate) fn scene_from_bundle(bundle: crate::DraftBundle) -> ImportedScene {
                     definition: indices[&n.definition],
                     transform: n.transform,
                     tag: n.tag.map(|t| tags[&t]),
+                    material: n.material.and_then(|m| mats.get(&m).copied()),
+                    hidden: n.hidden,
                 })
                 .collect(),
         });

@@ -239,6 +239,10 @@ impl DrafterApp {
     /// Open validated native values into fresh history/root context; retain the previous draft's recovery snapshot.
     pub fn open_path(&mut self, path: &Path) -> cindral_io::Result<()> {
         self.cancel_import();
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
+            self.start_import(path.to_owned(), self.files.import_options.clone());
+            return Ok(());
+        }
         let bundle = cindral_io::load_draft(path)?;
         self.cancel_modify();
         self.tool.cancel();
@@ -247,6 +251,9 @@ impl DrafterApp {
     }
     /// Atomically save committed values; any active drag is cancelled before writing.
     pub fn save_path(&mut self, path: &Path) -> cindral_io::Result<()> {
+        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("cdraft")) {
+            return Err(cindral_io::IoError::Invalid("Save As .cdraft is required".into()));
+        }
         self.cancel_modify();
         self.tool.cancel();
         let values = self.file_values();
@@ -281,7 +288,8 @@ impl DrafterApp {
             Action::Open => {
                 self.cancel_import();
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Cindral Drafter", &["cdraft"])
+                    .add_filter("Cindral drafts / SketchUp import", &["cdraft", "skp"])
+                    .add_filter("SketchUp (*.skp, read-only)", &["skp"])
                     .pick_file()
                 {
                     self.open_path(&path)?;
@@ -307,9 +315,10 @@ impl DrafterApp {
             Action::Import => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter(
-                        "Supported 3D Models (*.gltf, *.glb, *.dae, *.obj)",
-                        &["gltf", "glb", "dae", "obj"],
+                        "Supported 3D Models (*.skp, *.gltf, *.glb, *.dae, *.obj)",
+                        &["skp", "gltf", "glb", "dae", "obj"],
                     )
+                    .add_filter("SketchUp (*.skp, read-only)", &["skp"])
                     .add_filter("glTF 2.0 (*.gltf, *.glb)", &["gltf", "glb"])
                     .add_filter("COLLADA (*.dae)", &["dae"])
                     .add_filter("Wavefront OBJ (*.obj)", &["obj"])
@@ -776,6 +785,9 @@ impl DrafterApp {
             "Imported {}",
             path.file_name().unwrap_or_default().to_string_lossy()
         );
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("skp")) {
+            self.files.status.push_str(" · imported from .skp · Save As .cdraft");
+        }
         self.files.import_summary = Some(report);
         Ok(())
     }
@@ -1215,6 +1227,23 @@ mod tests {
     }
 
     #[test]
+    fn skp_open_uses_import_worker_and_never_saves_over_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let path = directory.path().join("source.skp");
+        std::fs::write(&path, b"source stays unchanged").unwrap();
+        editor.open_path(&path).unwrap();
+        assert!(editor.files.import_job.is_some());
+        editor.cancel_import();
+        assert!(editor.save_path(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"source stays unchanged");
+        editor.apply_import_result(test_import_result(), &path).unwrap();
+        assert!(editor.files.status.contains("imported from .skp"));
+        assert!(editor.files.status.contains("Save As .cdraft"));
+        assert!(editor.files.path.is_none());
+    }
+
+    #[test]
     fn stale_import_job_is_guarded_after_new_and_open() {
         let directory = tempfile::tempdir().unwrap();
         let mut editor = app(directory.path());
@@ -1340,4 +1369,32 @@ mod tests {
         );
         assert_eq!(editor.history.undo_depth(), 2);
     }
+    #[test]
+    #[ignore = "release-only SKP CPU edit/dirty mesh workload; CINDRAL_SKP_BENCHMARK_SEED supplies authored seed"]
+    #[allow(clippy::assertions_on_constants)]
+    fn imported_skp_interactive_mesh_update() {
+        assert!(!cfg!(debug_assertions), "benchmark requires --release");
+        let Some(path) = std::env::var_os("CINDRAL_SKP_BENCHMARK_SEED") else {
+            eprintln!("SKIP: set CINDRAL_SKP_BENCHMARK_SEED to authored connected benchmark fixture"); return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let control = ImportControl::default();
+        let result = cindral_io::import_file(&path, &ImportOptions::default(), &control).unwrap();
+        let prepared = prepare_import(result, &control).unwrap();
+        let mut editor = DrafterApp::default();
+        editor.apply_import_result(prepared, &path).unwrap();
+        let occurrence = editor.history.occurrences().unwrap().into_iter().find(|o| {
+            !editor.history.definition_model(o.definition).unwrap().faces().is_empty()
+        }).unwrap();
+        editor.history.enter(occurrence.path).unwrap();
+        editor.refresh_mesh();
+        editor.pending = None;
+        let start = Instant::now();
+        editor.execute(Command::AddEdge {start: DVec3::new(0., 0.127, 0.), end: DVec3::new(0.127, 0., 0.)}).unwrap();
+        let elapsed = start.elapsed();
+        eprintln!("SKP connected edit plus dirty CPU mesh {:.3}ms", elapsed.as_secs_f64()*1000.);
+        assert!(elapsed < Duration::from_millis(16), "interactive budget exceeded: {elapsed:?}");
+        assert_eq!(editor.history.undo_depth(), 2);
+    }
+
 }

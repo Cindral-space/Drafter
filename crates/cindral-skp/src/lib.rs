@@ -28,6 +28,10 @@ pub struct Definition {
     pub geometry: BulkGeometry,
     /// Nested placements.
     pub instances: Vec<Instance>,
+    /// Face index to explicit tag/hidden state; absent means inherited and visible.
+    pub face_assignments: BTreeMap<usize, (Option<usize>, bool)>,
+    /// Explicit loose-edge tag assignments, indexed in geometry.edges.
+    pub edge_tags: BTreeMap<usize, usize>,
 }
 /// Placement of a shared definition.
 #[derive(Debug)]
@@ -40,6 +44,10 @@ pub struct Instance {
     pub transform: DMat4,
     /// Zero-based tag index.
     pub tag: Option<usize>,
+    /// Instance paint, palette index plus one.
+    pub material: Option<cindral_core::MaterialId>,
+    /// User-hidden placement.
+    pub hidden: bool,
 }
 /// Parsed source scene, independent of IO/UI.
 #[derive(Debug, Default)]

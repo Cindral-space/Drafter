@@ -200,6 +200,8 @@ fn text(bytes: &[u8]) -> String {
 struct RawFace {
     loops: Vec<Vec<(u64, bool)>>,
     material: Option<u64>,
+    layer: Option<u64>,
+    hidden: bool,
 }
 
 struct RawInstance {
@@ -207,12 +209,14 @@ struct RawInstance {
     definition: u64,
     matrix: Option<[f64; 13]>,
     layer: Option<u64>,
+    material: Option<u64>,
+    hidden: bool,
 }
 
 #[derive(Default)]
 struct Builder {
     vertices: Vec<(u64, DVec3)>,
-    edges: Vec<(u64, u64, u64, u8)>,
+    edges: Vec<(u64, u64, u64, u8, Option<u64>)>,
     faces: Vec<RawFace>,
     instances: Vec<RawInstance>,
 }
@@ -232,10 +236,18 @@ struct Reader {
     items: usize,
     capped: bool,
     total_nodes: usize,
+    work: usize,
+    work_exhausted: bool,
 }
 
 impl Reader {
     /// Reserve aggregate work; returns false (once warning) when the item cap is reached.
+    fn visit(&mut self) -> bool {
+        if self.work == 0 {
+            if !self.work_exhausted { self.work_exhausted = true; self.scene.warn("TLV traversal work limit reached; remaining records skipped"); }
+            false
+        } else { self.work -= 1; true }
+    }
     fn take(&mut self, n: usize) -> bool {
         if self.items.saturating_add(n) > MAX_ITEMS {
             if !self.capped {
@@ -276,6 +288,7 @@ impl Reader {
 
     fn walk(&mut self, nodes: &[Node]) {
         for el in nodes {
+            if !self.visit() { return; }
             match el.tag {
                 T_LAYER_LIST => {
                     for layer in el.children.iter().filter(|c| c.tag == T_LAYER) {
@@ -327,6 +340,7 @@ impl Reader {
 
     fn extract(&mut self, elements: &[Node], b: &mut Builder) {
         for el in elements {
+            if !self.visit() { return; }
             match el.tag {
                 T_VERTEX => {
                     let pos = find(&el.children, T_POSITION).and_then(|n| f64s::<3>(n.payload));
@@ -350,7 +364,8 @@ impl Reader {
                     match (id, v1, v2) {
                         (Some(id), Some(v1), Some(v2)) => {
                             if self.take(1) {
-                                b.edges.push((id, v1, v2, flags));
+                                let layer = direct(&el.children, T_ENTITY_INFO).and_then(|i| direct(&i.children, T_INFO_LAYER)).and_then(|n| var_int(n.payload));
+                                b.edges.push((id, v1, v2, flags, layer));
                             }
                         }
                         _ => self.scene.warn("malformed edge skipped"),
@@ -411,6 +426,8 @@ impl Reader {
         }
         if let Some(info) = direct(&el.children, T_ENTITY_INFO) {
             face.material = direct(&info.children, T_INFO_MATERIAL).and_then(|n| var_int(n.payload));
+            face.layer = direct(&info.children, T_INFO_LAYER).and_then(|n| var_int(n.payload));
+            face.hidden = direct(&info.children, T_INFO_FLAGS).and_then(|n| n.payload.first()).is_some_and(|flag| flag & 1 != 0);
         }
         if face.material.is_none() {
             face.material = direct(&el.children, T_FACE_BACK_MAT)
@@ -435,7 +452,10 @@ impl Reader {
             .and_then(|i| direct(&i.children, T_INFO_LAYER))
             .filter(|n| !n.payload.is_empty())
             .and_then(|n| var_int(n.payload));
-        b.instances.push(RawInstance { name, definition, matrix, layer });
+        let info = direct(search, T_ENTITY_INFO);
+        let material = info.and_then(|i| direct(&i.children, T_INFO_MATERIAL)).and_then(|n| var_int(n.payload));
+        let hidden = info.and_then(|i| direct(&i.children, T_INFO_FLAGS)).and_then(|n| n.payload.first()).is_some_and(|flag| flag & 1 != 0);
+        b.instances.push(RawInstance { name, definition, matrix, layer, material, hidden });
     }
 
     fn top_level(&mut self, data: &[u8]) {
@@ -680,18 +700,21 @@ struct Resolver<'r> {
 
 fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definition {
     let mut geometry = BulkGeometry::default();
+    let mut face_assignments = BTreeMap::new();
+    let mut edge_tags = BTreeMap::new();
     let mut vertex_index = HashMap::with_capacity(b.vertices.len());
     for (id, p) in b.vertices {
         vertex_index.insert(id, geometry.vertices.len());
         geometry.vertices.push(p);
     }
     let mut edge_ends = HashMap::with_capacity(b.edges.len());
-    for (id, v1, v2, flags) in b.edges {
+    for (id, v1, v2, flags, layer) in b.edges {
         match (vertex_index.get(&v1), vertex_index.get(&v2)) {
             (Some(&a), Some(&c)) => {
                 edge_ends.insert(id, (a, c));
                 if a != c {
                     // 0x01 hidden, 0x08 soft, 0x10 smooth.
+                    if let Some(tag) = layer.and_then(|id| r.layer_index.get(&id)).copied() { edge_tags.insert(geometry.edges.len(), tag); }
                     geometry.edges.push(BulkEdge {
                         vertices: [a, c],
                         soft: flags & 0x08 != 0,
@@ -753,6 +776,7 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             .material
             .and_then(|id| r.material_names.get(&id))
             .and_then(|name| r.materials.get(name));
+        face_assignments.insert(geometry.faces.len(), (face.layer.and_then(|id| r.layer_index.get(&id)).copied(), face.hidden));
         geometry.faces.push(BulkFace {
             outer,
             holes: rings,
@@ -775,9 +799,10 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             None => DMat4::IDENTITY,
         };
         let tag = inst.layer.and_then(|l| r.layer_index.get(&l).copied());
-        instances.push(Instance { name: inst.name, definition, transform, tag });
+        let material = inst.material.and_then(|id| r.material_names.get(&id)).and_then(|name| r.materials.get(name)).map(|(index,_)| MaterialId(*index as u64+1));
+        instances.push(Instance { name: inst.name, definition, transform, tag, material, hidden: inst.hidden });
     }
-    Definition { name, geometry, instances }
+    Definition { name, geometry, instances, face_assignments, edge_tags }
 }
 
 /// Drop instance edges that close a definition cycle.
@@ -833,6 +858,8 @@ pub(crate) fn parse(model_data: &[u8], files: &BTreeMap<String, Vec<u8>>, versio
         items: 0,
         capped: false,
         total_nodes: MAX_TOTAL_NODES,
+        work: MAX_TOTAL_NODES,
+        work_exhausted: false,
     };
     reader.top_level(model_data);
     let Reader { mut scene, defs, def_by_id, material_names, layers, root, .. } = reader;
@@ -852,7 +879,7 @@ pub(crate) fn parse(model_data: &[u8], files: &BTreeMap<String, Vec<u8>>, versio
     let root = build(root, "Model".to_owned(), &resolver, &mut scene);
     break_cycles(&mut definitions, &mut scene);
     scene.roots = vec![Instance {
-        name: "Model".into(), definition: definitions.len(), transform: DMat4::IDENTITY, tag: None,
+        name: "Model".into(), definition: definitions.len(), transform: DMat4::IDENTITY, tag: None, material: None, hidden: false,
     }];
     definitions.push(root);
     scene.definitions = definitions;

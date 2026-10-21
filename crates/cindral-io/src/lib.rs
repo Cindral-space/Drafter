@@ -186,3 +186,6 @@ mod import_gltf;
 pub use import_gltf::{import_gltf, import_gltf_bytes};
 mod import_dae;
 pub use import_dae::{import_dae, import_dae_bytes};
+
+mod import_skp;
+pub use import_skp::{import_skp, import_skp_bytes};

@@ -256,3 +256,17 @@ fn imported_edge_flags_remain_independent_through_geometry_roundtrip() {
     let restored = Model::from_data(data).unwrap();
     assert_eq!(restored.edges(), model.edges());
 }
+
+#[test]
+fn hidden_import_boundary_split_preserves_flags_and_undo() {
+    let mut geometry = square();
+    geometry.edges.push(BulkEdge {vertices:[0,1],soft:false,smooth:true,hidden:true});
+    let mut data = DocumentHistory::new().to_data();
+    data.definitions.get_mut(&DefinitionId(0)).unwrap().geometry = geometry.build(false,false).unwrap().to_data();
+    let mut history = DocumentHistory::from_import_data(data).unwrap();
+    let before = history.model().to_data();
+    history.execute(Command::AddEdge {start:DVec3::new(0.5,0.,0.),end:DVec3::new(0.5,-1.,0.)}).unwrap();
+    assert_eq!(history.model().edges().values().filter(|edge| edge.hidden && edge.smooth && !edge.soft).count(),2);
+    history.undo().unwrap();
+    assert_eq!(history.model().to_data(),before);
+}

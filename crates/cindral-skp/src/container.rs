@@ -51,7 +51,7 @@ pub fn read(bytes: &[u8]) -> Result<Scene> {
 fn version(header: &[u8]) -> Option<String> {
     let second = header.get(4..)?.windows(3).position(|w| w == [0xff, 0xfe, 0xff])? + 4;
     let start = second.checked_add(4)?;
-    let text: Vec<u16> = header.get(start..header.len().min(start + 200))?.chunks_exact(2)
+    let text: Vec<u16> = header.get(start..header.len().min(start + 200))?.as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
     let text = String::from_utf16_lossy(&text);
     let begin = text.find('{')?;

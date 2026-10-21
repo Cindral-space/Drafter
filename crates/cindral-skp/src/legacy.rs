@@ -9,7 +9,7 @@
 use crate::{Definition, Error, Instance, Result, Scene, MAX_BYTES, MAX_DEPTH, MAX_ITEMS};
 use cindral_core::{BulkEdge, BulkFace, BulkGeometry, Material, MaterialId, Tag};
 use glam::{DMat4, DVec3};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MARKER: &[u8] = b"\xff\xfe\xff";
 const FIRST_V4: u32 = 4;
@@ -120,7 +120,7 @@ impl<'a> Cur<'a> {
         }
         let bytes = n.checked_mul(2).ok_or(Fail { at: self.pos, msg: "string length overflow".into() })?;
         let b = self.take(bytes)?;
-        let units: Vec<u16> = b.chunks_exact(2).take(512).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = b.as_chunks::<2>().0.iter().take(512).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         Ok(String::from_utf16_lossy(&units))
     }
 }
@@ -263,7 +263,7 @@ struct Ar<'a> {
     next_slot: usize,
     walk_base: usize,
     current_loop: Option<usize>,
-    burns: Vec<(usize, usize)>,
+    burns: Vec<(usize, usize, usize)>,
     cum_delta: usize,
     annot_watermark: Option<usize>,
     burn_stack: Vec<usize>,
@@ -402,17 +402,11 @@ impl<'a> Ar<'a> {
     }
 
     fn translate_ref(&self, slot: usize) -> Option<usize> {
-        let mut offset = 0usize;
-        for &(start, width) in &self.burns {
-            if slot < start {
-                break;
-            }
-            if slot < start.saturating_add(width) {
-                return None;
-            }
-            offset += width;
-        }
-        slot.checked_sub(offset)
+        let index = self.burns.partition_point(|&(start, _, _)| start <= slot);
+        if index == 0 { return Some(slot); }
+        let (start, width, cumulative) = self.burns[index - 1];
+        if slot < start.saturating_add(width) { None } else { slot.checked_sub(cumulative) }
+
     }
 
     fn backref(&self, mut slot: usize, at: usize) -> R<Ref> {
@@ -740,7 +734,7 @@ impl<'a> Ar<'a> {
                 self.preamble(r)?;
                 self.drawbase(r)?;
                 let first = f64_at(self.d, r.pos).ok_or(Fail { at: r.pos, msg: "truncated section plane".into() })?;
-                if !(first.abs() <= 1.0001) {
+                if !first.is_finite() || first.abs() > 1.0001 {
                     self.read_object(r, None)?;
                 }
                 r.take(32)?;
@@ -773,8 +767,9 @@ impl<'a> Ar<'a> {
         if self.burns.len() >= MAX_BURNS {
             return fail(at, "store-map burn limit exceeded");
         }
-        self.burns.push((w + self.cum_delta, delta));
+        let start = w + self.cum_delta;
         self.cum_delta += delta;
+        self.burns.push((start, delta, self.cum_delta));
         if let Some(last) = self.burn_stack.last_mut() {
             *last += 1;
         }
@@ -1429,6 +1424,8 @@ struct Build<'c, 's> {
     edges: HashSet<usize>,
     instances: Vec<Instance>,
     warns: Vec<String>,
+    face_assignments: BTreeMap<usize,(Option<usize>,bool)>,
+    edge_tags: BTreeMap<usize,usize>,
 }
 
 impl Build<'_, '_> {
@@ -1466,6 +1463,7 @@ impl Build<'_, '_> {
         let a = self.vertex(v1)?;
         let b = self.vertex(v2)?;
         if self.edges.insert(slot) && a != b && self.budget() {
+            if let Some(tag) = db.layer.and_then(|id| self.cx.tags.get(&id)).copied() { self.edge_tags.insert(self.g.edges.len(), tag); }
             self.g.edges.push(BulkEdge {
                 vertices: [a, b],
                 soft: db.soft != 0,
@@ -1526,6 +1524,7 @@ impl Build<'_, '_> {
                     return;
                 }
                 let mi = self.cx.mats.get(&db.mat).copied();
+                self.face_assignments.insert(self.g.faces.len(), (db.layer.and_then(|id| self.cx.tags.get(&id)).copied(), db.hidden != 0));
                 self.g.faces.push(BulkFace {
                     outer,
                     holes,
@@ -1543,14 +1542,14 @@ impl Build<'_, '_> {
                     return;
                 };
                 let tag = db.layer.and_then(|l| self.cx.tags.get(&l).copied());
-                self.instances.push(Instance { name: name.clone(), definition, transform, tag });
+                self.instances.push(Instance { name: name.clone(), definition, transform, tag, material: self.cx.mats.get(&db.mat).map(|i| MaterialId(*i as u64+1)), hidden: db.hidden != 0 });
             }
             _ => {}
         }
     }
 }
 
-fn build(cx: &mut Ctx, ents: &[Option<usize>], warns: &mut Vec<String>) -> (BulkGeometry, Vec<Instance>) {
+fn build(cx: &mut Ctx, ents: &[Option<usize>], warns: &mut Vec<String>) -> Definition {
     let mut b = Build {
         cx,
         g: BulkGeometry::default(),
@@ -1558,13 +1557,14 @@ fn build(cx: &mut Ctx, ents: &[Option<usize>], warns: &mut Vec<String>) -> (Bulk
         edges: HashSet::new(),
         instances: Vec::new(),
         warns: Vec::new(),
+        face_assignments: BTreeMap::new(), edge_tags: BTreeMap::new(),
     };
     for &s in ents.iter().flatten() {
         b.entity(s);
     }
     warns.append(&mut b.warns);
     warns.truncate(256);
-    (b.g, b.instances)
+    Definition { geometry:b.g, instances:b.instances, face_assignments:b.face_assignments, edge_tags:b.edge_tags, ..Default::default() }
 }
 
 fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) -> Scene {
@@ -1648,14 +1648,16 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
     }
     for &s in &def_slots {
         let Some(Val::Definition { name, ents }) = ar.val(Some(s)) else { continue };
-        let (geometry, instances) = build(&mut cx, ents, &mut warns);
-        scene.definitions.push(Definition { name: name.clone(), geometry, instances });
+        let mut definition = build(&mut cx, ents, &mut warns);
+        definition.name = name.clone();
+        scene.definitions.push(definition);
     }
-    let (geometry, instances) = build(&mut cx, &st.root, &mut warns);
-    if failure.is_none() || !geometry.vertices.is_empty() || !instances.is_empty() || !scene.definitions.is_empty() {
+    let mut root = build(&mut cx, &st.root, &mut warns);
+    if failure.is_none() || !root.geometry.vertices.is_empty() || !root.instances.is_empty() || !scene.definitions.is_empty() {
         let definition = scene.definitions.len();
-        scene.definitions.push(Definition { name: "Model".into(), geometry, instances });
-        scene.roots.push(Instance { name: "Model".into(), definition, transform: DMat4::IDENTITY, tag: None });
+        root.name = "Model".into();
+        scene.definitions.push(root);
+        scene.roots.push(Instance { name: "Model".into(), definition, transform: DMat4::IDENTITY, tag: None, material: None, hidden: false });
     }
     for n in &ar.notes {
         scene.warn(n.clone());
@@ -1815,6 +1817,17 @@ mod tests {
         assert_eq!(g.edges.len(), 7);
         assert_eq!(g.vertices[g.faces[0].outer[2]], DVec3::new(10.0, 10.0, 0.0));
         assert_eq!(scene.roots.len(), 1);
+        for cut in (0..d.len()).step_by(17) {
+            let mut archive = Ar::new(&d[..cut], 16, base);
+            let mut cursor = Cur { d: &d[..cut], pos: 0 };
+            let _ = archive.read_object(&mut cursor, None);
+        }
+        for i in (0..d.len()).step_by(7) {
+            let mut mutated = d.clone(); mutated[i] ^= 0xff;
+            let mut archive = Ar::new(&mutated, 16, base);
+            let mut cursor = Cur { d: &mutated, pos: 0 };
+            let _ = archive.read_object(&mut cursor, None);
+        }
     }
 
     #[test]

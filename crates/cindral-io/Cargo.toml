@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+cindral-skp = { path = "../cindral-skp" }
 cindral-core = { path = "../cindral-core" }
 glam = "0.30"
 serde = { version = "1", features = ["derive"] }

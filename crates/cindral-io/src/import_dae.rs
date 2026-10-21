@@ -1557,7 +1557,8 @@ fn build_visual_scene(
                             definition: def_idx,
                             transform: DMat4::IDENTITY,
                             tag: None,
-                        });
+            ..Default::default()
+});
                     }
                 }
                 "instance_node" => {
@@ -1576,7 +1577,8 @@ fn build_visual_scene(
                             definition: cached_def,
                             transform: cached_xform,
                             tag: None,
-                        });
+            ..Default::default()
+});
                     } else {
                         let target_node = *lib_nodes.get(target_id).ok_or_else(|| {
                             IoError::Invalid(format!("unknown <instance_node> target #{target_id}"))
@@ -1660,6 +1662,7 @@ fn build_visual_scene(
             definition: def_idx,
             transform,
             tag: None,
+            ..Default::default()
         }))
     }
 
