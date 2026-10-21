@@ -9,7 +9,10 @@ fn main() -> eframe::Result {
         multisampling: 4,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([720.0, 480.0]),
+            .with_min_inner_size([720.0, 480.0])
+            .with_maximized(true),
+        // Always use the launch default instead of restoring a smaller window.
+        persist_window: false,
         ..Default::default()
     };
     eframe::run_native(

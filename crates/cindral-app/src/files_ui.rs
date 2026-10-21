@@ -334,44 +334,50 @@ impl DrafterApp {
                 }
             });
             ui.separator();
-            ui.menu_button("Recovery snapshots", |ui| {
-                if ui.button("Refresh recovery snapshots").clicked() {
-                    match cindral_io::recovery_files(&self.files.directory) {
-                        Ok(files) => self.files.candidates = files,
-                        Err(e) => self.error = Some(e.to_string()),
-                    }
-                }
-                if self.files.candidates.is_empty() {
-                    ui.label("No recovery snapshots found.");
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(210.)
-                    .show(ui, |ui| {
-                        for path in self.files.candidates.clone() {
-                            ui.horizontal(|ui| {
-                                ui.add_sized(
-                                    [180., 30.],
-                                    egui::Label::new(
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(path.display().to_string());
-                                if ui.small_button("Recover").clicked() {
-                                    action = Some(Action::Recover(path.clone()));
-                                    ui.close();
-                                }
-                                if ui
-                                    .add(egui::Button::new("×").min_size(egui::vec2(30., 30.)))
-                                    .on_hover_text("Discard this recovery snapshot permanently")
-                                    .clicked()
-                                {
-                                    action = Some(Action::Discard(path));
-                                }
-                            });
+            // Keep the snapshot list open for repeated discard/refresh actions.
+            egui::containers::menu::SubMenuButton::new("Recovery snapshots")
+                .config(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+                .ui(ui, |ui| {
+                    if ui.button("Refresh recovery snapshots").clicked() {
+                        match cindral_io::recovery_files(&self.files.directory) {
+                            Ok(files) => self.files.candidates = files,
+                            Err(e) => self.error = Some(e.to_string()),
                         }
-                    });
-            });
+                    }
+                    if self.files.candidates.is_empty() {
+                        ui.label("No recovery snapshots found.");
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(210.)
+                        .show(ui, |ui| {
+                            for path in self.files.candidates.clone() {
+                                ui.horizontal(|ui| {
+                                    ui.add_sized(
+                                        [180., 30.],
+                                        egui::Label::new(
+                                            path.file_name().unwrap_or_default().to_string_lossy(),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(path.display().to_string());
+                                    if ui.small_button("Recover").clicked() {
+                                        action = Some(Action::Recover(path.clone()));
+                                        ui.close();
+                                    }
+                                    if ui
+                                        .add(egui::Button::new("×").min_size(egui::vec2(30., 30.)))
+                                        .on_hover_text("Discard this recovery snapshot permanently")
+                                        .clicked()
+                                    {
+                                        action = Some(Action::Discard(path));
+                                    }
+                                });
+                            }
+                        });
+                });
         });
         if let Some(action) = action {
             if let Err(e) = self.do_file_action(action) {

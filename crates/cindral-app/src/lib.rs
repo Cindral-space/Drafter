@@ -682,6 +682,7 @@ impl eframe::App for DrafterApp {
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
                         rect,
                         GridCallback {
+                            size: [rect.width(), rect.height()],
                             view_projection: matrix.to_cols_array_2d(),
                             show_grid: self.show_grid,
                         },
