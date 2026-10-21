@@ -87,3 +87,17 @@ fn cancellation_and_recursive_graph_are_atomic() {
     s.meters_per_unit = f64::NAN;
     assert!(convert_scene(s, &ImportOptions::default(), &ImportControl::default()).is_err());
 }
+#[test]
+fn obj_pipeline_uses_cleanup_without_restoring_diagonal_edges() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mesh.obj");
+    std::fs::write(
+        &path,
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n",
+    )
+    .unwrap();
+    let imported =
+        import_file(&path, &ImportOptions::default(), &ImportControl::default()).unwrap();
+    assert_eq!(imported.report.faces, 1);
+    assert_eq!(imported.report.edges, 4);
+}

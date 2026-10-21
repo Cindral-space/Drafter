@@ -181,3 +181,16 @@ fn append_component_sharing_and_tags_restore() {
     assert_eq!(destination.to_data().definitions, imported.definitions);
     assert_eq!(destination.tags().len(), 1);
 }
+#[test]
+fn explicit_mesh_edges_do_not_restore_cleaned_diagonals() {
+    let mut g = square();
+    g.edges.push(BulkEdge {
+        vertices: [0, 2],
+        ..Default::default()
+    });
+    let m = g.clone().build(true, true).unwrap();
+    assert_eq!(m.faces().len(), 1);
+    assert_eq!(m.edges().len(), 4);
+    let m = g.build(false, true).unwrap();
+    assert_eq!(m.edges().values().filter(|e| e.soft && e.smooth).count(), 1);
+}

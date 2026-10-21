@@ -278,9 +278,9 @@ impl BulkGeometry {
                 continue;
             }
             if let Some(edge) = pairs.get(&pair).and_then(|id| model.edges.get_mut(id)) {
-                edge.soft = e.soft;
-                edge.smooth = e.hidden;
-            } else {
+                edge.soft |= e.soft;
+                edge.smooth |= e.hidden;
+            } else if let std::collections::btree_map::Entry::Vacant(entry) = pairs.entry(pair) {
                 let id = EdgeId::from_raw(model.allocate()?);
                 model.edges.insert(
                     id,
@@ -290,7 +290,7 @@ impl BulkGeometry {
                         smooth: e.hidden,
                     },
                 );
-                pairs.insert(pair, id);
+                entry.insert(id);
             }
         }
         check()?;
