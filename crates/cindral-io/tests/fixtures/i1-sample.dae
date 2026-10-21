@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <authoring_tool>Cindral Hand-written Fixture</authoring_tool>
+    </contributor>
+    <unit meter="0.01" name="centimeter"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_materials>
+    <material id="mat_red_id" name="RedMaterial">
+      <instance_effect url="#effect_red_id"/>
+    </material>
+    <material id="mat_blue_id" name="BlueMaterial">
+      <instance_effect url="#effect_blue_id"/>
+    </material>
+  </library_materials>
+  <library_effects>
+    <effect id="effect_red_id" name="RedEffect">
+      <profile_COMMON>
+        <technique sid="common">
+          <lambert>
+            <diffuse>
+              <color>1.0 0.0 0.0 1.0</color>
+            </diffuse>
+          </lambert>
+        </technique>
+      </profile_COMMON>
+    </effect>
+    <effect id="effect_blue_id" name="BlueEffect">
+      <profile_COMMON>
+        <technique sid="common">
+          <phong>
+            <diffuse>
+              <color>0.0 0.0 1.0 0.8</color>
+            </diffuse>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_geometries>
+    <geometry id="geom_triangles" name="TriangleMesh">
+      <mesh>
+        <source id="tri_pos">
+          <float_array id="tri_pos_array" count="9">
+            0.0 0.0 0.0
+            100.0 0.0 0.0
+            0.0 100.0 0.0
+          </float_array>
+          <technique_common>
+            <accessor source="#tri_pos_array" count="3" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="tri_vertices">
+          <input semantic="POSITION" source="#tri_pos"/>
+        </vertices>
+        <triangles count="1" material="RedMatSymbol">
+          <input semantic="VERTEX" source="#tri_vertices" offset="0"/>
+          <p>0 1 2</p>
+        </triangles>
+      </mesh>
+    </geometry>
+    <geometry id="geom_polylist" name="QuadMesh">
+      <mesh>
+        <source id="poly_pos">
+          <float_array id="poly_pos_array" count="12">
+            0.0 0.0 0.0
+            50.0 0.0 0.0
+            50.0 50.0 0.0
+            0.0 50.0 0.0
+          </float_array>
+          <technique_common>
+            <accessor source="#poly_pos_array" count="4" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="poly_vertices">
+          <input semantic="POSITION" source="#poly_pos"/>
+        </vertices>
+        <polylist count="1" material="BlueMatSymbol">
+          <input semantic="VERTEX" source="#poly_vertices" offset="0"/>
+          <vcount>4</vcount>
+          <p>0 1 2 3</p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_nodes>
+    <node id="lib_node_tri" name="LibraryTriangleNode">
+      <instance_geometry url="#geom_triangles">
+        <bind_material>
+          <technique_common>
+            <instance_material symbol="RedMatSymbol" target="#mat_red_id"/>
+          </technique_common>
+        </bind_material>
+      </instance_geometry>
+    </node>
+  </library_nodes>
+  <library_visual_scenes>
+    <visual_scene id="visual_scene_default" name="DefaultScene">
+      <node id="scene_node_instanced" name="InstancedNode">
+        <translate>10.0 20.0 0.0</translate>
+        <instance_node url="#lib_node_tri"/>
+      </node>
+      <node id="scene_node_poly" name="DirectPolyNode">
+        <instance_geometry url="#geom_polylist">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="BlueMatSymbol" target="#mat_blue_id"/>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#visual_scene_default"/>
+  </scene>
+</COLLADA>

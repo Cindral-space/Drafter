@@ -872,15 +872,27 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
         textures,
     };
 
-    // Validate the bundle using DocumentHistory::from_data (via validate_bundle)
-    validate_bundle(&bundle)?;
-
     Ok(bundle)
 }
 
 /// Import a Wavefront OBJ file from disk with associated MTL and texture assets.
 /// Associated files must be located under the OBJ file's directory.
 pub fn import_obj(path: &Path) -> Result<DraftBundle> {
+    let bundle = read_obj_values(path)?;
+    validate_bundle(&bundle)?;
+    Ok(bundle)
+}
+/// Parse OBJ into the common scene boundary without constructing a runtime model.
+pub fn import_obj_scene(
+    path: &Path,
+    control: &crate::ImportControl,
+) -> Result<crate::ImportedScene> {
+    control.check()?;
+    let values = read_obj_values(path)?;
+    control.check()?;
+    Ok(crate::import_scene::scene_from_bundle(values))
+}
+fn read_obj_values(path: &Path) -> Result<DraftBundle> {
     let mut bytes = Vec::new();
     File::open(path)?
         .take(MAX_OBJ_BYTES as u64 + 1)
@@ -901,5 +913,7 @@ pub fn import_obj(path: &Path) -> Result<DraftBundle> {
 
 /// Import a Wavefront OBJ from an in-memory string without reading any external files.
 pub fn import_obj_str(text: &str) -> Result<DraftBundle> {
-    import_obj_internal(text, None)
+    let bundle = import_obj_internal(text, None)?;
+    validate_bundle(&bundle)?;
+    Ok(bundle)
 }

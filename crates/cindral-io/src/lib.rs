@@ -176,6 +176,13 @@ pub use archive::{
     load_draft, load_draft_report, recovery_files, save_autosave, save_draft, LoadReport,
 };
 mod import_obj;
-pub use import_obj::{import_obj, import_obj_str};
+pub use import_obj::{import_obj, import_obj_scene, import_obj_str};
 mod export;
 pub use export::{export_gltf, export_obj, export_stl};
+
+pub(crate) mod import_scene;
+pub use import_scene::*;
+mod import_gltf;
+pub use import_gltf::{import_gltf, import_gltf_bytes};
+mod import_dae;
+pub use import_dae::{import_dae, import_dae_bytes};
