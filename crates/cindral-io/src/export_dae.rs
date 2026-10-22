@@ -91,7 +91,7 @@ fn convex(model: &Model, face: &Face) -> bool {
         let a=model.vertices()[&ring[i]].position;
         let b=model.vertices()[&ring[(i+1)%ring.len()]].position;
         let c=model.vertices()[&ring[(i+2)%ring.len()]].position;
-        (b-a).cross(c-b).dot(face.plane.normal) >= -1e-14
+        (b-a).cross(c-b).dot(face.plane.normal) >= 0.
     })
 }
 fn uv(p: DVec3, normal: DVec3) -> [f64;2] {
@@ -174,6 +174,26 @@ fn geometry(id: DefinitionId, model: &Model, options: &DaeOptions, selection: Op
     }
     out.push_str("</mesh></geometry>");
     Ok(mesh)
+}
+fn tinted_png(asset: &crate::TextureAsset, color: [f32;3], control: &DaeControl) -> Result<Vec<u8>> {
+    let decoded=crate::decode_texture(asset)?;
+    let mut pixels=decoded.rgba;
+    for row in pixels.chunks_mut(decoded.width as usize*4) {
+        control.check()?;
+        for pixel in row.chunks_mut(4) {
+            for channel in 0..3 {
+                let s=pixel[channel] as f32/255.;
+                let linear=if s<=0.04045 {s/12.92} else {((s+0.055)/1.055).powf(2.4)};
+                let value=linear*color[channel];
+                let srgb=if value<=0.0031308 {12.92*value} else {1.055*value.powf(1./2.4)-0.055};
+                pixel[channel]=(srgb.clamp(0.,1.)*255.).round() as u8;
+            }
+        }
+    }
+    let image=image::RgbaImage::from_raw(decoded.width,decoded.height,pixels).ok_or_else(||IoError::Invalid("invalid decoded image".into()))?;
+    let mut bytes=std::io::Cursor::new(Vec::new());
+    image.write_to(&mut bytes,image::ImageFormat::Png).map_err(|e|IoError::Invalid(format!("texture encoding failed: {e}")))?;
+    Ok(bytes.into_inner())
 }
 type Variant=(DefinitionId,Option<MaterialId>);
 fn node_id((def,mat): Variant) -> String { format!("n{}-{}",def.0,mat.map_or_else(|| "default".into(),|m|m.0.to_string())) }
@@ -262,9 +282,9 @@ fn export_inner(path: &Path, bundle: &DraftBundle, options: &DaeOptions, control
     }
     let summary=scene.counts(root_variant,root_variant,&mut BTreeMap::new())?;
     let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let staging=tempfile::Builder::new().prefix(".cindral-dae-").tempdir_in(parent)?;
-    let folder=format!("cindral-textures-{}",staging.path().file_name().unwrap().to_string_lossy().trim_start_matches(".cindral-dae-"));
-    let staged_images=staging.path().join("images");
+    let staging=tempfile::Builder::new().prefix("cindral-textures-").tempdir_in(parent)?;
+    let folder=staging.path().file_name().unwrap().to_string_lossy().into_owned();
+    let staged_images=staging.path();
     let mut materials=BTreeMap::<String,Material>::new();
     materials.insert(color_key([160,177,193,255]),Material{name:"Default".into(),color:[160./255.,177./255.,193./255.],opacity:1.,texture:None});
     for (id,m) in &doc.materials { materials.insert(format!("m{}",id.0),m.clone()); }
@@ -275,29 +295,47 @@ fn export_inner(path: &Path, bundle: &DraftBundle, options: &DaeOptions, control
             }
         }
     }
-    let mut textures=BTreeMap::new();
-    if options.include_textures {
-        for m in materials.values() {
-            if let Some(key)=&m.texture {
-                control.check()?;
-                if textures.contains_key(key) {continue;}
-                let asset=bundle.textures.get(key).ok_or_else(||IoError::Invalid(format!("missing texture asset {key}")))?;
-                if textures.is_empty() {std::fs::create_dir(&staged_images)?;}
-                let index=textures.len(); let ext=if asset.mime=="image/png" {"png"} else {"jpg"};
-                let filename=format!("image{index}.{ext}");
-                let mut file=std::fs::File::create(staged_images.join(&filename))?;
-                file.write_all(&asset.bytes)?; file.sync_all()?;
-                textures.insert(key.clone(),(format!("image{index}"),format!("{folder}/{filename}")));
+    let mut needed=BTreeSet::new();
+    for &(id,inherited) in &scene.variants {
+        if let Some(mesh)=scene.meshes.get(&id) {
+            for symbol in &mesh.symbols {
+                needed.insert(if symbol=="inherit" {inherited.map_or_else(||color_key([160,177,193,255]),|m|format!("m{}",m.0))} else {symbol.clone()});
             }
         }
     }
-    let mut out=String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?><COLLADA xmlns=\"http://www.collada.org/2005/11/COLLADASchema\" version=\"1.4.1\"><asset><contributor><authoring_tool>Cindral Drafter</authoring_tool></contributor><created>2026-01-01T00:00:00Z</created><modified>2026-01-01T00:00:00Z</modified>");
+    materials.retain(|id,_|needed.contains(id));
+    let mut textures=BTreeMap::new();
+    if options.include_textures {
+        for (material_id,m) in &mut materials {
+            if let Some(key)=m.texture.clone() {
+                control.check()?;
+                let asset=bundle.textures.get(&key).ok_or_else(||IoError::Invalid(format!("missing texture asset {key}")))?;
+                // COLLADA diffuse is color OR texture. Bake the native linear tint into
+                // an image so standard readers retain the rendered appearance.
+                let tinted=m.color != [1.;3];
+                let output_key=if tinted {format!("tint-{material_id}")} else {format!("asset-{key}")};
+                if !textures.contains_key(&output_key) {
+                    let bytes=if tinted { tinted_png(asset,m.color,control)? } else {asset.bytes.clone()};
+                    let index=textures.len();
+                    let ext=if tinted || asset.mime=="image/png" {"png"} else {"jpg"};
+                    let filename=format!("image{index}.{ext}");
+                    let mut file=std::fs::File::create(staged_images.join(&filename))?;
+                    for chunk in bytes.chunks(64*1024) {control.check()?;file.write_all(chunk)?;}
+                    file.sync_all()?;
+                    textures.insert(output_key.clone(),(format!("image{index}"),format!("{folder}/{filename}")));
+                }
+                m.texture=Some(output_key);
+            }
+        }
+    }
+    let mut out=String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?><COLLADA xmlns=\"http://www.collada.org/2005/11/COLLADASchema\" version=\"1.4.1\"><asset><contributor><authoring_tool>Cindral Drafter</authoring_tool></contributor><created>1970-01-01T00:00:00Z</created><modified>1970-01-01T00:00:00Z</modified>");
     let _=write!(out,"<unit name=\"{}\" meter=\"{}\"/><up_axis>Z_UP</up_axis></asset>",if options.units==DaeUnits::Meters {"meter"} else {"inch"},options.units.meter());
     if !textures.is_empty() {
         out.push_str("<library_images>");
         for (id,path) in textures.values() {let _=write!(out,"<image id=\"{id}\"><init_from>{path}</init_from></image>");}
         out.push_str("</library_images>");
     }
+    if !materials.is_empty() {
     out.push_str("<library_effects>");
     for (id,m) in &materials {
         let _=write!(out,"<effect id=\"{id}-fx\"><profile_COMMON>");
@@ -307,11 +345,14 @@ fn export_inner(path: &Path, bundle: &DraftBundle, options: &DaeOptions, control
         }
         out.push_str("<technique sid=\"common\"><lambert><diffuse>");
         if texture.is_some() { out.push_str("<texture texture=\"sampler\" texcoord=\"UVSET0\"/>"); } else {let _=write!(out,"<color>{} {} {} 1</color>",m.color[0],m.color[1],m.color[2]);}
-        let _=write!(out,"</diffuse><transparent opaque=\"A_ONE\"><color>1 1 1 1</color></transparent><transparency><float>{}</float></transparency></lambert></technique></profile_COMMON></effect>",m.opacity);
+        out.push_str("</diffuse><transparent opaque=\"A_ONE\">");
+        if texture.is_some() {out.push_str("<texture texture=\"sampler\" texcoord=\"UVSET0\"/>");} else {out.push_str("<color>1 1 1 1</color>");}
+        let _=write!(out,"</transparent><transparency><float>{}</float></transparency></lambert></technique></profile_COMMON></effect>",m.opacity);
     }
     out.push_str("</library_effects><library_materials>");
     for (id,m) in &materials {let _=write!(out,"<material id=\"{id}\" name=\"{}\"><instance_effect url=\"#{id}-fx\"/></material>",xml(&m.name));}
     out.push_str("</library_materials>");
+    }
     if scene.meshes.values().any(|m|m.nonempty) {
         out.push_str("<library_geometries>"); for mesh in scene.meshes.values() {out.push_str(&mesh.xml);} out.push_str("</library_geometries>");
     }
@@ -336,13 +377,11 @@ fn export_inner(path: &Path, bundle: &DraftBundle, options: &DaeOptions, control
     temporary.as_file_mut().sync_all()?;
     let mut state=control.state.lock().unwrap_or_else(|p|p.into_inner());
     if state.cancelled {return Err(IoError::Invalid("COLLADA export cancelled".into()));}
-    let final_images=parent.join(&folder);
-    if !textures.is_empty() {std::fs::rename(&staged_images,&final_images)?;}
     let published=if options.force {temporary.persist(path)} else {temporary.persist_noclobber(path)};
     if let Err(error)=published {
-        if !textures.is_empty() {let _=std::fs::remove_dir_all(&final_images);}
         return Err(IoError::Io(error.error));
     }
+    if !textures.is_empty() { staging.keep(); }
     state.committed=true; control.set_progress(1.);
     Ok(summary)
 }

@@ -119,3 +119,28 @@ fn failures_cancel_and_overwrite_leave_no_partial_outputs() {
     assert!(export_dae(&dir.path().join("missing/out.dae"),&b,&DaeOptions::default(),&DaeControl::default()).unwrap_err().to_string().contains("COLLADA export to"));
     let c=DaeControl::default();export_dae(&p,&b,&DaeOptions{force:true,..Default::default()},&c).unwrap();assert_eq!(c.progress(),1.);assert!(!c.cancel());
 }
+#[test]
+fn concave_faces_are_triangulated_and_shared_instances_stay_small() {
+    let mut b=fixture();
+    let mesh=BulkGeometry{vertices:vec![DVec3::ZERO,DVec3::new(4.,0.,0.),DVec3::new(4.,1.,0.),DVec3::new(1.,1.,0.),DVec3::new(1.,4.,0.),DVec3::new(0.,4.,0.)],faces:vec![BulkFace{outer:vec![0,1,2,3,4,5],..Default::default()}],edges:vec![]}.build(false,false).unwrap();
+    b.document.definitions.get_mut(&DefinitionId(1)).unwrap().geometry=mesh.to_data();
+    b.document.definitions.get_mut(&DefinitionId(0)).unwrap().instances=(100..5100).map(|id|(InstanceId(id),instance(id,1,DMat4::from_translation(DVec3::new(id as f64,0.,0.))))).collect();b.document.next_id=5100;
+    let dir=tempfile::tempdir().unwrap();let p=dir.path().join("shared.dae");
+    let result=export_dae(&p,&b,&DaeOptions::default(),&DaeControl::default()).unwrap();assert_eq!((result.instances,result.triangles),(5000,20000));
+    let text=std::fs::read_to_string(&p).unwrap();let d=roxmltree::Document::parse(&text).unwrap();
+    assert_eq!(d.descendants().filter(|n|n.has_tag_name("geometry")).count(),1);assert_eq!(d.descendants().filter(|n|n.has_tag_name("polylist")).count(),0);
+    assert_eq!(d.descendants().filter(|n|n.has_tag_name("instance_node")).count(),5000);assert!(text.len()<2_000_000);
+    let c=DaeControl::default();let worker=c.clone();let output=dir.path().join("cancel.dae");let path=output.clone();
+    let t=std::thread::spawn(move||export_dae(&path,&b,&DaeOptions::default(),&worker));
+    let start=std::time::Instant::now();while c.progress()<0.1 && !t.is_finished(){assert!(start.elapsed().as_secs()<10);std::thread::yield_now();}
+    let cancelled=c.cancel();let result=t.join().unwrap();
+    if cancelled {assert!(result.unwrap_err().to_string().contains("cancelled"));assert!(!output.exists());}else{assert!(result.is_ok());assert!(output.exists());}
+    assert!(!std::fs::read_dir(dir.path()).unwrap().any(|entry|entry.unwrap().file_name().to_string_lossy().starts_with(".cindral")));
+}
+#[test]
+fn concurrent_no_clobber_exports_publish_one_complete_texture_set() {
+    let dir=tempfile::tempdir().unwrap();let p=dir.path().join("race.dae");let barrier=std::sync::Arc::new(std::sync::Barrier::new(2));
+    let jobs:Vec<_>=(0..2).map(|_|{let path=p.clone();let barrier=barrier.clone();std::thread::spawn(move||{barrier.wait();export_dae(&path,&textured(),&DaeOptions::default(),&DaeControl::default())})}).collect();
+    let results:Vec<_>=jobs.into_iter().map(|j|j.join().unwrap()).collect();assert_eq!(results.iter().filter(|r|r.is_ok()).count(),1);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(),2);assert_eq!(import_dae(&p,&ImportControl::default()).unwrap().textures.len(),1);
+}
