@@ -138,7 +138,6 @@ fn draw_compound_imperial_length() {
 }
 
 #[test]
-#[ignore = "gap: Line remeasurement appends from advanced anchor instead of replacing last segment"]
 fn draw_line_remeasurement_revises_last_segment() {
     let mut history = History::new();
     let mut tool = ToolSession::new(ToolKind::Line);
@@ -147,7 +146,7 @@ fn draw_line_remeasurement_revises_last_segment() {
         .execute(tool.click(DVec3::X).unwrap().unwrap())
         .unwrap();
     history
-        .execute(tool.measure("2m").unwrap().unwrap())
+        .replace_last(tool.measure("2m").unwrap().unwrap())
         .unwrap();
     assert_eq!(history.undo_depth(), 1);
     let (min, max) = history.model().bounds().unwrap();
@@ -176,7 +175,6 @@ fn draw_rectangle_partial_dimension_preserves_other_dimension() {
 }
 
 #[test]
-#[ignore = "gap: circle clears anchors and cannot remeasure completed radius"]
 fn draw_circle_remeasurement_after_completion() {
     let mut tool = prepared(ToolKind::Circle);
     tool.measure("2m").unwrap().unwrap();

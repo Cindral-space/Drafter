@@ -252,17 +252,22 @@ impl DrafterApp {
             return;
         }
         let before = self.tool.clone();
-        match self.tool.measure(&self.measurements.text) {
+        let replacing = self.tool.editing_completed();
+        match self.tool.measure_with_settings(&self.measurements.text, self.presentation.measurements) {
             Ok(Some(command)) => {
-                if self.commit(command) {
-                    self.measurements.text.clear();
+                let result = if replacing { self.history.replace_last(command) } else { self.history.execute(command) };
+                if matches!(result, Ok(true)) {
+                    self.refresh_mesh(); self.error = None;
+                    self.measurements.completed();
                 } else {
+                    self.error = Some(result.err().map(|e| e.to_string()).unwrap_or_else(|| "No change".into()));
                     self.tool = before;
                 }
             }
-            Ok(None) => {}
+            Ok(None) => { self.measurements.applied(); self.error = None; }
             Err(error) => self.error = Some(error.to_string()),
         }
+        self.measurements.invalid = self.error.is_some();
     }
     /// Current viewport appearance, independent of document geometry.
     pub fn view_style(&self) -> &cindral_core::ViewStyle {
@@ -586,6 +591,7 @@ impl DrafterApp {
     }
 
     fn click_tool_at(&mut self, snap: Snap) {
+        self.measurements.reset();
         if self.tool.anchors().is_empty() {
             if let Some(SnapEntity::Face(id)) = snap.entity {
                 if let Some(face) = self.history.model().faces().get(&id) {
@@ -603,7 +609,7 @@ impl DrafterApp {
             Ok(Some(command)) => {
                 if !self.commit(command) {
                     self.tool = before;
-                }
+                } else { self.measurements.completed(); }
             }
             Ok(None) => self.error = None,
             Err(error) => self.error = Some(error.to_string()),
