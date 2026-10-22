@@ -10,7 +10,7 @@ Expected workflows were paraphrased and checked against [Offset](https://help.sk
 | --- | --- | --- | --- |
 | O1 Offset activation | F activates Offset. | differs | `crates/cindral-app/src/lib.rs:425`: F fits view. |
 | O2 Tool palette activation | Both tools can be explicitly activated. | matches | `crates/cindral-app/src/workspace_ui.rs:80`; read the code. |
-| O3 Cursor and status | Identify active tool and next action; artwork may differ. | differs | `workspace_ui.rs:430,676`: crosshair and tool label, but generic drag hint omits face/path workflows. |
+| O3 Both tools: cursor and status | Identify active tool and next action; artwork may differ. | differs | `workspace_ui.rs:430,676`: crosshair and tool label, but generic drag hint omits face/path workflows. |
 | O4 Offset distance display | Show current offset distance. | matches | `crates/cindral-app/src/modify_ui.rs:416`: numeric meters overlay; field named Dimensions, not dynamically relabeled. |
 | O5 Offset explicit metric/decimal imperial | Accept lengths such as 2m, 150cm, 42in and 3.5ft after anchoring. | matches | `crates/cindral-tools/src/modify.rs:851`; `units.rs:11`; CPU unit test added in step 2. |
 | O6 Offset compound imperial | Accept 3'6\" as a length. | missing | `units.rs:11`: suffix-only parser; ignored regression in step 2. |
@@ -28,7 +28,7 @@ Expected workflows were paraphrased and checked against [Offset](https://help.sk
 | O18 Offset modifiers | Alt on Windows / Command on macOS changes overlap mode. Linux mapping is a product decision; Ctrl/Shift effects need Q4. | missing | `modify_ui.rs:108,220`: no Offset modifier state. |
 | O19 Offset ordinary planar result | Add parallel inset edges and bounded planar regions, preserving outer boundary. | matches | `modification.rs:855`: AddPolyline; exact inset geometry/validation test in step 2. |
 | O20 Offset soft/curved surface | Facet selection and smooth-surface behavior need Q5. | unsure | `modify.rs:562`: one planar FaceId; `modification.rs:811`; no analytic surface offset. |
-| F1 Follow Me preselected path resolution | Use a continuous selected edge path for a profile sweep. | matches | `modify.rs:259,597,794`; `test_followme_with_connected_ordered_edges_and_anchor_fallback` (see actual name in validation below); scope is command path resolution only. |
+| F1 Follow Me preselected path resolution | Use a continuous selected edge path for a profile sweep. | matches | `modify.rs:259,597,794`; `test_followme_with_connected_ordered_edges_and_anchor_fallback`; scope is command path resolution only. |
 | F2 Automatic completion | Clicking profile completes preselected-path sweep. | differs | `modify_ui.rs:305,341`: Follow Me is not an immediate action; displaced release or Enter needed. |
 | F3 Manual path following | Trace existing edges interactively. | missing | `modify.rs:794`: unselected fallback always two points; `modify_ui.rs:313` constrains pointer to face normal. |
 | F4 Manual completion convention | Exact drag/release versus final-click behavior needs Q6. | unsure | `modify_ui.rs:341`: commits on >3px displacement, not path end. |
@@ -40,16 +40,18 @@ Expected workflows were paraphrased and checked against [Offset](https://help.sk
 | F10 Holes, normals, intersections | Hole walls, cap orientation and interaction with adjacent solids need Q11. | unsure | `modification.rs:732,776,800`: hole stations/caps and surface rebuilding; no equivalence certification. |
 | F11 Path feedback | Show which existing edges the manual sweep follows; color can differ. | missing | `modify_ui.rs:355`: selection outline only; no traced-path state. |
 | F12 Invalid selected path | Disconnected/branching selection response needs Q12. | unsure | `modify.rs:259,601`: silently substitutes empty path and then straight fallback. Product should explain invalid selections regardless of parity answer. |
+| F13 Follow Me modifiers | Ctrl/Shift/Alt effects require a desktop trial (Q17). | unsure | `modify_ui.rs:108,220`: no tool-specific modifier modes; Shift only adds selection in Select. |
+| F14 Follow Me curved/soft paths | Sweep along a segmented curved path; exact smoothing and seam behavior need Q18. | unsure | `modify.rs:259` orders edges; `modification.rs:747` rotates stations; no analytic curve metadata or smoothing pass. |
 | I1 Snaps/locks for both | Endpoint, midpoint, on-edge, on-face; axis arrow locks and Shift hold applicability need Q13. | unsure | `modify_ui.rs:180,194`: inference and arrow locks; no Shift hold; Follow Me overrides inferred point with normal-axis projection. |
-| I2 Inference feedback | Which snap highlights and axis colors appear for these tools needs Q13. | unsure | `workspace_ui.rs:392`: modify mode uses modify overlay; `modify_ui.rs:355` omits inference markers. Red/green/blue axis convention exists globally, no per-tool colored guide. |
+| I2 Inference feedback | Which snap highlights and axis colors appear for these tools needs Q13. | unsure | `crates/cindral-app/src/lib.rs:325`: modify mode suppresses snap overlay; `modify_ui.rs:355` omits inference markers. Red/green/blue axis convention exists globally, no per-tool colored guide. |
 | S1 No preselection | Offset face and Follow Me profile can be chosen directly. | matches | `modify.rs:91,562,597`; direct-hit fixture tests. |
-| S2 Edit context | Edits stay in current group/component context, shared definitions propagate. | matches | `crates/cindral-app/src/lib.rs` History working-model usage; `crates/cindral-core/src/organization.rs`; read the code. Scope: existing History context contract, not tool-specific imported/group selection certification. |
+| S2 Edit context | Edits stay in current group/component context, shared definitions propagate. | matches | `crates/cindral-app/src/lib.rs` History working-model usage; `crates/cindral-core/src/document.rs:587`; read the code. Scope: existing History context contract, not tool-specific imported/group selection certification. |
 | S3 Closed groups/components | Tools operate on editable internal geometry, not closed container geometry. | matches | `modify.rs:91`: requires local face; `modify_ui.rs:175`: local model picking. Enter context first; read the code. |
 | S4 Selected face, empty click | Whether selected face acts despite click in space needs Q14. | unsure | `modify.rs:147`: falls back to first selected face, for both tools. |
 | C1 Cancel preview | Escape restores geometry without a committed edit. | matches | `modify_ui.rs:17,93`; exact History preview/cancel test and synthetic-input test in step 2. |
 | C2 Undo/redo | One completed operation is one undo entry, redo restores it. | matches | `modify_ui.rs:37`; exact History test in step 2. |
 | C3 Undo tool reset | Undo/redo cancels active operation before history navigation. | matches | `modify_ui.rs:103`: cancel_modify before history_step; synthetic-input test in step 2. |
-| C4 Invalid input/geometry | Report error, preserve valid committed model. | matches | `modify_ui.rs:26,60,697` (error rendered by `workspace_ui.rs:697`); `History::preview` rollback; invalid input tests. |
+| C4 Invalid input/geometry | Report error, preserve valid committed model. | matches | `modify_ui.rs:26,60` and `workspace_ui.rs:697`; `History::preview` rollback; invalid input tests. |
 | C5 Live preview | Show prospective edited geometry before commit. | matches | `modify_ui.rs:26,325`: provisional History geometry rendered via refresh_mesh; CPU preview/cancel tests. |
 | P1 20k-face performance | Project requirement: live preview <16ms and commit <100ms on Ryzen 5 2400G, release. SketchUp timing unknown. | unsure | CPU probe and limits below; no full picking/inference/mesh/GPU timing from this audit. Q15. |
 | P2 Imported .skp geometry | Equivalent editable planar topology should behave consistently; import-specific parity unverified. | unsure | No importer changes or imported fixture certification; Q16. |
@@ -58,7 +60,7 @@ Expected workflows were paraphrased and checked against [Offset](https://help.sk
 
 1. **Q1 (O7):** On a centimeter template, activate Offset, type `50` before clicking anything, then click a face. Is the value used? Repeat by typing `50` after the first click; what distance results?
 2. **Q2 (O10):** Press Offset on a square edge, hold the button, move inward and release. Does this finish the offset or keep it active?
-3. **Q3 (O16):** Draw a square with a square hole, Offset the annular face inward by `20cm`. Do both boundaries move, and in which directions?
+3. **Q3 (O16):** Draw a square with a square hole, Offset the annular face inward by `20cm`. Do both boundaries move, and in which directions? With back-face coloring enabled, do the new regions keep the source orientation?
 4. **Q4 (O18):** During an ordinary Offset preview, tap Ctrl, then Shift separately. Does either change behavior? Record platform/version; Linux equivalents are not assumed.
 5. **Q5 (O20):** On a cylinder side with softened vertical edges, activate Offset and click its side. Does it target one facet, the whole surface, or refuse?
 6. **Q6 (F4):** With no path selected, Follow Me a profile around a two-edge corner using press-drag-release. Does release finish, or must you click the endpoint?
@@ -72,6 +74,9 @@ Expected workflows were paraphrased and checked against [Offset](https://help.sk
 14. **Q14 (S4):** Select a face, activate each tool separately and click empty space away from it. Does an operation begin on that face?
 15. **Q15 (P1):** On your ~20k-face model on the Ryzen 5 2400G, perform one Offset and one Follow Me sweep in release Cindral and SketchUp. Is either visibly delayed? Instrumented presented-frame/commit timing is still needed to establish the numeric budgets.
 16. **Q16 (P2):** Import the same permitted .skp with a planar face, hole and softened curved path into Cindral; run one inset and one path sweep beside the original in SketchUp. Which result or rejection differs?
+
+17. **Q17 (F13):** During a manual Follow Me preview, tap Ctrl, Shift and Alt separately. Does any key change the path, constrain movement or change the result? Record platform/version.
+18. **Q18 (F14):** Select a circular path, Follow Me a small perpendicular profile around it, then enable Hidden Geometry. Are neighboring side facets softened, and is the closing seam smooth or sharp?
 
 ## Side-by-side manual script
 
@@ -96,3 +101,38 @@ Use classic tools, meter units, a fresh model, top view for Offset. In Cindral u
 ## CPU tests and performance limits
 
 Completion validation, test names, raw release measurements and reproduction are recorded below after execution. GPU-free tests establish specific state/geometry contracts, not visual parity. No real SketchUp timing or imported .skp certification is claimed. Existing bent-sweep kernel test checks valid closed topology, not correct corner dimensions.
+
+### Completion validation
+
+47 rows: **16 matches / 5 differs / 8 missing / 18 unsure**. Eighteen questions cover all unsure rows. Most important gaps: Offset uses anchor travel instead of perpendicular edge distance and cannot offset a selected open chain; Follow Me lacks manual tracing and immediate preselected-path completion; Offset lacks completed-distance editing and repeat-by-double-click.
+
+Eight new ordinary tests pass:
+
+- `offset_explicit_units_create_precise_parallel_valid_regions`
+- `follow_me_straight_sweep_has_valid_caps_sides_and_volume`
+- `offset_follow_me_cancel_exactly_restores_model_and_preserves_redo`
+- `offset_follow_me_multiple_previews_commit_one_exact_undo_redo`
+- `offset_follow_me_invalid_input_and_geometry_are_atomic`
+- `follow_me_preselected_edges_resolve_full_path_independent_of_pointer`
+- `offset_follow_me_parity_escape_keyboard_measurement_and_undo_reset`
+- `offset_parity_two_clicks_commit_a_valid_preview`
+
+Tools integration tests live in `crates/cindral-tools/tests/offset_follow_me_parity.rs`; synthetic egui tests and opt-in CPU probe are wholly inside the `#[cfg(test)] offset_follow_me_parity_tests` module of `crates/cindral-app/src/modify_ui.rs`. Follow Me numeric entry in the keyboard test verifies current Cindral plumbing only, not unknown SketchUp parity (F5). Exact model equality includes topology/attributes/IDs; revision intentionally changes on previews/cancellation. Closed-volume validation certifies only the simple normal sweep, not corner shape or outward face colors.
+
+Seven desired-behavior tests remain ignored with explicit gap reasons, and all seven fail when run explicitly: compound imperial Offset, perpendicular Offset distance, completed Offset remeasurement, selected open chain, manual Follow Me corner retention, F activation and stationary preselected-path completion. No known failing contract was fixed. Additional UI modes without a public state/command hook are documented by code evidence and manual cases.
+
+Targeted `cargo check -p cindral-tools` and `cargo check -p cindral-app` pass. Completion checks: `cargo fmt --all`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and one `cargo test --workspace --all-features` run pass: **383 passed, 0 failed, 48 ignored**. The new eighth ignored test is the opt-in release performance probe, not a functional gap. Initial test authoring required a numeric type annotation and a test-only import; no production fix.
+
+### Release CPU measurement
+
+Ryzen 5 2400G; release, authored 20,001-face fixture: 20,000 separated triangles plus an isolated 10m square, ten provisional absolute updates/tool and one commit. Setup excluded. Timed subset includes tool command generation, kernel provisional transaction and commit bookkeeping. It excludes initial target resolution, picking, inference, mesh preparation, upload, egui, GPU completion and presentation. It does not establish the full <16ms/<100ms viewport requirement or performance of whole-model/connected path edits.
+
+Reproduce:
+
+```sh
+cargo test -p cindral-app --release --features kernel-benchmark --lib offset_follow_me_parity_release_cpu_probe -- --ignored --nocapture
+```
+
+First potentially contended sample: Offset max preview **0.243992ms**, commit **0.000410ms**; Follow Me **0.565626ms / 0.000760ms**. Both CPU subset bounds pass. The isolated final run is saved in [raw output](offset-follow-me-release.txt); its measurements follow below. No native dependencies, Python, GPU session, SketchUp execution or import implementation were used.
+
+Isolated final sample: Offset max preview **0.230223ms**, commit **0.000340ms**; Follow Me max preview **0.436615ms**, commit **0.000360ms**. Both CPU subset bounds pass; P1 remains unsure for full viewport timing. The feature-gated probe checks both budgets after printing both tools' results.

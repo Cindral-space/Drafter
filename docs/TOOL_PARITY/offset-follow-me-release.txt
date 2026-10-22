@@ -1,0 +1,11 @@
+   Compiling cindral-app v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-app)
+    Finished `release` profile [optimized] target(s) in 21.54s
+     Running unittests src/lib.rs (target/release/deps/cindral_app-aa0a603d510c340b)
+
+running 1 test
+Offset: faces=20001 updates=10 max_preview_ms=0.230223 commit_ms=0.000340
+FollowMe: faces=20001 updates=10 max_preview_ms=0.436615 commit_ms=0.000360
+test modify_ui::offset_follow_me_parity_tests::offset_follow_me_parity_release_cpu_probe ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 77 filtered out; finished in 0.47s
+

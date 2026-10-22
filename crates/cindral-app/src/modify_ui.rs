@@ -1435,3 +1435,259 @@ mod transform_parity_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod offset_follow_me_parity_tests {
+    use super::*;
+    use cindral_core::FaceId;
+    fn fixture(kind: ModifyKind) -> (DrafterApp, egui::Context, FaceId) {
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline {
+            points: vec![
+                DVec3::ZERO,
+                DVec3::X * 10.,
+                (DVec3::X + DVec3::Y) * 10.,
+                DVec3::Y * 10.,
+            ],
+            closed: true,
+        })
+        .unwrap();
+        let face = *app.model().faces().keys().next().unwrap();
+        app.camera.set_view(StandardView::Top);
+        app.camera.projection = Projection::Orthographic;
+        app.camera.target = glam::Vec3::new(5., 5., 0.);
+        app.camera.distance = 30.;
+        app.choose_modify(kind);
+        let ctx = egui::Context::default();
+        send(&mut app, &ctx, vec![]);
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(308., 208.))],
+        );
+        (app, ctx, face)
+    }
+    fn send(app: &mut DrafterApp, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let modifiers = events
+            .iter()
+            .find_map(|event| match event {
+                egui::Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        crate::input_tests::frame(app, ctx, events, modifiers);
+    }
+    fn key(key: Key, command: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                ctrl: command,
+                command,
+                ..Default::default()
+            },
+        }
+    }
+    fn begin(app: &mut DrafterApp, face: FaceId) {
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.drag_axis = DVec3::Z;
+        let command = if app.modify.kind() == ModifyKind::Offset {
+            app.modify.measure("1m").unwrap().unwrap()
+        } else {
+            app.modify.update(DVec3::Z).unwrap().unwrap()
+        };
+        app.modify_preview(command);
+        assert!(app.error.is_none(), "{:?}", app.error);
+    }
+    #[test]
+    fn offset_follow_me_parity_escape_keyboard_measurement_and_undo_reset() {
+        for kind in [ModifyKind::Offset, ModifyKind::FollowMe] {
+            let (mut app, ctx, face) = fixture(kind);
+            let before = app.model().clone();
+            let depth = app.history.undo_depth();
+            begin(&mut app, face);
+            send(&mut app, &ctx, vec![key(Key::Escape, false)]);
+            assert_eq!(app.model(), &before);
+            assert_eq!(app.history.undo_depth(), depth);
+            assert!(!app.modify.active());
+            begin(&mut app, face);
+            // Follow Me typed behavior is a Cindral routing contract, not a parity claim (Q7).
+            send(
+                &mut app,
+                &ctx,
+                vec![egui::Event::Text("150cm".into()), key(Key::Enter, false)],
+            );
+            assert!(app.error.is_none(), "{kind:?}: {:?}", app.error);
+            assert_eq!(app.history.undo_depth(), depth + 1);
+            assert!(!app.modify.active());
+            let after = app.model().clone();
+            let next_face = *app
+                .model()
+                .faces()
+                .iter()
+                .find(|(_, f)| f.plane.normal.z.abs() > 0.9)
+                .unwrap()
+                .0;
+            begin(&mut app, next_face);
+            send(&mut app, &ctx, vec![key(Key::Z, true)]);
+            assert_eq!(app.model(), &before);
+            assert!(!app.modify.active());
+            send(&mut app, &ctx, vec![key(Key::Y, true)]);
+            assert_eq!(app.model(), &after);
+            app.model().validate().unwrap();
+        }
+    }
+    fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+    fn position(app: &DrafterApp, point: DVec3) -> egui::Pos2 {
+        let p = View {
+            matrix: app.camera.view_projection(1.5).as_dmat4(),
+            size: glam::DVec2::new(600., 400.),
+        }
+        .project(point)
+        .unwrap();
+        egui::pos2(p.x as f32 + 8., p.y as f32 + 8.)
+    }
+    #[test]
+    fn offset_parity_two_clicks_commit_a_valid_preview() {
+        let (mut app, ctx, _) = fixture(ModifyKind::Offset);
+        let start = position(&app, DVec3::new(0., 5., 0.));
+        let end = position(&app, DVec3::new(1., 5., 0.));
+        let depth = app.history.undo_depth();
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(start)]);
+        send(&mut app, &ctx, vec![button(start, true)]);
+        send(&mut app, &ctx, vec![button(start, false)]);
+        assert!(app.modify.active());
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(end)]);
+        assert!(app.error.is_none(), "{:?}", app.error);
+        send(&mut app, &ctx, vec![button(end, true)]);
+        send(&mut app, &ctx, vec![button(end, false)]);
+        assert!(!app.modify.active());
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        app.model().validate().unwrap();
+    }
+    #[test]
+    #[ignore = "gap: F fits view instead of activating Offset"]
+    fn offset_parity_f_shortcut() {
+        let (mut app, ctx, _) = fixture(ModifyKind::Select);
+        send(&mut app, &ctx, vec![key(Key::F, false)]);
+        assert!(app.modifying && app.modify.kind() == ModifyKind::Offset);
+    }
+    #[test]
+    #[ignore = "gap: Follow Me preselected path does not commit on a stationary profile click"]
+    fn follow_me_parity_preselected_path_completes_on_profile_click() {
+        let (mut app, ctx, _) = fixture(ModifyKind::FollowMe);
+        app.execute(Command::AddEdge {
+            start: DVec3::ZERO,
+            end: DVec3::Z * 3.,
+        })
+        .unwrap();
+        app.selection.edges = app
+            .model()
+            .edges()
+            .iter()
+            .filter(|(_, e)| {
+                e.vertices
+                    .iter()
+                    .any(|v| app.model().vertices()[v].position.z > 0.)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(app.selection.edges.len(), 1);
+        let depth = app.history.undo_depth();
+        let p = position(&app, DVec3::new(5., 5., 0.));
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        send(&mut app, &ctx, vec![button(p, true)]);
+        send(&mut app, &ctx, vec![button(p, false)]);
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        assert!(!app.modify.active());
+    }
+
+    #[cfg(feature = "kernel-benchmark")]
+    #[test]
+    #[ignore = "release-only opt-in 20k-face CPU subset; excludes picking, inference, mesh, GPU and UI"]
+    #[allow(clippy::assertions_on_constants)]
+    fn offset_follow_me_parity_release_cpu_probe() {
+        assert!(!cfg!(debug_assertions), "run --release");
+        let mut within_budget = true;
+        for kind in [ModifyKind::Offset, ModifyKind::FollowMe] {
+            let mut h = cindral_core::benchmark::tiled_squares(100, 100)
+                .unwrap()
+                .history;
+            h.execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::new(-20., -20., 0.),
+                    DVec3::new(-10., -20., 0.),
+                    DVec3::new(-10., -10., 0.),
+                    DVec3::new(-20., -10., 0.),
+                ],
+                closed: true,
+            })
+            .unwrap();
+            let face = *h
+                .model()
+                .faces()
+                .iter()
+                .find(|(id, _)| {
+                    h.model()
+                        .face_area(**id)
+                        .is_ok_and(|a| (a - 100.).abs() < 1e-7)
+                })
+                .unwrap()
+                .0;
+            assert_eq!(h.model().faces().len(), 20_001);
+            let mut s = ModifySession::new(kind);
+            s.begin(
+                h.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::new(-20., -20., 0.),
+                DVec3::Z,
+            )
+            .unwrap();
+            let mut max_ms = 0_f64;
+            for i in 0..10 {
+                let start = std::time::Instant::now();
+                let command = if kind == ModifyKind::Offset {
+                    s.measure(&format!("{}m", 0.5 + i as f64 * 0.05))
+                        .unwrap()
+                        .unwrap()
+                } else {
+                    s.update(DVec3::new(-20., -20., 1. + i as f64 * 0.05))
+                        .unwrap()
+                        .unwrap()
+                };
+                h.preview(command).unwrap();
+                max_ms = max_ms.max(start.elapsed().as_secs_f64() * 1000.);
+            }
+            let start = std::time::Instant::now();
+            assert!(h.commit_preview().unwrap());
+            let commit_ms = start.elapsed().as_secs_f64() * 1000.;
+            println!(
+                "{kind:?}: faces={} updates=10 max_preview_ms={max_ms:.6} commit_ms={commit_ms:.6}",
+                20_001
+            );
+            within_budget &= max_ms < 16. && commit_ms < 100.;
+        }
+        assert!(
+            within_budget,
+            "CPU subset exceeds preview or commit budget; see printed measurements"
+        );
+    }
+}
