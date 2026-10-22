@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 struct AutosaveJob {
+    path: PathBuf,
     generation: u64,
     revision: (u64, u64),
     superseded: bool,
@@ -79,6 +80,9 @@ pub(crate) struct FileState {
     candidates: Vec<PathBuf>,
     checked: bool,
     offer: bool,
+    close_error: Option<String>,
+    close_approved: bool,
+    recovered_from: Option<PathBuf>,
     status: String,
     pub(crate) import_options: ImportOptions,
     pub(crate) import_job: Option<ImportJob>,
@@ -114,6 +118,54 @@ fn snapshot_path(directory: &Path, generation: u64) -> PathBuf {
         std::process::id()
     ))
 }
+const RETAIN_SNAPSHOTS: usize = 20;
+const RECOVERY_GRACE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+// Retain recent files even when there are many; recovery cleanup must be conservative.
+fn prune_recovery(
+    directory: &Path,
+    protected: &[PathBuf],
+    now: SystemTime,
+) -> cindral_io::Result<Vec<PathBuf>> {
+    let mut files: Vec<_> = cindral_io::recovery_files(directory)?
+        .into_iter()
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?;
+            let values = name
+                .strip_prefix("draft-")?
+                .strip_suffix(".cdraft.autosave")?;
+            if values.split('-').count() != 3
+                || values.split('-').any(|part| part.parse::<u128>().is_err())
+            {
+                return None;
+            }
+            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    files.sort_by(|a, b| b.cmp(a));
+    let mut removed = Vec::new();
+    for (modified, path) in files.into_iter().skip(RETAIN_SNAPSHOTS) {
+        if protected.contains(&path)
+            || now.duration_since(modified).unwrap_or_default() < RECOVERY_GRACE
+        {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed.push(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => removed.push(path),
+            Err(e) => tracing::warn!("could not retire recovery snapshot {}: {e}", path.display()),
+        }
+    }
+    Ok(removed)
+}
+
+enum CloseAction {
+    Retry,
+    SaveAs,
+    CloseAnyway,
+    Cancel,
+}
 impl Default for FileState {
     fn default() -> Self {
         let directory = state_directory();
@@ -136,6 +188,9 @@ impl Default for FileState {
             candidates: Vec::new(),
             checked: false,
             offer: false,
+            close_error: None,
+            close_approved: false,
+            recovered_from: None,
             status: "Untitled draft".into(),
             import_options: ImportOptions::default(),
             import_job: None,
@@ -199,12 +254,22 @@ impl DrafterApp {
                 .instances(cindral_core::DefinitionId(0))
                 .is_some_and(|m| !m.is_empty())
     }
+    fn has_unsaved_values(&self) -> bool {
+        self.meaningful() && (self.files.saved_values.is_none() || self.files.modified)
+    }
     fn backup_current(&mut self) -> cindral_io::Result<()> {
-        if self.meaningful() {
+        self.refresh_save_state();
+        if self.has_unsaved_values()
+            && !(self.files.last_revision == Some(self.file_revision())
+                && self.files.snapshot.is_file())
+        {
             std::fs::create_dir_all(&self.files.directory)?;
             // An older background job may still own the previous snapshot path.
-            self.files.snapshot = snapshot_path(&self.files.directory, self.files.generation);
-            cindral_io::save_autosave(&self.files.snapshot, &self.file_values())?;
+            let path = snapshot_path(&self.files.directory, self.files.generation);
+            cindral_io::save_autosave(&path, &self.file_values())?;
+            self.files.snapshot = path;
+            self.files.last_revision = Some(self.file_revision());
+            self.retire_recovery();
         }
         Ok(())
     }
@@ -217,6 +282,9 @@ impl DrafterApp {
         self.files.saved_values = None;
         self.files.checked_save_revision = None;
         self.files.modified = false;
+        self.files.recovered_from = None;
+        self.files.close_error = None;
+        self.files.close_approved = false;
     }
     fn apply_file(&mut self, bundle: DraftBundle, path: Option<PathBuf>) -> cindral_io::Result<()> {
         self.set_document_data(bundle.document)?;
@@ -384,8 +452,13 @@ impl DrafterApp {
                 self.cancel_import();
                 let bundle = cindral_io::load_draft(&path)?;
                 self.cancel_modify();
-                self.backup_current()?;
+                let previous_source = self.files.recovered_from.replace(path.clone());
+                if let Err(e) = self.backup_current() {
+                    self.files.recovered_from = previous_source;
+                    return Err(e);
+                }
                 self.apply_file(bundle, None)?;
+                self.files.recovered_from = Some(path);
             }
             Action::Discard(path) => {
                 std::fs::remove_file(&path)?;
@@ -622,6 +695,7 @@ impl DrafterApp {
                             path.file_name().unwrap_or_default().to_string_lossy()
                         );
                     }
+                    self.retire_recovery();
                 }
                 Ok(Err(e)) => self.error = Some(format!("Autosave failed: {e}")),
                 Err(mpsc::TryRecvError::Empty) => self.files.job = Some(job),
@@ -632,10 +706,15 @@ impl DrafterApp {
         }
         let busy = self.modify.active()
             || self.organization.drag.is_some()
-            || self.files.import_job.is_some();
+            || self.files.import_job.is_some()
+            || self.files.close_error.is_some()
+            || self.files.close_approved;
+        if !busy {
+            self.refresh_save_state();
+        }
         if self.files.job.is_none()
             && !busy
-            && self.meaningful()
+            && self.has_unsaved_values()
             && self.files.last_time.elapsed() >= self.files.interval
             && self.files.last_revision != Some(self.file_revision())
         {
@@ -646,6 +725,7 @@ impl DrafterApp {
             let generation = self.files.generation;
             let revision = self.file_revision();
             let (sender, receiver) = mpsc::channel();
+            let job_path = path.clone();
             let spawned = std::thread::Builder::new()
                 .name("cindral-autosave".into())
                 .spawn(move || {
@@ -661,6 +741,7 @@ impl DrafterApp {
             match spawned {
                 Ok(_) => {
                     self.files.job = Some(AutosaveJob {
+                        path: job_path,
                         generation,
                         revision,
                         superseded: false,
@@ -678,13 +759,15 @@ impl DrafterApp {
     }
     /// Preserve committed values before a normal exit. A fresh path isolates any in-flight writer.
     pub(crate) fn preserve_on_close(&mut self) -> cindral_io::Result<()> {
+        if self.files.close_approved {
+            return Ok(());
+        }
         self.cancel_import();
         self.cancel_section();
         self.cancel_modify();
         self.tool.cancel();
         self.refresh_save_state();
-        if !self.meaningful()
-            || (self.files.saved_values.is_some() && !self.files.modified)
+        if !self.has_unsaved_values()
             || (self.files.last_revision == Some(self.file_revision())
                 && self.files.snapshot.is_file())
         {
@@ -693,6 +776,94 @@ impl DrafterApp {
         self.backup_current()?;
         self.files.last_revision = Some(self.file_revision());
         Ok(())
+    }
+    fn retire_recovery(&mut self) {
+        let mut protected = vec![self.files.snapshot.clone()];
+        if let Some(job) = &self.files.job {
+            protected.push(job.path.clone());
+        }
+        if let Some(path) = &self.files.recovered_from {
+            protected.push(path.clone());
+        }
+        match prune_recovery(&self.files.directory, &protected, SystemTime::now()) {
+            Ok(removed) => self.files.candidates.retain(|p| !removed.contains(p)),
+            Err(e) => tracing::warn!("could not retire recovery snapshots: {e}"),
+        }
+    }
+    fn approve_close(&mut self, ctx: &egui::Context) {
+        self.files.close_approved = true;
+        self.files.close_error = None;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+    fn save_before_close(&mut self, path: Option<PathBuf>, ctx: &egui::Context) {
+        let Some(mut path) = path else { return };
+        path.set_extension("cdraft");
+        match self.save_path(&path) {
+            Ok(()) => self.approve_close(ctx),
+            Err(e) => self.files.close_error = Some(format!("Could not save the draft: {e}")),
+        }
+    }
+    fn close_action(&mut self, action: CloseAction, ctx: &egui::Context) {
+        match action {
+            CloseAction::Retry => match self.preserve_on_close() {
+                Ok(()) => self.approve_close(ctx),
+                Err(e) => self.files.close_error = Some(e.to_string()),
+            },
+            CloseAction::SaveAs => {
+                let path = rfd::FileDialog::new()
+                    .add_filter("Cindral Drafter", &["cdraft"])
+                    .set_file_name("model.cdraft")
+                    .save_file();
+                self.save_before_close(path, ctx);
+            }
+            CloseAction::CloseAnyway => self.approve_close(ctx),
+            CloseAction::Cancel => self.files.close_error = None,
+        }
+    }
+    /// Handle native close and let the user choose how to proceed after a failed backup.
+    pub(crate) fn closing(&mut self, ctx: &egui::Context) -> bool {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.files.close_approved {
+                return true;
+            }
+            if self.files.close_error.is_none() {
+                match self.preserve_on_close() {
+                    Ok(()) => {
+                        self.files.close_approved = true;
+                        return true;
+                    }
+                    Err(e) => self.files.close_error = Some(e.to_string()),
+                }
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        if let Some(error) = self.files.close_error.clone() {
+            let mut action = None;
+            egui::Modal::new(egui::Id::new("close-recovery-failed")).show(ctx, |ui| {
+                ui.set_max_width(460.);
+                ui.heading("Couldn't create a recovery copy");
+                ui.label(
+                    "Save your draft elsewhere, retry, or close without saving the latest changes.",
+                );
+                ui.label(error);
+                ui.horizontal(|ui| {
+                    for (label, choice) in [
+                        ("Save As…", CloseAction::SaveAs),
+                        ("Retry", CloseAction::Retry),
+                        ("Close anyway", CloseAction::CloseAnyway),
+                        ("Keep editing", CloseAction::Cancel),
+                    ] {
+                        if ui.button(label).clicked() {
+                            action = Some(choice);
+                        }
+                    }
+                });
+            });
+            if let Some(action) = action {
+                self.close_action(action, ctx);
+            }
+        }
+        self.files.close_approved
     }
     pub(crate) fn document_title(&self) -> String {
         self.files
@@ -1062,6 +1233,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         editor.files.interval = Duration::MAX;
         editor.files.job = Some(AutosaveJob {
+            path: editor.files.snapshot.clone(),
             generation: editor.files.generation,
             revision: editor.file_revision(),
             superseded: false,
@@ -1156,7 +1328,11 @@ mod tests {
         assert_eq!(loaded.history.undo_depth(), 0);
         assert!(loaded.history.context().is_empty());
         let ctx = egui::Context::default();
-        source.files.last_revision = None;
+        source.set_view_style(cindral_core::ViewStyle {
+            mode: cindral_core::StyleMode::XRay,
+            ..Default::default()
+        });
+        let expected_recovery = source.file_values();
         source.autosave_tick(&ctx);
         let deadline = Instant::now() + Duration::from_secs(10);
         while source.files.job.is_some() && Instant::now() < deadline {
@@ -1166,13 +1342,13 @@ mod tests {
         assert!(source.files.job.is_none(), "autosave worker timed out");
         assert_eq!(
             cindral_io::load_draft(&source.files.snapshot).unwrap(),
-            expected
+            expected_recovery
         );
         let mut recovered = app(directory.path());
         recovered
             .do_file_action(Action::Recover(source.files.snapshot.clone()))
             .unwrap();
-        assert_eq!(recovered.file_values(), expected);
+        assert_eq!(recovered.file_values(), expected_recovery);
         assert!(recovered.files.path.is_none());
         assert_eq!(recovered.history.undo_depth(), 0);
         assert!(
@@ -1198,6 +1374,7 @@ mod tests {
         let old_revision = editor.file_revision();
         let (sender, receiver) = mpsc::channel();
         editor.files.job = Some(AutosaveJob {
+            path: editor.files.snapshot.clone(),
             generation: editor.files.generation,
             revision: old_revision,
             superseded: false,
@@ -1224,6 +1401,7 @@ mod tests {
         let old_path = editor.files.snapshot.clone();
         let (_sender, receiver) = mpsc::channel();
         editor.files.job = Some(AutosaveJob {
+            path: editor.files.snapshot.clone(),
             generation: 0,
             revision: (0, 0),
             superseded: false,
@@ -1246,6 +1424,7 @@ mod tests {
         let snapshot = editor.files.snapshot.clone();
         let (sender, receiver) = mpsc::channel();
         editor.files.job = Some(AutosaveJob {
+            path: editor.files.snapshot.clone(),
             generation: editor.files.generation,
             revision: old_revision,
             superseded: false,
@@ -1287,6 +1466,7 @@ mod tests {
         let old_path = editor.files.snapshot.clone();
         let (_sender, receiver) = mpsc::channel();
         editor.files.job = Some(AutosaveJob {
+            path: editor.files.snapshot.clone(),
             generation: editor.files.generation,
             revision: editor.file_revision(),
             superseded: false,
@@ -1354,18 +1534,188 @@ mod tests {
             .unwrap()
             .events
             .push(egui::ViewportEvent::Close);
-        let output = ctx.run(input, |ctx| editor.draw_frame(ctx));
+        let output = ctx.run(input.clone(), |ctx| editor.draw_frame(ctx));
         assert!(output.viewport_output[&egui::ViewportId::ROOT]
             .commands
             .contains(&egui::ViewportCommand::CancelClose));
-        assert!(editor.error.as_ref().unwrap().contains("before closing"));
+        assert!(editor.files.close_error.is_some());
         assert_eq!(editor.file_values(), expected);
         // Fixing the destination permits a later close attempt to preserve the draft.
         editor.files.directory = directory.path().to_owned();
-        editor.preserve_on_close().unwrap();
+        let repeated = ctx.run(input, |ctx| editor.draw_frame(ctx));
+        assert!(repeated.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose));
+        assert!(!editor.files.close_approved);
+        assert!(!editor.files.snapshot.exists());
+        editor.close_action(CloseAction::Retry, &ctx);
+        assert!(editor.files.close_approved);
         assert_eq!(
             cindral_io::load_draft(&editor.files.snapshot).unwrap(),
             expected
+        );
+    }
+
+    #[test]
+    fn close_anyway_bypasses_exit_backup_and_keep_editing_cancels_close() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let blocked = directory.path().join("blocked");
+        std::fs::write(&blocked, b"blocked").unwrap();
+        editor.files.directory = blocked;
+        assert!(editor.preserve_on_close().is_err());
+        editor.files.close_error = Some("Recovery unavailable".into());
+        let ctx = egui::Context::default();
+        editor.close_action(CloseAction::Cancel, &ctx);
+        assert!(editor.files.close_error.is_none());
+        assert!(!editor.files.close_approved);
+        let expected = editor.file_values();
+        editor.files.close_error = Some("Recovery unavailable".into());
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            editor.close_action(CloseAction::CloseAnyway, ctx);
+        });
+        assert!(output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::Close));
+        assert!(editor.files.close_approved);
+        assert!(editor.files.close_error.is_none());
+        // The exit fallback must not retry a write that the user chose to bypass.
+        editor.preserve_on_close().unwrap();
+        eframe::App::on_exit(&mut editor);
+        assert_eq!(editor.file_values(), expected);
+        assert!(cindral_io::recovery_files(directory.path())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn close_save_as_handles_cancel_failure_and_success() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        editor.files.close_error = Some("Recovery unavailable".into());
+        let ctx = egui::Context::default();
+        editor.save_before_close(None, &ctx);
+        assert!(!editor.files.close_approved);
+        assert_eq!(
+            editor.files.close_error.as_deref(),
+            Some("Recovery unavailable")
+        );
+        let blocked = directory.path().join("blocked");
+        std::fs::write(&blocked, b"blocked").unwrap();
+        editor.save_before_close(Some(blocked.join("failed.cdraft")), &ctx);
+        assert!(!editor.files.close_approved);
+        assert!(editor
+            .files
+            .close_error
+            .as_deref()
+            .unwrap()
+            .contains("Could not save"));
+        let expected = editor.file_values();
+        let path = directory.path().join("elsewhere.cdraft");
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            editor.save_before_close(Some(path.clone()), ctx);
+        });
+        assert!(output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::Close));
+        assert!(editor.files.close_approved);
+        assert!(editor.files.close_error.is_none());
+        assert_eq!(cindral_io::load_draft(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn unchanged_saved_values_skip_periodic_and_outgoing_backups() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let path = directory.path().join("saved.cdraft");
+        editor.save_path(&path).unwrap();
+        editor
+            .history
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::Z,
+            })
+            .unwrap();
+        editor.history.undo().unwrap();
+        editor.autosave_tick(&egui::Context::default());
+        assert!(editor.files.job.is_none());
+        editor.open_path(&path).unwrap();
+        editor.do_file_action(Action::New).unwrap();
+        assert!(cindral_io::recovery_files(directory.path())
+            .unwrap()
+            .is_empty());
+    }
+
+    fn dated_snapshot(directory: &Path, index: u64, modified: SystemTime) -> PathBuf {
+        let path = directory.join(format!("draft-1-{index}-0.cdraft.autosave"));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn retention_keeps_newest_twenty_and_protected_older_snapshots() {
+        let directory = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let paths: Vec<_> = (0..25)
+            .map(|index| {
+                dated_snapshot(
+                    directory.path(),
+                    index,
+                    now - RECOVERY_GRACE - Duration::from_secs(100 - index),
+                )
+            })
+            .collect();
+        let mut editor = app(directory.path());
+        editor.files.snapshot = paths[0].clone();
+        editor.files.recovered_from = Some(paths[1].clone());
+        let (_sender, receiver) = mpsc::channel();
+        editor.files.job = Some(AutosaveJob {
+            path: paths[2].clone(),
+            generation: 0,
+            revision: (0, 0),
+            superseded: false,
+            receiver,
+        });
+        editor.files.candidates = paths.clone();
+        editor.retire_recovery();
+        for (index, path) in paths.iter().enumerate() {
+            assert_eq!(path.exists(), !(3..5).contains(&index));
+        }
+        assert!(!editor.files.candidates.contains(&paths[3]));
+        assert!(!editor.files.candidates.contains(&paths[4]));
+        assert_eq!(editor.files.candidates.len(), 23);
+        assert_eq!(
+            cindral_io::recovery_files(directory.path()).unwrap().len(),
+            23
+        );
+    }
+
+    #[test]
+    fn retention_preserves_recent_future_and_unrelated_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        for index in 0..30 {
+            dated_snapshot(directory.path(), index, now - Duration::from_secs(60));
+        }
+        let future = dated_snapshot(directory.path(), 30, now + Duration::from_secs(60));
+        let unrelated = directory.path().join("saved.cdraft");
+        std::fs::write(&unrelated, b"saved draft").unwrap();
+        let named_recovery = directory.path().join("important.cdraft.autosave");
+        std::fs::File::create(&named_recovery)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH))
+            .unwrap();
+        assert!(prune_recovery(directory.path(), &[], now)
+            .unwrap()
+            .is_empty());
+        assert!(future.exists());
+        assert!(named_recovery.exists());
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"saved draft");
+        assert_eq!(
+            cindral_io::recovery_files(directory.path()).unwrap().len(),
+            32
         );
     }
 

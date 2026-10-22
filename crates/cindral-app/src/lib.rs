@@ -659,14 +659,8 @@ impl eframe::App for DrafterApp {
 }
 impl DrafterApp {
     fn draw_frame(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.viewport().close_requested()) {
-            match self.preserve_on_close() {
-                Ok(()) => return,
-                Err(error) => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                    self.error = Some(format!("Could not preserve draft before closing: {error}"));
-                }
-            }
+        if self.closing(ctx) {
+            return;
         }
         let _frame_profile = cindral_core::profile::Frame::new();
         self.transition_tick(ctx);
