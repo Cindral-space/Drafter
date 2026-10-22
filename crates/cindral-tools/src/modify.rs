@@ -553,14 +553,14 @@ impl ModifySession {
             }
             ModifyKind::PushPull => {
                 let face_id = resolve_face_for_pushpull_or_offset(model, selection, hit)
-                    .ok_or(ToolError::NotReady)?;
+                    .ok_or(ToolError::NoEditableFace)?;
                 target_face = Some(face_id);
                 let face = model.faces().get(&face_id).ok_or(ToolError::NotReady)?;
                 face.plane.normal
             }
             ModifyKind::Offset => {
                 let face_id = resolve_face_for_pushpull_or_offset(model, selection, hit)
-                    .ok_or(ToolError::NotReady)?;
+                    .ok_or(ToolError::NoEditableFace)?;
                 let face = model.faces().get(&face_id).ok_or(ToolError::NotReady)?;
                 let mut sum = DVec3::ZERO;
                 let mut count = 0usize;
@@ -595,7 +595,7 @@ impl ModifySession {
             }
             ModifyKind::FollowMe => {
                 let face_id = resolve_face_for_pushpull_or_offset(model, selection, hit)
-                    .ok_or(ToolError::NotReady)?;
+                    .ok_or(ToolError::NoEditableFace)?;
                 target_face = Some(face_id);
                 preselected_path =
                     resolve_ordered_path_from_edges(model, &selection.edges).unwrap_or_default();
@@ -1003,6 +1003,15 @@ mod tests {
         (history, face_id, vertices, edges)
     }
 
+    #[test]
+    fn face_tools_explain_missing_editable_face() {
+        for kind in [ModifyKind::PushPull, ModifyKind::Offset, ModifyKind::FollowMe] {
+            let mut session = ModifySession::new(kind);
+            assert_eq!(session.begin(&Model::default(), &Selection::default(), None,
+                DVec3::ZERO, DVec3::Z), Err(ToolError::NoEditableFace));
+            assert!(!session.active());
+        }
+    }
     #[test]
     fn test_pushpull_hit_resolution_and_distance_update_and_measure() {
         let (history, face_id, vertices, edges) = make_test_square();

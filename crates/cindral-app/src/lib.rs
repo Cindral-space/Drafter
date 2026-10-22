@@ -195,7 +195,11 @@ impl DrafterApp {
     }
     fn commit(&mut self, command: Command) -> bool {
         match self.execute(command) {
-            Ok(_) => true,
+            Ok(true) => true,
+            Ok(false) => {
+                self.error = Some("No change: input is below the geometry tolerance or already matches the model".into());
+                false
+            },
             Err(error) => {
                 self.error = Some(error.to_string());
                 false

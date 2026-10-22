@@ -15,6 +15,9 @@ pub enum ToolError {
     /// The tool is not in a state to commit a command.
     #[error("tool is not ready to commit")]
     NotReady,
+    /// No editable face was picked or selected in this model.
+    #[error("pick or select a face in the active editing context")]
+    NoEditableFace,
     /// The segment count is outside the valid range 3..=256.
     #[error("segment count must be between 3 and 256")]
     InvalidSegments,

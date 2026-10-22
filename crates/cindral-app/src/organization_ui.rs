@@ -598,6 +598,14 @@ impl DrafterApp {
 }
 
 impl DrafterApp {
+    fn reject_inactive_face(&mut self, hit: &cindral_tools::InstanceHit) -> bool {
+        if matches!(hit.hit, Hit::Face(_)) && hit.path != self.history.context() {
+            self.error = Some("Cannot edit this face: it belongs to another group or component. Double-click to enter it first.".into());
+            true
+        } else {
+            false
+        }
+    }
     pub(crate) fn scene_hit(
         &self,
         ray: Ray,
@@ -1041,6 +1049,12 @@ impl DrafterApp {
                 }
             }
         }
+        if pressed && self.modifying && matches!(self.modify.kind(),
+            ModifyKind::PushPull | ModifyKind::Offset | ModifyKind::FollowMe | ModifyKind::Eraser)
+            && hit.as_ref().is_some_and(|h| self.reject_inactive_face(h))
+        {
+            return true;
+        }
         if self.modifying
             && matches!(
                 self.modify.kind(),
@@ -1123,6 +1137,21 @@ impl DrafterApp {
 mod tests {
     use super::*;
     use cindral_tools::Hit;
+    #[test]
+    fn inactive_face_reports_context_reason_and_entering_allows_edit() {
+        let mut app = DrafterApp::default();
+        let path = component(&mut app);
+        let definition = app.history.occurrences().unwrap().into_iter().find(|o| o.path == path).unwrap().definition;
+        let face = *app.history.definition_model(definition).unwrap().faces().keys().next().unwrap();
+        let hit = cindral_tools::InstanceHit {
+            path: path.clone(), definition, hit: Hit::Face(face),
+            local_position: DVec3::ZERO, world_position: DVec3::ZERO,
+        };
+        assert!(app.reject_inactive_face(&hit));
+        assert!(app.error.as_ref().unwrap().contains("Double-click to enter"));
+        app.enter_context(path).unwrap();
+        assert!(!app.reject_inactive_face(&hit));
+    }
     fn component(app: &mut DrafterApp) -> InstancePath {
         app.execute(Command::AddPolyline {
             points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
