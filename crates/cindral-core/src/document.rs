@@ -786,6 +786,15 @@ impl DocumentHistory {
         self.geometry_changed(id);
         result
     }
+    /// Typed preview with atomic rejection, preserving the previous provisional model.
+    pub fn preview_atomic(&mut self, command: Command) -> Result<bool, KernelError> {
+        validate_material_command(&command, &self.graph.materials, 0)?;
+        let id = self.active_definition();
+        let result = self.history_mut(id)?.preview_atomic(command);
+        self.geometry_preview = Some(id);
+        self.geometry_changed(id);
+        result
+    }
     /// Cancel provisional geometry or an instance placement without touching global history.
     pub fn cancel_preview(&mut self) -> Result<bool, KernelError> {
         if let Some(entry) = self.organization_preview.take() {

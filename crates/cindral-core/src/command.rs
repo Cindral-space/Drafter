@@ -298,6 +298,18 @@ impl History {
             }
         }
     }
+    /// Typed preview: invalid geometry keeps the previous provisional model unchanged.
+    pub fn preview_atomic(&mut self, command: Command) -> Result<bool, KernelError> {
+        let previous = self.preview.clone();
+        let result = self.preview(command);
+        if result.is_err() {
+            if let Some(delta) = previous {
+                delta.apply(&mut self.model, true)?;
+                self.preview = Some(delta);
+            }
+        }
+        result
+    }
     /// Cancel the active provisional delta without changing committed history.
     pub fn cancel_preview(&mut self) -> Result<bool, KernelError> {
         let Some(delta) = self.preview.take() else {

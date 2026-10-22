@@ -1,6 +1,6 @@
 //! Shared status-field input routing and cached readout.
 use super::*;
-use cindral_tools::measurements::{MeasurementsBox, Readout, ValueKind};
+use cindral_tools::measurements::{MeasurementsBox, Readout, MeasurementTool};
 impl DrafterApp {
     pub(crate) fn capture_measurement_keys(&mut self, response: &egui::Response) -> bool {
         if !response.hovered() || response.ctx.wants_keyboard_input() { return false; }
@@ -27,11 +27,6 @@ impl DrafterApp {
     }
     pub(crate) fn measurement_readout(&self) -> Readout {
         if !self.modifying { return self.tool.measurement_readout(); }
-        let label = match self.modify.kind() {
-            ModifyKind::Rotate => "Angle", ModifyKind::Scale => "Scale",
-            ModifyKind::Select | ModifyKind::Eraser | ModifyKind::PaintBucket => "",
-            _ => "Distance",
-        };
-        Readout { label, values: [self.modify.measurement().unwrap_or(0.),0.,0.], count: usize::from(!label.is_empty() && self.modify.measurement().is_some()), kind: match self.modify.kind() { ModifyKind::Rotate => ValueKind::Angle, ModifyKind::Scale => ValueKind::Factor, _ => ValueKind::Length } }
+        self.modify.readout()
     }
 }

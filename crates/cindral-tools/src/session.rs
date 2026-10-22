@@ -68,6 +68,7 @@ pub struct ToolSession {
     previous_direction: Option<DVec3>,
     segments: usize,
     typed_sweep: Option<f64>,
+    typed_direction: Option<DVec3>,
 }
 
 impl ToolSession {
@@ -82,6 +83,7 @@ impl ToolSession {
             previous_direction: None,
             segments: kind.default_segments(),
             typed_sweep: None,
+            typed_direction: None,
         }
     }
 
@@ -94,6 +96,7 @@ impl ToolSession {
     pub fn set_kind(&mut self, kind: ToolKind) {
         self.completed = None;
         self.typed_sweep = None;
+        self.typed_direction = None;
         self.kind = kind;
         self.anchors.clear();
         self.current_pointer = None;
@@ -105,6 +108,7 @@ impl ToolSession {
     pub fn cancel(&mut self) {
         self.completed = None;
         self.typed_sweep = None;
+        self.typed_direction = None;
         self.anchors.clear();
         self.current_pointer = None;
         self.previous_direction = None;
@@ -190,6 +194,7 @@ impl ToolSession {
         validate_point(point)?;
         self.completed = None;
         self.typed_sweep = None;
+        self.typed_direction = None;
         let mut source = self.clone();
         source.current_pointer = Some(point);
         let result = match self.kind {
@@ -305,7 +310,7 @@ impl ToolSession {
             return Err(ToolError::InvalidMeasurement("Invalid or degenerate dimension".into()));
         }
         let start = self.anchors[0];
-        let dir = if let Some(p) = self.current_pointer {
+        let dir = if let Some(dir) = self.typed_direction { dir } else if let Some(p) = self.current_pointer {
             let diff = p - start;
             if diff.length() > TOLERANCE {
                 diff.normalize()
@@ -319,6 +324,7 @@ impl ToolSession {
         } else {
             self.plane_basis().0
         };
+        self.typed_direction = Some(dir);
         let end = start + dir * len;
         validate_point(end)?;
         self.previous_direction = Some(dir);
@@ -811,7 +817,7 @@ impl MeasurementTool for ToolSession {
         };
         if let Some(command) = &result {
             match command {
-                Command::AddEdge { end, .. } => source.current_pointer = Some(*end),
+                Command::AddEdge { end, .. } => { source.current_pointer = Some(*end); source.typed_direction = candidate.typed_direction; },
                 Command::AddPolyline { points, .. } => {
                     source.current_pointer = points.get(if source.kind == ToolKind::Rectangle {2} else if source.kind == ToolKind::Arc {points.len()-1} else {0}).copied();
                     if source.kind == ToolKind::Arc { source.anchors[1] = points[0]; }

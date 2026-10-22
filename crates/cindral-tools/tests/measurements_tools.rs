@@ -39,3 +39,52 @@ fn coordinates_signed_line_sides_and_arc_radius() {
         assert_eq!(h.model().edges().len(),24); assert_eq!(h.undo_depth(),1);
     }
 }
+
+use cindral_tools::{ModifyKind, ModifySession, Hit, Selection};
+fn modify_fixture(kind: ModifyKind) -> (DocumentHistory, ModifySession) {
+    let mut h=DocumentHistory::new();
+    h.execute(cindral_core::Command::AddPolyline{points:vec![DVec3::ZERO,DVec3::X*10.,(DVec3::X+DVec3::Y)*10.,DVec3::Y*10.],closed:true}).unwrap();
+    let face=*h.model().faces().keys().next().unwrap();
+    let mut s=ModifySession::new(kind);
+    s.begin(h.model(),&Selection::default(),Some(Hit::Face(face)),DVec3::ZERO,DVec3::Z).unwrap();
+    s.update(DVec3::X).unwrap();
+    (h,s)
+}
+#[test]
+fn modify_distances_remeasure_one_entry() {
+    for kind in [ModifyKind::PushPull,ModifyKind::Move,ModifyKind::Copy,ModifyKind::Offset] {
+        let (mut h,mut s)=modify_fixture(kind); let before=h.model().clone();
+        for (i,text) in ["1m","2m","3m"].into_iter().enumerate() {
+            let command=s.measure(text).unwrap().unwrap();
+            if i==0 { h.preview_atomic(command).unwrap(); h.commit_preview().unwrap(); }
+            else { h.replace_last(command).unwrap(); }
+            s.finish(); assert!(s.editing_completed()); assert_eq!(h.undo_depth(),2);
+            let saved=h.model().clone(); assert!(s.measure("nope").is_err()); assert_eq!(h.model(),&saved);
+        }
+        let after=h.model().clone();h.undo().unwrap();assert_eq!(h.model(),&before);h.redo().unwrap();assert_eq!(h.model(),&after);
+        s.cancel();assert!(s.measure("2m").is_err());
+    }
+}
+#[test]
+fn copy_arrays_replace_the_same_operation() {
+    let(mut h,mut s)=modify_fixture(ModifyKind::Copy);
+    h.execute(s.measure("60m").unwrap().unwrap()).unwrap();s.finish();
+    for text in ["3x","*2","/3"] { h.replace_last(s.measure(text).unwrap().unwrap()).unwrap();s.finish();assert_eq!(h.undo_depth(),2); }
+    assert_eq!(h.model().faces().len(),4);
+    h.undo().unwrap();assert_eq!(h.model().faces().len(),1);
+    h.redo().unwrap();assert_eq!(h.model().faces().len(),4);
+}
+#[test]
+fn rectangle_extrude_copy_full_undo_redo() {
+    let mut h=DocumentHistory::new(); let mut t=ToolSession::new(ToolKind::Rectangle);
+    t.click(DVec3::ZERO).unwrap();h.execute(t.measure("2m,3m").unwrap().unwrap()).unwrap();
+    let face=*h.model().faces().keys().next().unwrap();let mut s=ModifySession::new(ModifyKind::PushPull);
+    s.begin(h.model(),&Selection::default(),Some(Hit::Face(face)),DVec3::ZERO,DVec3::Z).unwrap();
+    h.preview_atomic(s.measure("1.5").unwrap().unwrap()).unwrap();h.commit_preview().unwrap();s.finish();
+    let selection=Selection{vertices:h.model().vertices().keys().copied().collect(),..Default::default()};
+    s.set_kind(ModifyKind::Copy);s.begin(h.model(),&selection,None,DVec3::ZERO,DVec3::Z).unwrap();s.update(DVec3::X*5.).unwrap();
+    h.execute(s.measure("5m").unwrap().unwrap()).unwrap();s.finish();h.replace_last(s.measure("3x").unwrap().unwrap()).unwrap();s.finish();
+    assert_eq!(h.undo_depth(),3);let after=h.model().clone();
+    for _ in 0..3 {h.undo().unwrap();}assert!(h.model().edges().is_empty());
+    for _ in 0..3 {h.redo().unwrap();}assert_eq!(h.model(),&after);
+}

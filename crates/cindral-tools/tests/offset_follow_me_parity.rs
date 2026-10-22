@@ -198,7 +198,6 @@ fn follow_me_preselected_edges_resolve_full_path_independent_of_pointer() {
 }
 
 #[test]
-#[ignore = "gap: Offset parser rejects compound feet/inches"]
 fn offset_compound_imperial_length() {
     let (_, _, mut s) = fixture(ModifyKind::Offset);
     assert!(
@@ -225,7 +224,6 @@ fn offset_diagonal_pointer_uses_perpendicular_distance() {
 }
 
 #[test]
-#[ignore = "gap: Offset finish clears target; completed operation cannot be remeasured"]
 fn offset_remeasure_after_completion() {
     let (mut h, _, mut s) = fixture(ModifyKind::Offset);
     h.preview(command(&mut s, 2.)).unwrap();

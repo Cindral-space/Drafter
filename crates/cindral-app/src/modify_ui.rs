@@ -37,7 +37,7 @@ impl DrafterApp {
         self.modify.finish();
         self.modify_press = None;
         match self.history.commit_preview() {
-            Ok(true) => self.error = None,
+            Ok(true) => { self.error = None; self.measurements.completed(); },
             Ok(false) => {
                 if self.error.is_none() {
                     self.error = Some(
@@ -58,27 +58,27 @@ impl DrafterApp {
             .retain(|f| self.history.model().faces().contains_key(f));
     }
     pub(crate) fn modify_measurement(&mut self) {
-        match self.modify.measure(&self.measurements.text) {
+        let before = self.modify.clone();
+        let replacing = self.modify.editing_completed();
+        match self.modify.measure_with_settings(&self.measurements.text, self.presentation.measurements) {
             Ok(Some(command)) => {
-                self.modify_preview(command);
-                if self.error.is_none() {
-                    self.finish_modify();
-                    self.measurements.text.clear();
+                let result = if replacing { self.history.replace_last(command) } else { self.history.preview_atomic(command).and_then(|_| self.history.commit_preview()) };
+                match result {
+                    Ok(true) => { self.modify.finish(); self.modify_press = None; self.measurements.completed(); self.error = None; self.refresh_mesh(); }
+                    result => { self.modify = before; self.error = Some(result.err().map(|e| e.to_string()).unwrap_or_else(|| "No change".into())); }
                 }
             }
             Ok(None) => {
                 if self.modify.kind() == ModifyKind::TapeMeasure {
                     self.last_tape = self.modify.measurement();
-                    if let Err(e) = self.modify.add_guide() {
-                        self.error = Some(e.to_string());
-                    }
-                    self.modify.finish();
-                    self.measurements.text.clear();
+                    self.modify.finish(); self.measurements.completed(); self.error = None;
                 }
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => { self.modify = before; self.error = Some(e.to_string()); }
         }
+        self.measurements.invalid = self.error.is_some();
     }
+
     pub(crate) fn modify_viewport_input(&mut self, response: &egui::Response) {
         let rect = response.rect;
         let view = View {
@@ -224,6 +224,7 @@ impl DrafterApp {
             return;
         }
         if pressed && !self.modify.active() {
+            self.measurements.reset();
             if point.is_none() {
                 self.error = Some(
                     "Cannot start tool: pointer ray does not intersect the editing plane or a face"
@@ -320,6 +321,7 @@ impl DrafterApp {
                         self.error = Some(e.to_string());
                     }
                     self.modify.finish();
+                    self.measurements.completed();
                 } else if self.error.is_none()
                     && self
                         .modify_press
