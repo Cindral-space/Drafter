@@ -109,3 +109,25 @@ Existing GPU-free coverage: crates/cindral-tools/tests/tool_session.rs (nine tes
 
 CPU performance probe is opt-in, release-only, under the existing kernel-benchmark feature. It uses 20,000 authored triangles in disconnected coplanar tiles, times 30 ToolSession pointer/preview updates and one History execute per tool. It excludes inference, picking, egui, mesh construction, upload, GPU and display latency. It must never turn the full-frame performance row into “matches.” No .skp fixture certification, native dependency, Python, SDK, or SketchUp binary is involved.
 
+
+### Completed validation and measurements
+
+53 scoped rows: **25 matches / 4 differs / 8 missing / 16 unsure**. Top workflow gaps: completion remeasurement, shape-plane arrow locks, and Shift inference hold. Cursor art and branding differences are not defects.
+
+Eight new ordinary tests pass (five public tool/kernel tests, three synthetic-egui routing tests). Six ignored behavioral tests were explicitly run and all failed as expected: compound imperial input, Line remeasurement, pre-center Circle sides, partial Rectangle dimensions, completed Circle remeasurement, and Circle plane lock. Arc radius-before-start remains a question, not a failing contract. The synthetic input harness was corrected to initialize hover and supply egui's platform command modifier; no production fix was made.
+
+Completion checks: targeted tools/app checks; formatting; strict workspace/all-target/all-feature Clippy; one full workspace/all-feature test run: **368 passed, 0 failed, 26 ignored**. The new release probe is the seventh added ignored test and passes when explicitly invoked. Existing ignored tests were not enabled in the normal workspace run.
+
+Measured on AMD Ryzen 5 2400G with Radeon Vega Graphics, release profile, CPU only. Fixture construction excluded. Isolated repeat after all checks/builds completed:
+
+| Tool | Max pointer + polyline preview, 30 samples (ms) | One kernel commit (ms) |
+| --- | ---: | ---: |
+| Line | 0.000610 | 0.174 |
+| Rectangle | 0.001720 | 0.107 |
+| Circle | 0.013000 | 0.760 |
+| Arc | 0.003640 | 0.383 |
+| Polygon | 0.001890 | 0.155 |
+
+First sample, possibly overlapping other checks: preview/commit ms = Line 0.000710/0.072, Rectangle 0.001050/0.099, Circle 0.014450/0.970, Arc 0.003850/0.318, Polygon 0.001630/0.144. Both runs pass only the isolated CPU bounds; **the complete live-preview and presented commit budgets remain unsure**. This fixture tests an isolated new drawing outside existing tiles; it does not measure editing through densely connected geometry.
+
+Reproduce: `cargo test --release -p cindral-app --features kernel-benchmark --lib draw_parity_tests::draw_20k_cpu_budget -- --ignored --exact --nocapture`. Raw isolated output: [draw-release.txt](draw-release.txt).

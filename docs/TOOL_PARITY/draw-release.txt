@@ -1,0 +1,13 @@
+    Finished `release` profile [optimized] target(s) in 0.25s
+     Running unittests src/lib.rs (target/release/deps/cindral_app-aa0a603d510c340b)
+
+running 1 test
+Line: CPU preview max 0.000610 ms; kernel commit 0.174 ms; 20000-face fixture; 30 samples
+Rectangle: CPU preview max 0.001720 ms; kernel commit 0.107 ms; 20000-face fixture; 30 samples
+Circle: CPU preview max 0.013000 ms; kernel commit 0.760 ms; 20000-face fixture; 30 samples
+Arc: CPU preview max 0.003640 ms; kernel commit 0.383 ms; 20000-face fixture; 30 samples
+Polygon: CPU preview max 0.001890 ms; kernel commit 0.155 ms; 20000-face fixture; 30 samples
+test draw_parity_tests::draw_20k_cpu_budget ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 1.20s
+
