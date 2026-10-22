@@ -1,0 +1,91 @@
+# Push/Pull parity audit
+
+2026-10-22. Audit only: no implementation changes, no SketchUp execution. Desktop SketchUp is the comparison; version-specific uncertainties require user trials. Different artwork, wording and branding are intentional and are not defects. Evidence paths are repository-relative; named tests are searchable. A `matches` verdict applies only to the stated scope, not all possible geometry.
+
+Expected behavior uses established modeling knowledge, checked where possible against the official [Push/Pull workflow](https://help.sketchup.com/en/sketchup/pushing-and-pulling-shapes-3d) (workflow, preselection, repeat, measurements) and [Windows reference card](https://download.sketchup.com/QRC2025/HC-QRC2025-en-SU-Windows.pdf) (P, Ctrl, repeat). All descriptions below are paraphrases; no assets or documentation text were copied. Remaining details are explicitly unresolved. Windows Ctrl corresponds to macOS Option; there is no native Linux SketchUp comparison here.
+
+## Behavior matrix
+
+| Behavior | Expected (SketchUp) | Cindral status (matches / differs / missing / unsure) | Evidence |
+|---|---|---|---|
+| A1 Activation shortcut | P activates Push/Pull. | missing | `lib.rs:416` in cindral-app maps P to Polygon; ignored `push_pull_parity_p_activates_push_pull`. |
+| A2 Cursor identifies tool | Pointer indicates active tool; artwork may differ. | matches | `crates/cindral-app/src/workspace_ui.rs:436`: crosshair and tool label. No icon-copy requirement. |
+| A3 Status hint | Explain starting a face and completing extrusion. | differs | `workspace_ui.rs:679` uses generic select-then-drag hint, omitting second-click completion and Ctrl/repeat. |
+| A4 Measurement label/display | Distance/depth field tracks extrusion. | differs | `workspace_ui.rs:673` labels it Dimensions; field contains typed text, while `modify_ui.rs:416` displays live meters separately. Functional discoverability gap, not wording parity. |
+| A5 Explicit metric/imperial suffixes | Unit-qualified distances are accepted. | matches | `crates/cindral-tools/src/units.rs:9`; `push_pull_parity` integration measurement tests cover 2m, 150cm, mm, ft, in. |
+| A6 Compound imperial input | Feet/inches notation such as `3'6"` specifies 1.0668 m. | differs | `units.rs:9` only parses a single floating-point number with a suffix; ignored compound-imperial test. Fractions/locales not certified. |
+| A7 Bare numbers/document units | Exact behavior depends on document unit settings; verify Q1. | unsure | `units.rs:9` interprets all bare numbers as meters. |
+| A8 Typing before first click | Verify whether a preselected/hovered face can accept a value before clicking (Q2). | unsure | `modify_ui.rs:128` captures canvas text only while active; `ModifySession::measure` rejects inactive state. |
+| A9 Typing after starting | Distance plus Enter completes a precise extrusion. | matches | Existing `click_then_typed_pushpull_and_typed_rotation_scale_commit_once_each`; new integration measurement tests. Positive distance follows face normal; mouse-direction sign semantics remain Q2. |
+| A10 Typing after completion | Re-enter distance while the last operation remains eligible. | missing | `finish_modify` resets session; ignored `push_pull_parity_retype_after_commit_changes_same_extrusion` reproduces NotReady. |
+| F1 Click-drag-release | Press face, drag depth, release to finish. | matches | `push_pull_parity_drag_and_click_move_click`; `modify_ui.rs:324` release threshold is 3 px. |
+| F2 Click-move-click | First click starts preview, movement sets depth, second click finishes. | matches | `push_pull_parity_drag_and_click_move_click`; actual completion occurs on second release. |
+| F3 Double-click repeat | Apply previous extrusion amount to another face. | missing | `modify_ui.rs:244` start path has no repeat handling; `ModifySession::finish` discards previous command. |
+| F4 Empty first click, no selection | No face means no extrusion or model change. | matches | `ModifySession::begin` returns NoEditableFace; app surfaces error. No requirement to duplicate SketchUp's exact empty-click wording. |
+| F5 Empty/edge/vertex click with preselection | Which face, if any, starts needs Q3. | unsure | `modify.rs:91` resolves incident faces then falls back to first selected face even with no hit. |
+| I1 Extrusion direction | Face travels perpendicular to its plane. | matches | `ModifySession::begin/update` use actual face normal; integration normal-constrained test. |
+| I2 Endpoint/midpoint/on-edge/on-face inference and preview | Which target depths latch needs Q4. | unsure | `modify_ui.rs:193` computes inference but `:315` replaces point with `axis_ray_point`; displayed snap may not determine preview. No reliable exact-case parity claim. |
+| I3 Axis colors, arrow locks, Shift inference hold | Push/Pull-specific applicability needs Q5; do not assume Move rules apply. | unsure | Shared inference supports colored axes; `modify_ui.rs:113` sets arrow locks, `:315` overrides point on normal; Shift only affects selection here. |
+| K1 Ctrl start-new mode | Toggle retained starting face for another extrusion section. | missing | No Push/Pull Ctrl handling in `modify_ui.rs`; `Command::PushPull` has only face/distance. |
+| K2 Alt/Shift other modes | Version/platform-specific Push/Pull effects need Q6. | unsure | Alt is not handled; Shift only feeds additive selection in this path. |
+| S1 Single preselected face or none | A face can be targeted directly or preselected. | matches | `resolve_face_for_pushpull_or_offset`; existing `test_pushpull_hit_resolution_and_distance_update_and_measure`. Exact hover-priority rules remain Q3. |
+| S2 Multiple selected faces | Whether selection restricts hovered target needs Q7. | unsure | Resolver prioritizes direct hit, otherwise incident/first selected face; never extrudes selection as a batch. |
+| S3 Groups/components/edit context | Edit faces inside entered context; shared definition edits affect occurrences. | matches | `inactive_face_reports_context_reason_and_entering_allows_edit`, `scripted_three_instances_edit_in_place_exit_undo_reverts_all_and_redo_restores_all`, IO `entered_shared_component_out_pocket_through_and_hole_face`. |
+| G1 Planar face extrusion | Produce translated cap and boundary walls, joined geometry. | matches | Integration metric tests and core `rectangle_push_pull_move_undo_redo_script`, `Model::validate`. Single-sheet base retained to form a box; mixed attached-sheet details remain Q8. |
+| G2 Pocket/simple through opening | Inward push removes volume; meeting opposite boundary can open a hole. | matches | Core `pull_out_pocket_and_through_hole_keep_closed`; IO `bulk_and_imported_pocket_and_through_hole`. Subdivided opposite-face semantics remain Q8. |
+| G3 Face with holes | Preserve void while extruding outer/inner boundaries. | matches | `extrusion_of_face_with_hole_and_adjacent_faces`, `annular_solid_face_can_be_pulled_again_without_capping_tunnel`. |
+| G4 Collision/merge/heal/limits | Partial overlap, attached open sheets and subdivided opposite-face rules need Q8. | unsure | `crates/cindral-core/src/modification.rs:676`: closed-shell Boolean union/subtraction; open surfaces rebuilt. It may differ from interactive limiting/healing; no guess. |
+| G5 Normals/orientation | Outward/front/back behavior for reversed sheets needs Q9. | unsure | `modification.rs:676` uses oriented shells; local extrusion and CSG reconstruct winding. Validity alone does not establish face-front parity. |
+| G6 Curved/soft geometry | Faceted cylinder caps are planar; treatment of a smooth curved wall needs Q10. | unsure | Model stores planar faces and soft/smooth edges; resolver can choose an individual facet. No whole curved-surface parity certification. |
+| G7 Imported .skp faces | Editable planar faces should support the same extrusion after entering context. | matches | Existing IO `skp_import.rs::authored_binary` coverage and app imported-SKP workload; `pushpull_import.rs` compares authored imported/drawn cubes and annuli. Scoped to existing authored fixtures; arbitrary private files not certified; no importer edits. |
+| U1 Escape | Cancel provisional geometry without a completed operation. | matches | `push_pull_parity_escape_and_history_reset`; integration cancel snapshot/depth test. |
+| U2 Undo/redo/state | One operation entry; undo restores model, redo reapplies, interaction resets. | matches | Same app test, integration repeated-preview history test; core `previews_replace_cancel_and_commit_one_entry`. |
+| B1 Live preview | Moving pointer shows provisional geometry. | matches | `modify_preview` refreshes dirty mesh; headless click/drag test checks geometry and no early history entry. GPU visual quality not measured by headless test. |
+| B2 Target-face hover highlight | Hover identifies face before starting. | missing | `modify_overlay` outlines existing selection and draws guides; it does not highlight the currently hovered Push/Pull face. |
+| B3 Invalid action feedback | Unusable target/input must explain failure and preserve valid model. | matches | `modify_ui.rs:244` and `modify_measurement` expose errors; inactive-context test and integration invalid-value test. Geometry validity errors are propagated, not silently committed. |
+| P1 Performance on ~20k faces | Project targets: live preview <16 ms; commit <100 ms, Ryzen 5 2400G, release. SketchUp timing itself is unmeasured (Q11). | unsure | New release CPU probe below; excludes pick/infer/mesh/GPU. Existing `docs/KERNEL_BENCHMARK.md` isolated-solid GPU update max 1.879 ms excludes editor input. `docs/REAL_FILE_PROFILE.md` real-file preview max 40.820 ms exceeds target on a different workload. Full requested case remains unverified. |
+
+## Questions for the user
+
+Each trial is in your real desktop SketchUp; please include version and platform once. These correspond to every `unsure` row, plus unresolved subcases deliberately excluded from matching rows.
+
+1. **Q1 (A7):** Set document units to centimeters, start pulling a square, type `50`, Enter. Is the extrusion 50 cm?
+2. **Q2 (A8/A9):** Preselect a square, activate Push/Pull, type `2m`, Enter without clicking. Does it extrude? Undo; click it, move inward, type positive `2m`, Enter. Does positive input follow the inward mouse direction or the face's front normal?
+3. **Q3 (F5/S1):** Preselect one face, activate Push/Pull and click empty space. Does it start that face? Cancel, then click its boundary midpoint and a corner; does either start a particular adjacent face? Finally hover a different face: which face starts on click?
+4. **Q4 (I2):** Pull a square beside a separate box. Hover an endpoint, edge midpoint, edge interior and face interior on the box in turn; does each set an exact extrusion height, and does preview stay aligned with its inference marker?
+5. **Q5 (I3):** While pulling a tilted face, press Right, Left, Up and Down separately, then hold Shift over a height inference and move away. Which locks act, and does Shift retain height? Report the displayed axis colors too.
+6. **Q6 (K2):** During one extrusion, tap Alt, then separately hold Shift without an inference. Does either change the tool mode/cursor or result? On macOS use the platform equivalents and report the keys.
+7. **Q7 (S2):** Select two separate faces, activate Push/Pull and click a third unselected face. Which faces move?
+8. **Q8 (G4/G1/G2):** Draw a small rectangle on a box, split the opposite face with a line, and push the small rectangle exactly through to it. Does the opening clear or stop? Separately pull a face attached to an open neighboring sheet into an overlapping coplanar face; which seam/base faces remain? Use undo between trials.
+9. **Q9 (G5):** Reverse a standalone square's face, pull with `1m`, Enter, then inspect front/back colors of all box faces. Does the pull direction or wall/cap orientation change relative to an unreversed square?
+10. **Q10 (G6):** Draw a circle and pull its cap into a cylinder. Activate Push/Pull and click the smooth side wall with hidden geometry off. Is it rejected or does one facet/the surface extrude? Repeat with hidden geometry on.
+11. **Q11 (P1):** In a roughly 20,000-face model on the Ryzen 5 2400G, pull one face continuously, then finish. Is SketchUp visibly smooth, and does completion pause? Save the fixture for the same Cindral trial; visual smoothness alone cannot prove 16/100 ms budgets.
+
+## Side-by-side manual script
+
+Start two new meter-unit documents in an isometric view. Use menus/tool buttons where shortcut mappings differ. Left click means press and release; all typing is directly into the viewport unless stated. Each numbered step is a case; undo to its stated starting state before continuing.
+
+1. Press **P** over empty viewport. Expected: SketchUp activates Push/Pull; Cindral currently activates Polygon. Select Rectangle through its tool button in both and click two ground-plane corners to make a square. Keep it visible from above and the side.
+2. Activate **Push/Pull using its tool button**; click empty ground away from the square. Expected: no geometry change; Cindral reports no editable face. Move over the square: SketchUp highlights a target; Cindral currently lacks this hover highlight.
+3. Press the square center, hold left button, move upward until visible walls appear, release. Expected: one finished solid extrusion. Press **Ctrl+Z**, then **Ctrl+Y** (macOS **Cmd+Z**, **Cmd+Shift+Z**). Expected: square restored, then exact solid restored, no continuing preview. Undo again.
+4. Click square center once, move upward without a button, click once to finish. Expected: same two-click workflow and one undo entry; live preview before finishing. Undo.
+5. Click square center, move upward a little, type **2m**, press **Enter**. Expected: 2 m height and stopped mouse-following in Cindral. Record any SketchUp difference in direction/sign (Q2). Move pointer away and verify height is unchanged.
+6. Without another click, type **150cm**, **Enter**. Expected: SketchUp adjusts the last extrusion to 1.5 m; Cindral currently reports inactive/not-ready and retains 2 m. Undo to the square.
+7. Click square, move upward, type **3'6"**, **Enter**. Expected: SketchUp accepts 1.0668 m; Cindral rejects this format. Press **Esc**: square must be restored without another history entry. Repeat with **42in**, Enter: both produce 1.0668 m. Undo.
+8. Click square, move upward until walls appear, press **Esc**. Expected: exact original square and no operation in history. Then type **2m**, Enter before starting another pull: record whether SketchUp acts (Q2); Cindral requires an active operation.
+9. Start a new pull on the square, tap **Ctrl** (macOS **Option**), move upward, type **1m**, Enter. Expected: SketchUp retains starting face for a new section; Cindral has no mode toggle. Inspect face count/base rather than cursor artwork; undo.
+10. Create a second separated square with Rectangle. Pull first square **1m**, Enter; activate Push/Pull again and **double-click the second square center**. Expected: SketchUp repeats 1 m; Cindral has no repeat action. Press Esc to stop its unfinished interaction.
+11. With the first box beside the other face, start pulling the other face and hover first box's top corner, midpoint and face. Press **Shift**, move away, release Shift; press **Right**, then **Up**, then **Down**. Expected: trial Q4/Q5, record actual heights/locks rather than assuming parity. Esc must restore the starting geometry in both.
+12. On the top of a box create a smaller rectangle, Push/Pull its inner face inward exactly the box depth, Enter. Expected: simple unsplit opposite face opens through; undo/redo preserves opening and model validity. Split the opposite face and repeat as Q8 instead of treating that variant as certified.
+13. Select all of one box, create a component using each app's command, double-click it to enter, pull its top **150cm**, Enter, then exit. Expected: only active definition geometry changes; shared occurrences follow. Outside the component, attempt to pull its face: enter-context guidance/no direct loose-face edit. Compare a planar imported .skp face in the same way only if you have an existing compatible file; this audit adds no format support.
+14. Create the circle/cylinder Q10 fixture and try its smooth wall; record behavior. Finally repeat steps 3–5 in your common ~20k-face fixture in release Cindral and SketchUp, recording stalls (Q11). Expected: project budget is <16 ms preview/<100 ms commit; visual observation cannot certify these timings.
+
+## Automated validation and measurements
+
+New checks are GPU-free: integration tests in `crates/cindral-tools/tests/push_pull_parity.rs`, synthetic egui events in the existing app test module, and an ignored opt-in release CPU workload in `crates/cindral-core/tests/push_pull_parity_performance.rs`. Ignored desired-behavior tests document missing parity and are intentionally not fixes. The performance workload is ignored because it is timing-sensitive/release-only, not because the CPU budget is known to fail.
+
+Run CPU probe: `cargo test --release -p cindral-core --features bench-fixtures --test push_pull_parity_performance -- --ignored --nocapture`. Thirty absolute previews on an isolated box beside 20,000 triangles; setup excluded. Commit timing measures finalization of the already-previewed delta. This favorable disconnected fixture is not a connected-solid or full interactive benchmark.
+
+Results and final validation are recorded below after execution. No GPU or SketchUp was launched for this audit. Existing imported-geometry tests are reused; no .skp implementation work or external assets were introduced.
+
+Measured on AMD Ryzen 5 2400G with Radeon Vega Graphics, release: CPU preview maximum **3.059 ms**, commit finalization **0.000 ms rounded to 3 decimals** (below displayed precision), 30 samples. Probe passed both CPU bounds. This does not certify full live preview. Matrix totals: **17 matches / 3 differs / 5 missing / 11 unsure**, 36 rows. Principal gaps: P activates Polygon; Ctrl start-new and double-click repeat are absent; completed extrusions cannot be remeasured.
