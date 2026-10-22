@@ -177,3 +177,21 @@ pub(crate) fn prepare(
     after.validate()?;
     Ok(Some((before, after)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn imported_open_sheet_has_local_extrusion_candidate() {
+        let model = crate::BulkGeometry {
+            vertices: vec![DVec3::ZERO,DVec3::X,DVec3::X+DVec3::Y,DVec3::Y,
+                DVec3::X*2.,DVec3::X*2.+DVec3::Y],
+            faces: [vec![0,1,2,3],vec![1,4,5,2]].into_iter()
+                .map(|outer| crate::BulkFace {outer,..Default::default()}).collect(),
+            ..Default::default()
+        }.build(false,false).unwrap();
+        let face = *model.faces.keys().next().unwrap();
+        assert!(prepare(&model,&Command::PushPull {face,distance:0.2},model.next_id).unwrap().is_some(),
+            "coplanar open sheet must avoid global surface reconstruction");
+    }
+}
