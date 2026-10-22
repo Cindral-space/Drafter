@@ -72,18 +72,32 @@ fn connected(n: usize) -> Result<DraftBundle> {
 }
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    for (name, bundle) in [("instances-5000", placed_scene()?), ("connected-21600", connected(60)?)] {
+    for (name, bundle) in [
+        ("instances-5000", placed_scene()?),
+        ("connected-21600", connected(60)?),
+    ] {
         let path = directory.path().join(format!("{name}.dae"));
         for run in 1..=3 {
-            let control=DaeControl::default();
-            let start=Instant::now();
-            let summary=export_dae(&path,&bundle,&DaeOptions{force:true,..Default::default()},&control)?;
-            let elapsed=start.elapsed().as_secs_f64()*1000.;
+            let control = DaeControl::default();
+            let start = Instant::now();
+            let summary = export_dae(
+                &path,
+                &bundle,
+                &DaeOptions {
+                    force: true,
+                    ..Default::default()
+                },
+                &control,
+            )?;
+            let elapsed = start.elapsed().as_secs_f64() * 1000.;
             println!("{name} run{run}: export_ms {elapsed:.3}; dae_bytes {}; occurrences {}; triangles {}",std::fs::metadata(&path)?.len(),summary.instances,summary.triangles);
         }
-        if let Some(target)=std::env::var_os("DAE_BENCH_OUTPUT") {
+        if let Some(target) = std::env::var_os("DAE_BENCH_OUTPUT") {
             std::fs::create_dir_all(&target)?;
-            std::fs::copy(&path,std::path::Path::new(&target).join(format!("{name}.dae")))?;
+            std::fs::copy(
+                &path,
+                std::path::Path::new(&target).join(format!("{name}.dae")),
+            )?;
         }
     }
     Ok(())

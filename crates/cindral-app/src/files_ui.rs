@@ -363,7 +363,9 @@ impl DrafterApp {
                     );
                 }
             }
-            Action::Dae => { self.files.dae.open = true; }
+            Action::Dae => {
+                self.files.dae.open = true;
+            }
             Action::Recover(path) => {
                 self.cancel_import();
                 let bundle = cindral_io::load_draft(&path)?;

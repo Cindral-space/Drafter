@@ -16,7 +16,7 @@ M0–M6 implement the workspace/CI, viewport/camera, transactional geometry kern
 | cindral-io | Versioned documents and import/export | core, skp |
 | cindral-app | Window, egui controls, input routing | all above |
 
-Rendering and UI dependencies never enter core. Tools emit commands; they do not mutate renderer buffers. IO deserializes into validated core documents.
+Rendering and UI dependencies never enter core. Tools emit commands; they do not mutate renderer buffers. IO deserializes into validated core documents. E1 adds independent COLLADA 1.4.1 export with shared definition geometry, nested instance nodes, meter/inch Z-up coordinates, planar textures and cancellable atomic publication. The desktop and display-free CLI share the same options and safety boundary; see [COLLADA export](DAE_EXPORT.md) and [release measurements](DAE_BENCHMARK.md).
 
 ## Core data model
 

@@ -7,8 +7,8 @@ use cindral_render::{
     scene::{SceneCallback, SceneRenderer, SceneUpdate},
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
-mod files_ui;
 mod dae_ui;
+mod files_ui;
 mod modify_ui;
 mod organization_ui;
 mod presentation_ui;
