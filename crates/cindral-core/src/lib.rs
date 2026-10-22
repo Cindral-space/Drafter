@@ -20,6 +20,8 @@
 //! # Ok::<(), KernelError>(())
 //! ```
 
+mod measurement;
+pub use measurement::*;
 mod command;
 mod csg;
 mod document;

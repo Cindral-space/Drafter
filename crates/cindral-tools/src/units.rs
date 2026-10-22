@@ -7,46 +7,10 @@ use crate::ToolError;
 /// Supports plain numbers (meters) as well as units: `mm`, `cm`, `m`, `in`, `ft`.
 /// Rejects unknown units, invalid numbers, non-finite values, and malformed or trailing input.
 pub fn parse_length(input: &str) -> Result<f64, ToolError> {
-    let s = input.trim();
-    if s.is_empty() {
-        return Err(ToolError::InvalidMeasurement(input.to_string()));
+    match crate::measurements::parse(input, Default::default())? {
+        crate::measurements::Measurement::Values(values) if values.len() == 1 => values[0].length(Default::default()),
+        _ => Err(ToolError::InvalidMeasurement(input.into())),
     }
-
-    // Supported units: mm, cm, in, ft, m.
-    // Order matters: check multi-char suffixes before single-char suffix 'm'.
-    let (num_str, factor) = if let Some(rest) = s.strip_suffix("mm") {
-        (rest, 0.001)
-    } else if let Some(rest) = s.strip_suffix("cm") {
-        (rest, 0.01)
-    } else if let Some(rest) = s.strip_suffix("in") {
-        (rest, 0.0254)
-    } else if let Some(rest) = s.strip_suffix("ft") {
-        (rest, 0.3048)
-    } else if let Some(rest) = s.strip_suffix('m') {
-        (rest, 1.0)
-    } else {
-        (s, 1.0)
-    };
-
-    let num_str = num_str.trim();
-    if num_str.is_empty() {
-        return Err(ToolError::InvalidMeasurement(input.to_string()));
-    }
-
-    let val: f64 = num_str
-        .parse()
-        .map_err(|_| ToolError::InvalidMeasurement(input.to_string()))?;
-
-    if !val.is_finite() {
-        return Err(ToolError::InvalidMeasurement(input.to_string()));
-    }
-
-    let result = val * factor;
-    if !result.is_finite() {
-        return Err(ToolError::InvalidMeasurement(input.to_string()));
-    }
-
-    Ok(result)
 }
 
 #[cfg(test)]

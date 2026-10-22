@@ -84,6 +84,9 @@ pub struct SavedScene {
 /// Document presentation persisted alongside topology.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Presentation {
+    /// Document units, rounding and locale used by the shared measurements box.
+    #[serde(default)]
+    pub measurements: crate::MeasurementSettings,
     /// Current style.
     pub style: ViewStyle,
     /// Section planes and active cut.
