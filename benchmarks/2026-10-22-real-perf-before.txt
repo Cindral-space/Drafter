@@ -1,0 +1,30 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cycles:u'
+# Event count (approx.): 52278802714
+#
+# Overhead  Command          Shared Object         Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ...............  ....................  .......................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    27.39%  real_file_bench  real_file_benchmark   [.] <[cindral_core::model::VertexId]>::sort_by::<<cindral_core::model::Model>::sort_along::{closure#0}>::{closure#0}
+    19.34%  real_file_bench  real_file_benchmark   [.] <alloc::collections::btree::map::BTreeMap<cindral_core::model::VertexId, alloc::collections::btree::set::BTreeSet<cindral_core::model::EdgeId>>>::get::<cindral_core::model::VertexId>
+    15.91%  real_file_bench  real_file_benchmark   [.] cindral_core::geometry::intersections
+     5.09%  real_file_bench  real_file_benchmark   [.] <cindral_core::model::Model>::insert_segment
+     4.83%  real_file_bench  real_file_benchmark   [.] <cindral_core::model::Model>::intern
+     2.28%  real_file_bench  real_file_benchmark   [.] core::slice::sort::shared::smallsort::insertion_sort_shift_left::<cindral_core::model::VertexId, <[cindral_core::model::VertexId]>::sort_by<<cindral_core::model::Model>::sort_along::{closure#0}>::{closure#0}>
+     1.90%  real_file_bench  real_file_benchmark   [.] <alloc::collections::btree::map::Iter<cindral_core::model::VertexId, alloc::collections::btree::set::BTreeSet<cindral_core::model::EdgeId>> as core::iter::traits::iterator::Iterator>::next
+     1.43%  real_file_bench  libc.so.6             [.] malloc
+            |
+            ---malloc
+
+     1.23%  real_file_bench  real_file_benchmark   [.] cindral_core::modification::surfaces
+     1.19%  real_file_bench  real_file_benchmark   [.] <core::iter::adapters::map::Map<alloc::collections::btree::map::Iter<cindral_core::model::EdgeId, cindral_core::model::Edge>, <cindral_core::model::Model>::insert_segment::{closure#1}> as core::iter::traits::iterator::Iterator>::fold::<(), core::iter::traits::iterator::Iterator::for_each::call<(cindral_core::model::EdgeId, cindral_core::model::Edge), <alloc::vec::Vec<(cindral_core::model::EdgeId, cindral_core::model::Edge)>>::extend_trusted<core::iter::adapters::map::Map<alloc::collections::btree::map::Iter<cindral_core::model::EdgeId, cindral_core::model::Edge>, <cindral_core::model::Model>::insert_segment::{closure#1}>>::{closure#0}>::{closure#0}>
+     1.09%  real_file_bench  real_file_benchmark   [.] cindral_core::geometry::on_segment
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#
