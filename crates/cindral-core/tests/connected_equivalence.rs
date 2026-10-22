@@ -605,3 +605,120 @@ fn interior_pocket_fast_path_matches_reference_and_translation_index_supports_la
         })
         .unwrap());
 }
+
+fn open_grid(transform: DMat4) -> (History, FaceId) {
+    let mut geometry = cindral_core::BulkGeometry::default();
+    for y in 0..=3 {
+        for x in 0..=3 {
+            geometry
+                .vertices
+                .push(transform.transform_point3(DVec3::new(x as f64, y as f64, 0.)));
+        }
+    }
+    for y in 0..3 {
+        for x in 0..3 {
+            let a = y * 4 + x;
+            geometry.faces.push(cindral_core::BulkFace {
+                outer: vec![a, a + 1, a + 5, a + 4],
+                color: [50, 100, 150, 255],
+                ..Default::default()
+            });
+        }
+    }
+    let model = geometry.build(false, false).unwrap();
+    let face = *model.faces().keys().nth(4).unwrap();
+    (History::benchmark_from_data(model.to_data()).unwrap(), face)
+}
+fn assert_open_equivalence(a: &Model, b: &Model) {
+    a.validate().unwrap();
+    b.validate().unwrap();
+    let area = total_surface_area(a);
+    assert!((area - total_surface_area(b)).abs() < TOLERANCE * area.max(1.));
+    let (amin, amax) = a.bounds().unwrap();
+    let (bmin, bmax) = b.bounds().unwrap();
+    assert!(amin.distance(bmin) < TOLERANCE && amax.distance(bmax) < TOLERANCE);
+    assert_symmetric_triangle_sample_coverage(a, b, TOLERANCE);
+}
+#[test]
+fn planar_open_extrusion_matches_general_path_in_both_directions() {
+    for transform in [
+        DMat4::IDENTITY,
+        DMat4::from_translation(DVec3::new(1000., -2000., 3000.))
+            * DMat4::from_rotation_x(0.37)
+            * DMat4::from_scale(DVec3::new(-1., 1., 1.)),
+    ] {
+        for distance in [-0.2, 0.2] {
+            let (mut optimized, face) = open_grid(transform);
+            let mut reference = optimized.clone();
+            let before = optimized.model().clone();
+            let command = Command::PushPull { face, distance };
+            optimized.execute(command.clone()).unwrap();
+            reference_execute(&mut reference, command).unwrap();
+            assert_open_equivalence(optimized.model(), reference.model());
+            let after = optimized.model().clone();
+            // Neighbors and source attributes survive without face reconstruction.
+            for (id, old) in before.faces().iter().filter(|(id, _)| **id != face) {
+                assert_eq!(optimized.model().faces().get(id), Some(old));
+            }
+            optimized.undo().unwrap();
+            assert_eq!(optimized.model(), &before);
+            optimized.redo().unwrap();
+            assert_eq!(optimized.model(), &after);
+        }
+    }
+}
+#[test]
+fn planar_open_drag_replaces_original_and_commits_one_reversible_step() {
+    let (mut h, face) = open_grid(DMat4::from_rotation_y(0.2));
+    let before = h.model().clone();
+    for distance in [0.1, 0.25, -0.2, 0.3] {
+        let mut reference = History::benchmark_from_data(before.to_data()).unwrap();
+        let command = Command::PushPull { face, distance };
+        h.preview(command.clone()).unwrap();
+        reference_execute(&mut reference, command).unwrap();
+        assert_open_equivalence(h.model(), reference.model());
+        assert_eq!(h.undo_depth(), 0);
+    }
+    h.cancel_preview().unwrap();
+    assert_eq!(h.model(), &before);
+    h.preview(Command::PushPull {
+        face,
+        distance: 0.4,
+    })
+    .unwrap();
+    let after = h.model().clone();
+    h.commit_preview().unwrap();
+    assert_eq!(h.undo_depth(), 1);
+    h.undo().unwrap();
+    assert_eq!(h.model(), &before);
+    h.redo().unwrap();
+    assert_eq!(h.model(), &after);
+}
+#[test]
+fn concave_open_face_matches_general_extrusion() {
+    let geometry = cindral_core::BulkGeometry {
+        vertices: vec![
+            DVec3::ZERO,
+            DVec3::X * 2.,
+            DVec3::new(2., 1., 0.),
+            DVec3::new(1., 1., 0.),
+            DVec3::new(1., 2., 0.),
+            DVec3::Y * 2.,
+        ],
+        faces: vec![cindral_core::BulkFace {
+            outer: (0..6).collect(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let model = geometry.build(false, false).unwrap();
+    let face = *model.faces().keys().next().unwrap();
+    for distance in [-0.2, 0.2] {
+        let mut h = History::benchmark_from_data(model.to_data()).unwrap();
+        let mut reference = h.clone();
+        let command = Command::PushPull { face, distance };
+        h.execute(command.clone()).unwrap();
+        reference_execute(&mut reference, command).unwrap();
+        assert_open_equivalence(h.model(), reference.model());
+    }
+}

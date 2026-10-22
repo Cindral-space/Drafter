@@ -1592,5 +1592,34 @@ mod tests {
             "interactive budget exceeded: {elapsed:?}"
         );
         assert_eq!(editor.history.undo_depth(), 2);
+        editor.history.undo().unwrap();
+        editor.refresh_mesh();
+        editor.pending = None;
+        // Repeated absolute previews use the original source, just as dragging does.
+        let face = *editor.model().faces().keys().nth(count / 2).unwrap();
+        let mut worst = Duration::ZERO;
+        for i in 1..=20 {
+            let start = Instant::now();
+            assert!(editor
+                .preview(Command::PushPull {
+                    face,
+                    distance: 0.001 * i as f64 * if i % 2 == 0 { 1. } else { -1. },
+                })
+                .unwrap());
+            worst = worst.max(start.elapsed());
+            assert_eq!(editor.history.undo_depth(), 1);
+        }
+        eprintln!(
+            "SKP {count} faces: 20 drag previews plus dirty CPU mesh, worst {:.3}ms",
+            worst.as_secs_f64() * 1000.
+        );
+        assert!(
+            worst < Duration::from_millis(16),
+            "drag preview budget exceeded: {worst:?}"
+        );
+        assert!(editor.commit_preview().unwrap());
+        assert_eq!(editor.history.undo_depth(), 2);
+        assert!(editor.history.undo().unwrap());
+        assert!(editor.history.redo().unwrap());
     }
 }

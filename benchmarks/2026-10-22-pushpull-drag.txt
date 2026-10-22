@@ -1,0 +1,33 @@
+Push/Pull drag follow-up — 2026-10-22
+AMD Ryzen 5 2400G / Linux x86_64, Rust release profile.
+Existing project-authored .agent-out/i2-connected.skp: 140x140 grid,
+19,600 quads / 19,881 shared vertices. No external model copied.
+Sequential benchmark after builds and Antigravity task ended.
+
+Build:
+  cargo test --release -p cindral-app --lib --no-run
+Run (existing seed remains in original checkout):
+  CINDRAL_SKP_BENCHMARK_SEED=<original-checkout>/.agent-out/i2-connected.skp \
+    timeout 20s <release-app-test-binary> \
+    files_ui::tests::imported_skp_pushpull_interactive_mesh_update \
+    --exact --ignored --nocapture
+
+running 1 test
+SKP import and CPU scene preparation complete; starting Push/Pull on 19600 faces
+SKP 19600 faces Push/Pull plus dirty CPU mesh 2.810ms
+SKP 19600 faces: 20 drag previews plus dirty CPU mesh, worst 2.847ms
+test files_ui::tests::imported_skp_pushpull_interactive_mesh_update ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; finished in 1.66s
+
+The first operation is committed, undone, then 20 alternating +/- absolute
+previews replace the original source at increasing distances. Each preview
+includes previous-delta rollback, local edit, runtime-index/history changes,
+and normal app dirty CPU mesh preparation. Previews do not add undo steps;
+final commit adds one reversible undo step. Budget asserted at 16 ms.
+
+Single execute sample and maximum of 20 previews, not a statistical p95.
+Import/file IO/scene preparation and undo/redo validation excluded from timers.
+GPU upload/render/picking/inference/input routing/UI/vsync excluded.
+Supersedes prior >20-second timeout for this planar open-sheet case.
+Noncoplanar, overlapping, holed or loose-wire inputs retain general extrusion;
+this is not an arbitrary imported-model or whole-frame performance guarantee.

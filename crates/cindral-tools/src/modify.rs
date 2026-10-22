@@ -681,6 +681,9 @@ impl ModifySession {
                 self.current_pointer = Some(point);
                 self.measurement = Some(distance);
                 let cmd = Command::PushPull { face, distance };
+                if self.last_command.as_ref() == Some(&cmd) {
+                    return Ok(None);
+                }
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
             }
@@ -1006,17 +1009,37 @@ mod tests {
     #[test]
     fn stationary_pushpull_does_not_emit_repeated_preview() {
         let mut h = cindral_core::History::new();
-        h.execute(Command::AddPolyline {points:vec![DVec3::ZERO,DVec3::X,DVec3::X+DVec3::Y,DVec3::Y],closed:true}).unwrap();
+        h.execute(Command::AddPolyline {
+            points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+            closed: true,
+        })
+        .unwrap();
         let face = *h.model().faces().keys().next().unwrap();
         let mut session = ModifySession::new(ModifyKind::PushPull);
-        session.begin(h.model(),&Selection::default(),Some(Hit::Face(face)),DVec3::ZERO,DVec3::Z).unwrap();
+        session
+            .begin(
+                h.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
         assert!(session.update(DVec3::Z).unwrap().is_some());
-        assert_eq!(session.update(DVec3::Z).unwrap(),None);
-        assert_eq!(session.update(DVec3::Z+DVec3::X).unwrap(),None);
-        assert!(session.update(DVec3::Z*2.).unwrap().is_some());
+        assert_eq!(session.update(DVec3::Z).unwrap(), None);
+        assert_eq!(session.update(DVec3::Z + DVec3::X).unwrap(), None);
+        assert!(session.update(DVec3::Z * 2.).unwrap().is_some());
         session.cancel();
-        session.begin(h.model(),&Selection::default(),Some(Hit::Face(face)),DVec3::ZERO,DVec3::Z).unwrap();
-        assert!(session.update(DVec3::Z*2.).unwrap().is_some());
+        session
+            .begin(
+                h.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        assert!(session.update(DVec3::Z * 2.).unwrap().is_some());
     }
     #[test]
     fn face_tools_explain_missing_editable_face() {

@@ -4,7 +4,7 @@ use crate::{
     TOLERANCE,
 };
 use std::collections::BTreeMap;
-/// Return no candidate unless the support-plane and closed-boundary proof applies.
+/// Return no candidate unless a closed boundary or disjoint planar-sheet proof applies.
 pub(crate) fn prepare(
     model: &Model,
     command: &Command,
@@ -27,12 +27,12 @@ pub(crate) fn prepare(
     // No shell walk or orientation propagation: prove that the entire model is behind
     // the starting plane in the requested direction. The new prism is then disjoint
     // from all old surfaces except its base. This also handles reflections/holes.
-    if index
+    let closed = index
         .edge_faces
         .values()
         .filter(|v| !v.is_empty())
-        .any(|v| v.len() != 2)
-    {
+        .all(|v| v.len() == 2);
+    if !closed && !planar_sheet(model, *face)? {
         return Ok(None);
     }
     let normal = source.plane.normal * distance.signum();
@@ -122,6 +122,12 @@ pub(crate) fn prepare(
     }
     cap.plane.distance += cap.plane.normal.dot(delta);
     after.faces.insert(*face, cap);
+    if !closed {
+        // The general open-surface path extrudes a complete prism, including its
+        // base. Closed solids instead replace the source boundary with the cap.
+        let base = FaceId::from_raw(after.allocate()?);
+        after.faces.insert(base, source.clone());
+    }
     for ring in std::iter::once(&source.outer).chain(source.holes.iter()) {
         for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
             let mut outer = vec![*a, *b, raised[b], raised[a]];
@@ -178,20 +184,178 @@ pub(crate) fn prepare(
     Ok(Some((before, after)))
 }
 
+/// Coplanarity excludes swept-volume collisions in either normal direction.
+/// Triangle separation additionally excludes overlapping source surfaces at the
+/// base. Work is bounded; ambiguous/expensive inputs retain the general path.
+fn planar_sheet(model: &Model, face: FaceId) -> Result<bool, KernelError> {
+    let source = &model.faces[&face];
+    let index = model.spatial.as_ref().ok_or(KernelError::MissingEntity)?;
+    if index.edge_faces.len() != model.edges.len()
+        || index.edge_faces.values().any(|faces| faces.is_empty())
+        || model
+            .vertices
+            .values()
+            .any(|v| source.plane.signed_distance(v.position).abs() > TOLERANCE)
+    {
+        return Ok(false);
+    }
+    let origin = model.position(source.outer[0])?;
+    let (u, v) = source.plane.basis();
+    let project =
+        |t: [DVec3; 3]| t.map(|p| glam::DVec2::new((p - origin).dot(u), (p - origin).dot(v)));
+    let triangles = model
+        .triangulate(face)?
+        .into_iter()
+        .map(project)
+        .collect::<Vec<_>>();
+    let bounds =
+        crate::spatial::envelope(source.outer.iter().map(|id| model.vertices[id].position))
+            .ok_or(KernelError::MissingEntity)?;
+    let mut work = 4096usize;
+    for other in index
+        .query_faces(bounds)
+        .into_iter()
+        .filter(|id| *id != face)
+    {
+        for triangle in model.triangulate(other)? {
+            let b = project(triangle);
+            for a in &triangles {
+                let Some(left) = work.checked_sub(1) else {
+                    return Ok(false);
+                };
+                work = left;
+                if triangles_overlap(*a, b) {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+fn triangles_overlap(a: [glam::DVec2; 3], b: [glam::DVec2; 3]) -> bool {
+    // Separating axis theorem; boundary-only contact is allowed at model tolerance.
+    for triangle in [a, b] {
+        for i in 0..3 {
+            let Some(axis) = (triangle[(i + 1) % 3] - triangle[i]).perp().try_normalize() else {
+                return true;
+            };
+            let range = |t: [glam::DVec2; 3]| {
+                t.into_iter()
+                    .map(|p| p.dot(axis))
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), d| {
+                        (lo.min(d), hi.max(d))
+                    })
+            };
+            let (alo, ahi) = range(a);
+            let (blo, bhi) = range(b);
+            if ahi.min(bhi) - alo.max(blo) <= TOLERANCE {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    fn open_sheet_proof_declines_overlaps_nonplanarity_and_loose_wires() {
+        let square = |origin: DVec3, size: f64| {
+            [
+                origin,
+                origin + DVec3::X * size,
+                origin + (DVec3::X + DVec3::Y) * size,
+                origin + DVec3::Y * size,
+            ]
+        };
+        let mut geometry = crate::BulkGeometry {
+            vertices: square(DVec3::ZERO, 2.)
+                .into_iter()
+                .chain(square(DVec3::new(0.5, 0.5, 0.), 1.))
+                .collect(),
+            faces: [vec![0, 1, 2, 3], vec![4, 5, 6, 7]]
+                .into_iter()
+                .map(|outer| crate::BulkFace {
+                    outer,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let candidate = |g: crate::BulkGeometry| {
+            let model = g.build(false, false).unwrap();
+            let face = *model.faces.keys().next().unwrap();
+            prepare(
+                &model,
+                &Command::PushPull {
+                    face,
+                    distance: 0.2,
+                },
+                model.next_id,
+            )
+            .unwrap()
+            .is_some()
+        };
+        assert!(!candidate(geometry.clone()), "overlapping planar interiors");
+        for p in &mut geometry.vertices[4..] {
+            p.z = 0.1;
+        }
+        assert!(!candidate(geometry), "noncoplanar swept collision");
+        let geometry = crate::BulkGeometry {
+            vertices: square(DVec3::ZERO, 1.)
+                .into_iter()
+                .chain([DVec3::X * 3., DVec3::X * 4.])
+                .collect(),
+            faces: vec![crate::BulkFace {
+                outer: vec![0, 1, 2, 3],
+                ..Default::default()
+            }],
+            edges: vec![crate::BulkEdge {
+                vertices: [4, 5],
+                ..Default::default()
+            }],
+        };
+        assert!(
+            !candidate(geometry),
+            "loose wire must keep general behavior"
+        );
+    }
+    #[test]
     fn imported_open_sheet_has_local_extrusion_candidate() {
         let model = crate::BulkGeometry {
-            vertices: vec![DVec3::ZERO,DVec3::X,DVec3::X+DVec3::Y,DVec3::Y,
-                DVec3::X*2.,DVec3::X*2.+DVec3::Y],
-            faces: [vec![0,1,2,3],vec![1,4,5,2]].into_iter()
-                .map(|outer| crate::BulkFace {outer,..Default::default()}).collect(),
+            vertices: vec![
+                DVec3::ZERO,
+                DVec3::X,
+                DVec3::X + DVec3::Y,
+                DVec3::Y,
+                DVec3::X * 2.,
+                DVec3::X * 2. + DVec3::Y,
+            ],
+            faces: [vec![0, 1, 2, 3], vec![1, 4, 5, 2]]
+                .into_iter()
+                .map(|outer| crate::BulkFace {
+                    outer,
+                    ..Default::default()
+                })
+                .collect(),
             ..Default::default()
-        }.build(false,false).unwrap();
+        }
+        .build(false, false)
+        .unwrap();
         let face = *model.faces.keys().next().unwrap();
-        assert!(prepare(&model,&Command::PushPull {face,distance:0.2},model.next_id).unwrap().is_some(),
-            "coplanar open sheet must avoid global surface reconstruction");
+        assert!(
+            prepare(
+                &model,
+                &Command::PushPull {
+                    face,
+                    distance: 0.2
+                },
+                model.next_id
+            )
+            .unwrap()
+            .is_some(),
+            "coplanar open sheet must avoid global surface reconstruction"
+        );
     }
 }
