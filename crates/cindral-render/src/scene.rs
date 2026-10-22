@@ -903,6 +903,7 @@ impl SceneRenderer {
         queue: &wgpu::Queue,
         update: &SceneUpdate,
     ) {
+        let _phase = cindral_core::profile::Scope::new(5);
         if !self.default_texture_initialized {
             let white_preview = TexturePixels::default_white_preview();
             queue.write_texture(
@@ -1126,6 +1127,7 @@ impl SceneRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
     ) {
+        let _phase = cindral_core::profile::Scope::new(6);
         let resolution = self.shadow.resolution;
         self.shadow.configure(
             device,

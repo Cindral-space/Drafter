@@ -20,6 +20,7 @@
 //! # Ok::<(), KernelError>(())
 //! ```
 
+pub mod profile;
 mod command;
 mod csg;
 mod document;

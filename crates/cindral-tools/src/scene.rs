@@ -152,6 +152,7 @@ pub fn pick_instances_section(
     radius: f64,
     section: Option<&cindral_core::SectionPlane>,
 ) -> Option<InstanceHit> {
+        let _phase = cindral_core::profile::Scope::new(0);
     if items.is_empty()
         || !cursor.is_finite()
         || !radius.is_finite()

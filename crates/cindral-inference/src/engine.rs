@@ -29,6 +29,7 @@ impl Engine {
     /// Infer the highest-priority geometric snap or work-plane fallback for `query`.
     #[tracing::instrument(level = "info", skip_all, name = "inference.scan")]
     pub fn infer(&self, model: &Model, query: &Query) -> Option<Snap> {
+        let _phase = cindral_core::profile::Scope::new(1);
         self.infer_retained(model, query).filter(|snap| {
             query
                 .section

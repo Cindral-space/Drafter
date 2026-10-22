@@ -326,6 +326,7 @@ impl DrafterApp {
         }
     }
     pub(crate) fn prepare_sections(&mut self) {
+        let _phase = cindral_core::profile::Scope::new(8);
         let revision = self.history.revision();
         if self.section_ui.bounds_revision != Some(revision) {
             let mut bounds: Option<[glam::Vec3; 2]> = None;

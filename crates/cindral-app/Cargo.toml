@@ -54,3 +54,7 @@ required-features = ["kernel-benchmark"]
 [[example]]
 name = "import_pushpull_gpu"
 required-features = ["kernel-benchmark"]
+
+[[example]]
+name = "real_file_benchmark"
+required-features = ["kernel-benchmark"]

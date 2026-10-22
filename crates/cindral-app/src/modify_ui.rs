@@ -25,6 +25,7 @@ impl DrafterApp {
         self.selection_start = None;
     }
     fn modify_preview(&mut self, command: Command) {
+        let _phase = cindral_core::profile::Scope::new(3);
         if let Err(e) = self.history.preview(command) {
             self.error = Some(e.to_string());
         } else {

@@ -660,6 +660,7 @@ impl ModifySession {
     /// Produce an absolute preview mutation command from the initial anchor to the prospective point.
     #[tracing::instrument(level = "info", skip_all, name = "tool.update")]
     pub fn update(&mut self, point: DVec3) -> Result<Option<Command>, ToolError> {
+        let _phase = cindral_core::profile::Scope::new(2);
         if !self.active {
             return Err(ToolError::NotReady);
         }

@@ -744,6 +744,7 @@ impl DrafterApp {
         }
     }
     fn preview_instance(&mut self, drag: &InstanceDrag, point: DVec3, typed: Option<f64>) {
+        let _phase = cindral_core::profile::Scope::new(3);
         let delta = self.instance_delta(drag, point, typed);
         let transform = drag.owner_world.inverse()
             * drag.context_world

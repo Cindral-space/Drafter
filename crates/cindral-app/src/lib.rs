@@ -22,6 +22,8 @@ use std::sync::Arc;
 
 /// Editor state; geometry changes are committed only through core commands.
 pub struct DrafterApp {
+    #[cfg(feature = "kernel-benchmark")]
+    replay_rect: egui::Rect,
     files: files_ui::FileState,
     show_tray: bool,
     show_grid: bool,
@@ -57,6 +59,8 @@ pub struct DrafterApp {
 impl Default for DrafterApp {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "kernel-benchmark")]
+            replay_rect: egui::Rect::NOTHING,
             files: files_ui::FileState::default(),
             show_tray: true,
             show_grid: false,
@@ -144,6 +148,7 @@ impl DrafterApp {
         self.draw_drag = None;
     }
     fn refresh_mesh(&mut self) {
+        let _phase = cindral_core::profile::Scope::new(4);
         let active = self.history.active_definition();
         if self.guide_definition != active {
             let guides = self.guide_cache.remove(&active).unwrap_or_default();
@@ -639,7 +644,11 @@ fn snap_label(kind: SnapKind) -> &'static str {
     }
 }
 impl eframe::App for DrafterApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) { self.draw_frame(ctx); }
+}
+impl DrafterApp {
+    fn draw_frame(&mut self, ctx: &egui::Context) {
+        let _frame_profile = cindral_core::profile::Frame::new();
         self.transition_tick(ctx);
         let camera_at_tick = (
             self.camera.target,
@@ -648,6 +657,7 @@ impl eframe::App for DrafterApp {
             self.camera.pitch,
             self.camera.projection,
         );
+        let ui_profile = cindral_core::profile::Scope::new(7);
         self.workspace_header(ctx);
         self.workspace_status(ctx);
         self.recovery_window(ctx);
@@ -655,6 +665,7 @@ impl eframe::App for DrafterApp {
         self.scene_tabs(ctx);
         self.tool_palette(ctx);
         self.model_inspector(ctx);
+        drop(ui_profile);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_rgb(
                 self.presentation.style.background[0],
@@ -667,6 +678,8 @@ impl eframe::App for DrafterApp {
                 if rect.width() <= 0. || rect.height() <= 0. {
                     return;
                 }
+                #[cfg(feature = "kernel-benchmark")]
+                { self.replay_rect = rect; }
                 let aspect = rect.width() / rect.height();
                 if self.files.fit {
                     self.extents(aspect);
@@ -1098,3 +1111,9 @@ mod style_tests {
 #[cfg(feature = "kernel-benchmark")]
 /// Imported versus drawn drag performance workload.
 pub mod import_pushpull_benchmark;
+
+#[cfg(feature = "kernel-benchmark")]
+pub mod real_file_benchmark;
+
+#[cfg(feature = "kernel-benchmark")]
+mod real_file_gpu;
