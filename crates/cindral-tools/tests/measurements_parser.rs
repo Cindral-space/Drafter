@@ -42,3 +42,23 @@ proptest::proptest! {
         let _ = parse(&input,MeasurementSettings{decimal_comma:comma,..Default::default()});
     }
 }
+
+#[test]
+fn box_lifecycle_and_idle_cache() {
+    let mut b = MeasurementsBox::default();
+    let readout = Readout { label: "Length",values:[2.,0.,0.],count:1,kind:ValueKind::Length };
+    b.update(readout,Default::default());
+    assert_eq!(b.phase,BoxPhase::Live);
+    let pointer = b.display.as_ptr();
+    b.update(readout,Default::default());
+    assert_eq!(pointer,b.display.as_ptr());
+    b.type_text("3'6\""); b.invalid = true;
+    b.update(Readout{values:[4.,0.,0.],..readout},Default::default());
+    assert_eq!(b.text,"3'6\"");
+    assert!(b.escape()); assert!(!b.invalid); assert_eq!(b.display(),"4.000m");
+    assert!(!b.escape()); assert_eq!(b.phase,BoxPhase::Empty);
+    b.type_text("2"); b.backspace(); assert!(b.text.is_empty());
+    b.applied(); assert_eq!(b.phase,BoxPhase::Applied);
+    b.completed(); assert_eq!(b.phase,BoxPhase::Completed);
+    b.reset(); assert_eq!(b.phase,BoxPhase::Empty);
+}

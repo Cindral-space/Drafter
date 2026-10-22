@@ -10,6 +10,7 @@ use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession}
 mod dae_ui;
 mod files_ui;
 mod modify_ui;
+mod measurements_ui;
 mod organization_ui;
 mod presentation_ui;
 #[cfg(feature = "kernel-benchmark")]
@@ -53,7 +54,7 @@ pub struct DrafterApp {
     snap: Option<Snap>,
     draw_press: Option<Snap>,
     draw_drag: Option<()>,
-    measurement: String,
+    measurements: cindral_tools::measurements::MeasurementsBox,
     error: Option<String>,
     scene: scene_cache::SceneCache,
     organization: organization_ui::OrganizationUi,
@@ -90,7 +91,7 @@ impl Default for DrafterApp {
             snap: None,
             draw_press: None,
             draw_drag: None,
-            measurement: String::new(),
+            measurements: Default::default(),
             error: None,
             scene: scene_cache::SceneCache::default(),
             organization: organization_ui::OrganizationUi::default(),
@@ -146,7 +147,7 @@ impl DrafterApp {
             self.error = Some(error.to_string());
         }
         self.axis_lock = None;
-        self.measurement.clear();
+        self.measurements.reset();
         self.snap = None;
         self.draw_press = None;
         self.draw_drag = None;
@@ -219,6 +220,7 @@ impl DrafterApp {
         }
     }
     fn history_step(&mut self, redo: bool) {
+        self.measurements.reset();
         if let Ok(true) = self.history.cancel_preview() {
             self.refresh_mesh();
         }
@@ -250,10 +252,10 @@ impl DrafterApp {
             return;
         }
         let before = self.tool.clone();
-        match self.tool.measure(&self.measurement) {
+        match self.tool.measure(&self.measurements.text) {
             Ok(Some(command)) => {
                 if self.commit(command) {
-                    self.measurement.clear();
+                    self.measurements.text.clear();
                 } else {
                     self.tool = before;
                 }
@@ -378,6 +380,7 @@ impl DrafterApp {
                 self.camera.orbit(Vec2::new(delta.x, delta.y));
             }
         }
+        if self.capture_measurement_keys(response) { return; }
         if self.section_input(response) {
             return;
         }
@@ -404,7 +407,7 @@ impl DrafterApp {
                 self.camera.zoom(i.smooth_scroll_delta.y, cursor, aspect);
             }
             if keyboard_free
-                && self.measurement.is_empty()
+                && self.measurements.text.is_empty()
                 && !i.modifiers.command
                 && !i.modifiers.alt
             {
@@ -451,7 +454,7 @@ impl DrafterApp {
             if keyboard_free {
                 if i.key_pressed(Key::Escape) {
                     self.tool.cancel();
-                    self.measurement.clear();
+                    self.measurements.text.clear();
                     self.axis_lock = None;
                     self.error = None;
                     self.draw_press = None;
@@ -536,25 +539,7 @@ impl DrafterApp {
             if !keyboard_free {
                 return;
             }
-            for event in &i.events {
-                if let egui::Event::Text(text) = event {
-                    let starts_measure = text
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_digit() || "+-.".contains(c));
-                    if !self.measurement.is_empty()
-                        || (self.tool.anchor().is_some() && starts_measure)
-                    {
-                        self.measurement.push_str(text);
-                    }
-                }
-            }
-            if i.key_pressed(Key::Backspace) {
-                self.measurement.pop();
-            }
-            if i.key_pressed(Key::Enter) && !self.measurement.is_empty() {
-                self.apply_measurement();
-            }
+
         });
         if self.modifying {
             self.draw_press = None;

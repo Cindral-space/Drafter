@@ -157,7 +157,7 @@ impl DrafterApp {
         for n in 1..=path.len() {
             self.organization.expanded.insert(path[..n].to_vec());
         }
-        self.measurement.clear();
+        self.measurements.text.clear();
         self.refresh_mesh();
         Ok(())
     }
@@ -171,7 +171,7 @@ impl DrafterApp {
         let changed = self.history.exit()?;
         self.selection.clear();
         self.organization.selected = None;
-        self.measurement.clear();
+        self.measurements.text.clear();
         if changed {
             self.refresh_mesh();
         }
@@ -768,7 +768,7 @@ impl DrafterApp {
         let Some(drag) = self.organization.drag.clone() else {
             return false;
         };
-        let text = self.measurement.trim();
+        let text = self.measurements.text.trim();
         let parsed = match drag.kind {
             ModifyKind::Move | ModifyKind::Copy => {
                 cindral_tools::parse_length(text).map_err(|e| e.to_string())
@@ -803,7 +803,7 @@ impl DrafterApp {
                     match self.history.commit_preview() {
                         Ok(_) => {
                             self.organization.drag = None;
-                            self.measurement.clear();
+                            self.measurements.text.clear();
                         }
                         Err(e) => self.error = Some(e.to_string()),
                     }
@@ -824,7 +824,7 @@ impl DrafterApp {
                     Ok(_) => self.refresh_mesh(),
                     Err(e) => self.error = Some(e.to_string()),
                 }
-                self.measurement.clear();
+                self.measurements.text.clear();
                 return true;
             }
             if !self.history.context().is_empty()
@@ -863,26 +863,9 @@ impl DrafterApp {
                         self.axis_lock = None;
                     }
 
-                    for event in &i.events {
-                        if let egui::Event::Text(text) = event {
-                            if !self.measurement.is_empty()
-                                || text
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_ascii_digit() || "+-.".contains(c))
-                            {
-                                self.measurement.push_str(text);
-                            }
-                        }
-                    }
-                    if i.key_pressed(Key::Backspace) {
-                        self.measurement.pop();
-                    }
+
                 });
-                if ctx.input(|i| i.key_pressed(Key::Enter)) && !self.measurement.is_empty() {
-                    self.instance_measurement();
-                    return true;
-                }
+
             }
             let Some(position) = ctx.input(|i| i.pointer.hover_pos()) else {
                 return true;
@@ -1272,7 +1255,7 @@ mod tests {
         app.begin_instance_drag(path.clone(), DVec3::ZERO, DVec2::ZERO)
             .unwrap();
         app.organization.drag.as_mut().unwrap().last = DVec3::X;
-        app.measurement = "2m".into();
+        app.measurements.text = "2m".into();
         assert!(app.instance_measurement());
         assert_eq!(app.history.undo_depth(), depth + 1);
         assert_eq!(

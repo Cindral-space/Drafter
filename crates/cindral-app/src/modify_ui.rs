@@ -9,7 +9,7 @@ impl DrafterApp {
         self.modify.set_kind(kind);
         self.modify.set_color(self.paint_color);
         self.tool.cancel();
-        self.measurement.clear();
+        self.measurements.reset();
         self.draw_press = None;
         self.draw_drag = None;
     }
@@ -58,12 +58,12 @@ impl DrafterApp {
             .retain(|f| self.history.model().faces().contains_key(f));
     }
     pub(crate) fn modify_measurement(&mut self) {
-        match self.modify.measure(&self.measurement) {
+        match self.modify.measure(&self.measurements.text) {
             Ok(Some(command)) => {
                 self.modify_preview(command);
                 if self.error.is_none() {
                     self.finish_modify();
-                    self.measurement.clear();
+                    self.measurements.text.clear();
                 }
             }
             Ok(None) => {
@@ -73,7 +73,7 @@ impl DrafterApp {
                         self.error = Some(e.to_string());
                     }
                     self.modify.finish();
-                    self.measurement.clear();
+                    self.measurements.text.clear();
                 }
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -91,9 +91,9 @@ impl DrafterApp {
         };
         let keyboard_free = !response.ctx.wants_keyboard_input();
         let escape = response.ctx.input(|i| i.key_pressed(Key::Escape));
-        if escape {
+        if keyboard_free && escape {
             self.cancel_modify();
-            self.measurement.clear();
+            self.measurements.text.clear();
             self.error = None;
             return;
         }
@@ -123,27 +123,9 @@ impl DrafterApp {
                 if i.key_pressed(Key::ArrowDown) {
                     self.axis_lock = None;
                 }
-                for event in &i.events {
-                    if let egui::Event::Text(text) = event {
-                        if self.modify.active()
-                            && (!self.measurement.is_empty()
-                                || text
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_ascii_digit() || "+-.".contains(c)))
-                        {
-                            self.measurement.push_str(text);
-                        }
-                    }
-                }
-                if i.key_pressed(Key::Backspace) {
-                    self.measurement.pop();
-                }
+
             });
-            if response.ctx.input(|i| i.key_pressed(Key::Enter)) && !self.measurement.is_empty() {
-                self.modify_measurement();
-                return;
-            }
+
         }
         let Some(position) = response.ctx.input(|i| i.pointer.hover_pos()) else {
             return;
@@ -632,7 +614,7 @@ mod tests {
             app.modify
                 .begin(app.history.model(), &selection, None, DVec3::ZERO, DVec3::Z)
                 .unwrap();
-            app.measurement = text.into();
+            app.measurements.text = text.into();
             let depth = app.history.undo_depth();
             app.apply_measurement();
             assert!(app.error.is_none(), "{:?}", app.error);
@@ -674,7 +656,7 @@ mod tests {
             )
             .unwrap();
         app.modify.update(DVec3::X * 3.).unwrap();
-        app.measurement = "5m".into();
+        app.measurements.text = "5m".into();
         app.apply_measurement();
         assert_eq!(app.model(), &before);
         assert_eq!(app.history.undo_depth(), depth);
@@ -784,7 +766,7 @@ mod tests {
                 DVec3::Z,
             )
             .unwrap();
-        app.measurement = "2m".into();
+        app.measurements.text = "2m".into();
         app.apply_measurement();
         let solid = app.model().clone();
         assert_eq!(app.history.undo_depth(), depth + 1);
@@ -847,9 +829,9 @@ mod tests {
                 DVec3::Z,
             )
             .unwrap();
-        app.measurement = "2m".into();
+        app.measurements.text = "2m".into();
         app.apply_measurement();
-        app.measurement = "150cm".into();
+        app.measurements.text = "150cm".into();
         app.apply_measurement();
         assert!(app.error.is_none(), "{:?}", app.error);
         assert!((app.model().bounds().unwrap().1.z - 1.5).abs() < 1e-7);
@@ -951,7 +933,7 @@ mod select_parity {
                     ],
                     egui::Modifiers::NONE,
                 );
-                assert!(app.measurement.is_empty());
+                assert!(app.measurements.text.is_empty());
                 assert_eq!(app.model(), &before);
                 assert_eq!(app.history.undo_depth(), depth);
                 assert!(!app.modify.active());
@@ -1935,7 +1917,7 @@ mod utility_parity_tests {
             )
             .unwrap();
         app.modify.update(DVec3::X * 3.).unwrap();
-        app.measurement = "2m".into();
+        app.measurements.text = "2m".into();
         app.apply_measurement();
         assert_eq!(app.modify.guides().len(), 1);
         let command = egui::Modifiers {

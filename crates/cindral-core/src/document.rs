@@ -762,6 +762,18 @@ impl DocumentHistory {
         }
         Ok(changed)
     }
+    /// Replace the last geometry operation in this context as a single undo step.
+    pub fn replace_last(&mut self, command: Command) -> Result<bool, KernelError> {
+        validate_material_command(&command, &self.graph.materials, 0)?;
+        self.cancel_preview()?;
+        let id = self.active_definition();
+        if !matches!(self.undo.last(), Some(DocumentEntry::Geometry(owner)) if *owner == id) {
+            return Err(invalid("Last operation is no longer editable in this context"));
+        }
+        let changed = self.history_mut(id)?.replace_last(command)?;
+        if changed { self.redo.clear(); self.geometry_changed(id); }
+        Ok(changed)
+    }
     /// Replace a live geometry preview in the active definition, shared by every instance.
     pub fn preview(&mut self, command: Command) -> Result<bool, KernelError> {
         validate_material_command(&command, &self.graph.materials, 0)?;

@@ -644,33 +644,31 @@ impl DrafterApp {
     }
 
     pub(crate) fn workspace_status(&mut self, ctx: &egui::Context) {
+        let readout = self.measurement_readout();
+        self.measurements.update(readout, self.presentation.measurements);
         egui::TopBottomPanel::bottom("workspace_status")
             .frame(egui::Frame::new().fill(Color32::WHITE).inner_margin(egui::Margin::symmetric(16, 8)))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Allocate dimensions first so contextual instructions cannot hide the input.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let hint = if self.modifying {
-                        match self.modify.kind() {
-                            ModifyKind::Rotate => "e.g. 90deg",
-                            ModifyKind::Scale => "e.g. 150%",
-                            _ => "e.g. 2m",
-                        }
-                    } else {
-                        match self.tool.kind() {
-                            ToolKind::Rectangle => "e.g. 2m,3m",
-                            ToolKind::Arc => "e.g. 90deg",
-                            _ => "e.g. 2m",
-                        }
-                    };
-                    let field = ui.add(egui::TextEdit::singleline(&mut self.measurement)
+                    let field = ui.add(egui::TextEdit::singleline(&mut self.measurements.text)
                         .desired_width(if ctx.content_rect().width() < 900. { 105. } else { 150. })
-                        .hint_text(hint).frame(false).background_color(Color32::from_rgb(244, 245, 249)))
+                        .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { Color32::from_rgb(255, 220, 217) } else { Color32::from_rgb(244, 245, 249) }))
                         .on_hover_text("Type a precise dimension during an operation, then press Enter. Accepts m, cm, mm, ft and in.");
+                    if field.has_focus() && ctx.input(|i| i.key_pressed(Key::Escape)) { self.measurements.escape(); self.error = None; }
                     if field.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
                         self.apply_measurement();
                     }
-                    ui.label(RichText::new("Dimensions").small());
+                    ui.label(RichText::new(readout.label).small()).on_hover_text("Right-click for document units and precision").context_menu(|ui| {
+                        let before = self.presentation.measurements;
+                        for unit in [cindral_core::LengthUnit::Meter, cindral_core::LengthUnit::Centimeter, cindral_core::LengthUnit::Millimeter, cindral_core::LengthUnit::Inch, cindral_core::LengthUnit::Foot] {
+                            ui.radio_value(&mut self.presentation.measurements.unit, unit, unit.suffix());
+                        }
+                        ui.add(egui::Slider::new(&mut self.presentation.measurements.precision, 0..=9).text("Decimals"));
+                        ui.checkbox(&mut self.presentation.measurements.decimal_comma, "Decimal comma (; separates values)");
+                        if before != self.presentation.measurements { self.presentation_changed(); }
+                    });
                     ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         let prompt = if self.modifying {

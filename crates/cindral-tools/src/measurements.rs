@@ -104,3 +104,99 @@ pub fn format_length(meters: f64, settings: MeasurementSettings) -> String {
     if settings.decimal_comma { s = s.replace('.', ","); }
     s
 }
+
+/// Presentation unit for a live scalar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ValueKind {
+    /// Meters converted through document settings.
+    Length,
+    /// Degrees.
+    Angle,
+    /// Dimensionless factor.
+    Factor,
+}
+/// Tool-owned live measurement, cheap to compare without formatting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Readout {
+    /// Caption to the left of the field.
+    pub label: &'static str,
+    /// Up to three live numbers.
+    pub values: [f64; 3],
+    /// Number of valid entries.
+    pub count: usize,
+    /// Interpretation of the entries.
+    pub kind: ValueKind,
+}
+/// Shared tool-facing protocol. All adapters consume the same parsed syntax.
+pub trait MeasurementTool {
+    /// Label and current numerical values, without allocating.
+    fn readout(&self) -> Readout;
+    /// Apply already parsed values, rejecting unsupported syntax atomically.
+    fn apply_input(&mut self, input: &Measurement, settings: MeasurementSettings) -> Result<Option<cindral_core::Command>, ToolError>;
+}
+/// Lifecycle of the shared value field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoxPhase {
+    /// No operation or live value.
+    #[default]
+    Empty,
+    /// Pointer-driven value.
+    Live,
+    /// Unapplied user input, including invalid input.
+    Typing,
+    /// A typed value was applied.
+    Applied,
+    /// Latest completed operation is available for replacement.
+    Completed,
+}
+/// One cached display and typing state for the status bar and viewport routing.
+#[derive(Clone, Debug, Default)]
+pub struct MeasurementsBox {
+    /// User input; never overwritten by pointer updates.
+    pub text: String,
+    /// Current lifecycle phase.
+    pub phase: BoxPhase,
+    /// Error highlight, cleared by successful application or cancellation.
+    pub invalid: bool,
+    /// Cached formatted readout, separate from user input.
+    pub display: String,
+    cached: Option<(Readout, MeasurementSettings)>,
+}
+impl MeasurementsBox {
+    /// Clear an operation on tool/context/history changes or a new placement click.
+    pub fn reset(&mut self) { *self = Self::default(); }
+    /// Refresh only when numbers or settings change. Idle frames allocate nothing here.
+    pub fn update(&mut self, readout: Readout, settings: MeasurementSettings) {
+        if self.cached == Some((readout, settings)) { return; }
+        self.cached = Some((readout, settings));
+        self.display.clear();
+        for n in readout.values.iter().take(readout.count.min(3)) {
+            if !self.display.is_empty() { self.display.push_str(if settings.decimal_comma { "; " } else { ", " }); }
+            self.display.push_str(&match readout.kind {
+                ValueKind::Length => format_length(*n, settings),
+                ValueKind::Angle | ValueKind::Factor => {
+                    let precision = settings.precision.min(9) as usize;
+                    let factor = 10_f64.powi(precision as i32);
+                    let approx = ((n*factor).round()/factor-n).abs() > f64::EPSILON*n.abs().max(1.)*4.;
+                    let mut s = format!("{}{n:.precision$}{}",if approx { "~" } else { "" },if readout.kind == ValueKind::Angle { "°" } else { "" });
+                    if settings.decimal_comma { s = s.replace('.', ","); } s
+                }
+            });
+        }
+        if matches!(self.phase, BoxPhase::Empty | BoxPhase::Live) { self.phase = if readout.count == 0 { BoxPhase::Empty } else { BoxPhase::Live }; }
+    }
+    /// Current immutable live text.
+    pub fn display(&self) -> &str { &self.display }
+    /// Whether a viewport text event should start measurement entry.
+    pub fn starts_input(text: &str) -> bool { text.chars().next().is_some_and(|c| c.is_ascii_digit() || "+-.,[<*/".contains(c)) }
+    /// Append text forwarded only when the viewport has keyboard focus.
+    pub fn type_text(&mut self, text: &str) { if self.text.len().saturating_add(text.len()) <= 4096 { self.text.push_str(text); self.phase = BoxPhase::Typing; self.invalid = false; } }
+    /// Edit a user entry.
+    pub fn backspace(&mut self) { self.text.pop(); self.invalid = false; }
+    /// First Escape clears typing; false asks the caller to cancel its tool operation.
+    pub fn escape(&mut self) -> bool { if self.text.is_empty() { self.reset(); false } else { self.text.clear(); self.invalid = false; self.phase = if self.display.is_empty() { BoxPhase::Empty } else { BoxPhase::Live }; true } }
+    /// Record a completed operation without discarding its live readout.
+    pub fn completed(&mut self) { self.text.clear(); self.invalid = false; self.phase = BoxPhase::Completed; }
+    /// Record an application that only advances an operation phase.
+    pub fn applied(&mut self) { self.text.clear(); self.invalid = false; self.phase = BoxPhase::Applied; }
+}

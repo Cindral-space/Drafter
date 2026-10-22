@@ -218,6 +218,21 @@ impl ToolSession {
         }
     }
 
+    /// Numerical status readout without formatting or allocation.
+    pub fn measurement_readout(&self) -> crate::measurements::Readout {
+        use crate::measurements::{Readout, ValueKind};
+        let label = match self.kind { ToolKind::Line => "Length", ToolKind::Rectangle => "Dimensions", _ => "Radius" };
+        let mut out = Readout { label, values: [0.;3], count: 0, kind: ValueKind::Length };
+        if let (Some(start), Some(pointer)) = (self.anchors.first(), self.current_pointer) {
+            let delta = pointer - *start;
+            out.count = 1;
+            if self.kind == ToolKind::Rectangle {
+                let (u,v) = self.plane_basis(); out.values[0] = delta.dot(u); out.values[1] = delta.dot(v); out.count = 2;
+            } else { out.values[0] = delta.length(); }
+        }
+        out
+    }
+
     // --- Internal Helpers ---
 
     fn unit_normal(&self) -> DVec3 {

@@ -218,6 +218,39 @@ impl History {
         self.revision = revision;
         Ok(true)
     }
+    /// Atomically replace the latest completed geometry operation, preserving one undo entry.
+    /// Commands refer to the model before that operation. Invalid commands restore it exactly.
+    pub fn replace_last(&mut self, command: Command) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
+        let Some(old) = self.undo.pop() else { return Ok(false); };
+        old.delta.apply(&mut self.model, false)?;
+        let prepared = crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water);
+        let delta = match prepared {
+            Ok(delta) if !delta.is_empty() => delta,
+            result => {
+                old.delta.apply(&mut self.model, true)?;
+                self.undo.push(old);
+                return result.map(|_| false);
+            }
+        };
+        if let Err(error) = delta.apply(&mut self.model, true) {
+            old.delta.apply(&mut self.model, true)?;
+            self.undo.push(old);
+            return Err(error);
+        }
+        self.revision += 1;
+        let mut dirty = old.delta.changes(self.revision);
+        let mut new = delta.changes(self.revision);
+        dirty.vertices.append(&mut new.vertices);
+        dirty.edges.append(&mut new.edges);
+        dirty.faces.append(&mut new.faces);
+        dirty.rigid_translation = false;
+        self.changes = dirty;
+        self.high_water = self.high_water.max(delta.next_id());
+        self.undo.push(Entry { delta });
+        self.redo.clear();
+        Ok(true)
+    }
     /// Replace a provisional edit using the same local delta path as a committed command.
     /// No undo entry is recorded until `commit_preview`; cancellation restores the starting geometry.
     #[tracing::instrument(level = "info", skip_all, name = "history.preview")]

@@ -108,7 +108,7 @@ fn draw_keyboard_metric_input_commits_all_tools_and_invalid_input_reports_error(
         app.tool.cancel();
         app.tool.click(DVec3::splat(10.)).unwrap();
         let before = app.model().clone();
-        app.measurement = "garbage".into();
+        app.measurements.text = "garbage".into();
         app.apply_measurement();
         assert!(app.error.is_some());
         assert_eq!(app.model(), &before);
