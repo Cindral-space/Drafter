@@ -12,6 +12,10 @@ mod files_ui;
 mod modify_ui;
 mod organization_ui;
 mod presentation_ui;
+#[cfg(feature = "kernel-benchmark")]
+pub mod real_file_benchmark;
+#[cfg(feature = "kernel-benchmark")]
+mod real_file_gpu;
 mod scene_cache;
 mod section_ui;
 mod shadow_ui;
@@ -644,7 +648,9 @@ fn snap_label(kind: SnapKind) -> &'static str {
     }
 }
 impl eframe::App for DrafterApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) { self.draw_frame(ctx); }
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.draw_frame(ctx);
+    }
 }
 impl DrafterApp {
     fn draw_frame(&mut self, ctx: &egui::Context) {
@@ -679,7 +685,9 @@ impl DrafterApp {
                     return;
                 }
                 #[cfg(feature = "kernel-benchmark")]
-                { self.replay_rect = rect; }
+                {
+                    self.replay_rect = rect;
+                }
                 let aspect = rect.width() / rect.height();
                 if self.files.fit {
                     self.extents(aspect);
@@ -1111,9 +1119,3 @@ mod style_tests {
 #[cfg(feature = "kernel-benchmark")]
 /// Imported versus drawn drag performance workload.
 pub mod import_pushpull_benchmark;
-
-#[cfg(feature = "kernel-benchmark")]
-pub mod real_file_benchmark;
-
-#[cfg(feature = "kernel-benchmark")]
-mod real_file_gpu;

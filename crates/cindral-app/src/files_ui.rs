@@ -973,6 +973,29 @@ impl DrafterApp {
     }
 }
 
+#[cfg(feature = "kernel-benchmark")]
+impl DrafterApp {
+    pub(super) fn load_replay(&mut self, path: &Path) -> cindral_io::Result<()> {
+        let control = ImportControl::default();
+        let result = cindral_io::import_file(
+            path,
+            &ImportOptions {
+                as_component: false,
+                ..Default::default()
+            },
+            &control,
+        )?;
+        let prepared = prepare_import(result, &control)?;
+        self.apply_import_result(prepared, path)?;
+        // Replay starts after dismissing the summary, with recovery/autosave isolated.
+        self.files.import_summary = None;
+        self.files.checked = true;
+        self.files.offer = false;
+        self.files.interval = Duration::from_secs(86400);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1621,21 +1644,5 @@ mod tests {
         assert_eq!(editor.history.undo_depth(), 2);
         assert!(editor.history.undo().unwrap());
         assert!(editor.history.redo().unwrap());
-    }
-}
-
-#[cfg(feature = "kernel-benchmark")]
-impl DrafterApp {
-    pub(super) fn load_replay(&mut self, path: &Path) -> cindral_io::Result<()> {
-        let control = ImportControl::default();
-        let result = cindral_io::import_file(path, &ImportOptions { as_component: false, ..Default::default() }, &control)?;
-        let prepared = prepare_import(result, &control)?;
-        self.apply_import_result(prepared, path)?;
-        // Replay starts after dismissing the summary, with recovery/autosave isolated.
-        self.files.import_summary = None;
-        self.files.checked = true;
-        self.files.offer = false;
-        self.files.interval = Duration::from_secs(86400);
-        Ok(())
     }
 }

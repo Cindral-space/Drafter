@@ -20,13 +20,13 @@
 //! # Ok::<(), KernelError>(())
 //! ```
 
-pub mod profile;
 mod command;
 mod csg;
 mod document;
 mod document_data;
 mod geometry;
 mod model;
+pub mod profile;
 pub use document::*;
 pub use document_data::*;
 mod modification;

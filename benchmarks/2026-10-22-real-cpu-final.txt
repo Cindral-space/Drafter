@@ -1,0 +1,53 @@
+import + initial CPU mesh + textures=212.855ms
+first full UI frame incl tessellation=1.713ms
+hover full frame: mean=0.496 max=0.827ms n=200
+  pick: mean=0.111 max=0.149ms
+  inference/snap: mean=0.157 max=0.262ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.000 max=0.000ms
+  mesh rebuild: mean=0.000 max=0.000ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.000 max=0.000ms
+  UI/outliner: mean=0.138 max=0.261ms
+  bounds/sections: mean=0.000 max=0.000ms
+  render + GPU completion: mean=0.000 max=0.000ms
+component Move begin=1.225ms
+component Move preview full frame: mean=0.464 max=0.659ms n=60
+  pick: mean=0.000 max=0.000ms
+  inference/snap: mean=0.179 max=0.213ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.005 max=0.014ms
+  mesh rebuild: mean=0.004 max=0.009ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.000 max=0.000ms
+  UI/outliner: mean=0.158 max=0.262ms
+  bounds/sections: mean=0.008 max=0.034ms
+  render + GPU completion: mean=0.000 max=0.000ms
+component Move release/commit frame=0.486ms
+loose Move begin=7.855ms
+loose Move preview full frame: mean=15.027 max=18.814ms n=60
+  pick: mean=0.126 max=0.200ms
+  inference/snap: mean=0.189 max=0.232ms
+  tool update: mean=0.003 max=0.007ms
+  kernel edit: mean=13.484 max=17.393ms
+  mesh rebuild: mean=1.252 max=1.695ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.000 max=0.000ms
+  UI/outliner: mean=0.373 max=0.716ms
+  bounds/sections: mean=0.026 max=0.085ms
+  render + GPU completion: mean=0.000 max=0.000ms
+loose Move release/commit frame=12.974ms
+PushPull begin=30.056ms
+PushPull preview full frame: mean=28.242 max=33.060ms n=60
+  pick: mean=0.074 max=0.118ms
+  inference/snap: mean=0.114 max=0.205ms
+  tool update: mean=0.001 max=0.003ms
+  kernel edit: mean=27.653 max=32.505ms
+  mesh rebuild: mean=0.304 max=0.681ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.000 max=0.000ms
+  UI/outliner: mean=0.187 max=0.339ms
+  bounds/sections: mean=0.021 max=0.076ms
+  render + GPU completion: mean=0.000 max=0.000ms
+PushPull release/commit frame=0.546ms
+replay_exit=0

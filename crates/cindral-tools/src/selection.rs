@@ -385,7 +385,7 @@ pub fn pick_section(
     radius: f64,
     section: Option<&cindral_core::SectionPlane>,
 ) -> Option<Hit> {
-        let _phase = cindral_core::profile::Scope::new(0);
+    let _phase = cindral_core::profile::Scope::new(0);
     pick_section_impl(model, ray, view, cursor, radius, section, true)
 }
 // Keep an exhaustive reference for differential tests; production always uses the index.

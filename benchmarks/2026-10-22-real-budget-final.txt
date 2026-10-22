@@ -1,0 +1,53 @@
+    Finished `release` profile [optimized] target(s) in 0.22s
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+import + initial CPU mesh + textures=167.660ms
+first full UI frame incl tessellation=24.610ms
+hover full frame: mean=2.899 max=5.696ms n=200
+  pick: mean=0.159 max=0.395ms
+  inference/snap: mean=0.218 max=0.591ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.000 max=0.000ms
+  mesh rebuild: mean=0.000 max=0.000ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.022 max=0.418ms
+  UI/outliner: mean=0.257 max=0.746ms
+  bounds/sections: mean=0.000 max=0.001ms
+  render + GPU completion: mean=2.091 max=4.042ms
+component Move begin=3.546ms
+component Move preview full frame: mean=2.746 max=4.345ms n=60
+  pick: mean=0.000 max=0.000ms
+  inference/snap: mean=0.211 max=0.409ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.012 max=0.031ms
+  mesh rebuild: mean=0.009 max=0.018ms
+  GPU upload (CPU): mean=0.013 max=0.032ms
+  shadow pass (CPU): mean=0.017 max=0.033ms
+  UI/outliner: mean=0.255 max=0.509ms
+  bounds/sections: mean=0.025 max=0.062ms
+  render + GPU completion: mean=2.050 max=3.674ms
+component Move release/commit frame=2.938ms
+loose Move begin=11.342ms
+loose Move preview full frame: mean=16.962 max=23.610ms n=60
+  pick: mean=0.115 max=0.180ms
+  inference/snap: mean=0.175 max=0.224ms
+  tool update: mean=0.002 max=0.004ms
+  kernel edit: mean=12.518 max=17.913ms
+  mesh rebuild: mean=1.153 max=1.607ms
+  GPU upload (CPU): mean=0.378 max=0.632ms
+  shadow pass (CPU): mean=0.017 max=0.038ms
+  UI/outliner: mean=0.361 max=0.512ms
+  bounds/sections: mean=0.020 max=0.068ms
+  render + GPU completion: mean=3.028 max=4.455ms
+loose Move release/commit frame=16.245ms
+PushPull begin=32.483ms
+CINDRAL_PROFILE UI frame=36.047ms phases=[0.168591, 0.18635200000000002, 0.00138, 35.349786, 0.34409300000000004, 0.0, 0.0, 0.260592, 0.02104, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE CPU frame through scene callback=37.259ms phases=[0.168591, 0.18635200000000002, 0.00138, 35.349786, 0.34409300000000004, 0.26129199999999997, 0.01856, 0.260592, 0.02104, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive)
+CINDRAL_PROFILE CPU frame through scene callback=33.410ms phases=[0.117121, 0.182352, 0.00108, 32.312541, 0.318623, 0.19728099999999998, 0.014759999999999999, 0.269552, 0.01485, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive)
+CINDRAL_PROFILE UI frame=33.851ms phases=[0.09634100000000001, 0.143651, 0.00142, 33.298579000000004, 0.264382, 0.0, 0.0, 0.238822, 0.01989, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE CPU frame through scene callback=34.718ms phases=[0.09634100000000001, 0.143651, 0.00142, 33.298579000000004, 0.264382, 0.148701, 0.01714, 0.238822, 0.01989, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive)
+PushPull preview full frame: mean=31.530 max=39.892ms n=60
+
+thread 'main' (108262) panicked at crates/cindral-app/src/real_file_benchmark.rs:100:13:
+PushPull preview full frame: preview exceeded 33ms: 39.892
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+replay_exit=101

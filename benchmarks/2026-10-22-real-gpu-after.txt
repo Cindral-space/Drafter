@@ -1,0 +1,56 @@
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+import + initial CPU mesh + textures=203.195ms
+first full UI frame incl tessellation=32.966ms
+hover full frame: mean=2.896 max=5.512ms n=200
+  pick: mean=0.171 max=0.347ms
+  inference/snap: mean=0.227 max=0.541ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.000 max=0.000ms
+  mesh rebuild: mean=0.000 max=0.000ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.022 max=0.082ms
+  UI/outliner: mean=0.264 max=0.531ms
+  bounds/sections: mean=0.001 max=0.002ms
+  render + GPU completion: mean=2.051 max=3.741ms
+component Move begin=3.261ms
+component Move preview full frame: mean=2.944 max=4.491ms n=60
+  pick: mean=0.000 max=0.000ms
+  inference/snap: mean=0.252 max=0.563ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.013 max=0.031ms
+  mesh rebuild: mean=0.010 max=0.022ms
+  GPU upload (CPU): mean=0.014 max=0.036ms
+  shadow pass (CPU): mean=0.021 max=0.062ms
+  UI/outliner: mean=0.283 max=0.476ms
+  bounds/sections: mean=0.026 max=0.070ms
+  render + GPU completion: mean=2.154 max=3.637ms
+component Move release/commit frame=3.418ms
+loose Move begin=11.808ms
+loose Move preview full frame: mean=18.015 max=22.833ms n=60
+  pick: mean=0.128 max=0.191ms
+  inference/snap: mean=0.189 max=0.304ms
+  tool update: mean=0.002 max=0.006ms
+  kernel edit: mean=13.427 max=16.859ms
+  mesh rebuild: mean=1.261 max=2.309ms
+  GPU upload (CPU): mean=0.406 max=0.640ms
+  shadow pass (CPU): mean=0.018 max=0.032ms
+  UI/outliner: mean=0.389 max=0.588ms
+  bounds/sections: mean=0.022 max=0.088ms
+  render + GPU completion: mean=3.058 max=4.140ms
+loose Move release/commit frame=15.033ms
+PushPull begin=29.364ms
+CINDRAL_PROFILE UI frame=33.048ms phases=[0.079341, 0.112541, 0.00106, 32.554004, 0.35687199999999997, 0.0, 0.0, 0.222632, 0.024451, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE CPU frame through scene callback=34.085ms phases=[0.079341, 0.112541, 0.00106, 32.554004, 0.35687199999999997, 0.208881, 0.01711, 0.222632, 0.024451, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive)
+PushPull preview full frame: mean=30.889 max=36.688ms n=60
+  pick: mean=0.084 max=0.127ms
+  inference/snap: mean=0.113 max=0.163ms
+  tool update: mean=0.001 max=0.004ms
+  kernel edit: mean=27.743 max=32.554ms
+  mesh rebuild: mean=0.294 max=0.455ms
+  GPU upload (CPU): mean=0.191 max=0.831ms
+  shadow pass (CPU): mean=0.015 max=0.032ms
+  UI/outliner: mean=0.220 max=0.337ms
+  bounds/sections: mean=0.019 max=0.058ms
+  render + GPU completion: mean=2.505 max=5.088ms
+PushPull release/commit frame=3.106ms
+replay_exit=0

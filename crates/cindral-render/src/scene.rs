@@ -1523,6 +1523,7 @@ impl CallbackTrait for SceneCallback {
             pass.set_bind_group(0, &renderer.offscreen.composite_bind_group, &[]);
             pass.draw(0..6, 0..1);
         }
+        cindral_core::profile::finish_render();
     }
 }
 

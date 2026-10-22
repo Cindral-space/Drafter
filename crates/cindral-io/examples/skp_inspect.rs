@@ -8,9 +8,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scene = import_skp(std::path::Path::new(&file), &control)?;
     // The source model itself is represented by one synthetic root placement.
     let raw = cindral_skp::read(&std::fs::read(&file)?)?;
-    eprintln!("source definitions: {:?}; tags={}; encoded textures={}", raw.definitions.iter().map(|d| (&d.name, d.geometry.vertices.len(), d.geometry.edges.len(), d.geometry.faces.len(), d.instances.len())).collect::<Vec<_>>(), raw.tags.len(), raw.textures.len());
-    let pixels: usize = scene.textures.values().map(|t| cindral_io::decode_texture(t).map(|d| d.width as usize * d.height as usize)).collect::<Result<Vec<_>, _>>()?.iter().sum();
-    eprintln!("decoded texture count={} total_pixels={pixels}", scene.textures.len());
+    eprintln!(
+        "source definitions: {:?}; tags={}; encoded textures={}",
+        raw.definitions
+            .iter()
+            .map(|d| (
+                &d.name,
+                d.geometry.vertices.len(),
+                d.geometry.edges.len(),
+                d.geometry.faces.len(),
+                d.instances.len()
+            ))
+            .collect::<Vec<_>>(),
+        raw.tags.len(),
+        raw.textures.len()
+    );
+    let pixels: usize = scene
+        .textures
+        .values()
+        .map(|t| cindral_io::decode_texture(t).map(|d| d.width as usize * d.height as usize))
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .sum();
+    eprintln!(
+        "decoded texture count={} total_pixels={pixels}",
+        scene.textures.len()
+    );
     let instances = raw
         .definitions
         .iter()
@@ -28,19 +51,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &control,
     )?;
     for occurrence in result.history.occurrences()? {
-        let model = result.history.definition_model(occurrence.definition).unwrap();
-        let triangles: Vec<_> = model.faces().iter().filter(|(_, f)| f.outer.len()==3 && f.holes.is_empty()).collect();
+        let model = result
+            .history
+            .definition_model(occurrence.definition)
+            .unwrap();
+        let triangles: Vec<_> = model
+            .faces()
+            .iter()
+            .filter(|(_, f)| f.outer.len() == 3 && f.holes.is_empty())
+            .collect();
         let mut unmerged = std::collections::BTreeSet::new();
         for (i, (a, fa)) in triangles.iter().enumerate() {
-            for (b, fb) in triangles.iter().skip(i+1) {
+            for (b, fb) in triangles.iter().skip(i + 1) {
                 let parallel = fa.plane.normal.cross(fb.plane.normal).length() < 1e-7;
                 let shared = fa.outer.iter().filter(|v| fb.outer.contains(v)).count();
-                let same_plane = (fa.plane.normal.dot(model.vertices()[&fb.outer[0]].position) - fa.plane.distance).abs() < 1e-7;
-                if parallel && shared==2 && same_plane { unmerged.insert(**a); unmerged.insert(**b); }
+                let same_plane = (fa.plane.normal.dot(model.vertices()[&fb.outer[0]].position)
+                    - fa.plane.distance)
+                    .abs()
+                    < 1e-7;
+                if parallel && shared == 2 && same_plane {
+                    unmerged.insert(**a);
+                    unmerged.insert(**b);
+                }
             }
         }
-        eprintln!("triangles={} edge-adjacent coplanar triangles remaining={}", triangles.len(), unmerged.len());
-        eprintln!("occurrence {:?} definition {:?} kind {:?}: V={} E={} F={}", occurrence.path, occurrence.definition, result.history.definition_kind(occurrence.definition), model.vertices().len(), model.edges().len(), model.faces().len());
+        eprintln!(
+            "triangles={} edge-adjacent coplanar triangles remaining={}",
+            triangles.len(),
+            unmerged.len()
+        );
+        eprintln!(
+            "occurrence {:?} definition {:?} kind {:?}: V={} E={} F={}",
+            occurrence.path,
+            occurrence.definition,
+            result.history.definition_kind(occurrence.definition),
+            model.vertices().len(),
+            model.edges().len(),
+            model.faces().len()
+        );
     }
     let mut bounds: Option<(glam::DVec3, glam::DVec3)> = None;
     for occurrence in result.history.occurrences()? {
