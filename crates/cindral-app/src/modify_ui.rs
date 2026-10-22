@@ -1145,3 +1145,293 @@ mod select_parity {
         assert_eq!(app.selection.edges.len(), 8);
     }
 }
+
+#[cfg(test)]
+mod transform_parity_tests {
+    use super::*;
+    fn fixture(kind: ModifyKind) -> (DrafterApp, egui::Context) {
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline {
+            points: vec![
+                DVec3::ZERO,
+                DVec3::X * 2.,
+                (DVec3::X + DVec3::Y) * 2.,
+                DVec3::Y * 2.,
+            ],
+            closed: true,
+        })
+        .unwrap();
+        app.camera.set_view(StandardView::Top);
+        app.camera.projection = Projection::Orthographic;
+        app.camera.target = glam::Vec3::new(1., 1., 0.);
+        app.camera.distance = 10.;
+        app.selection.vertices = app.model().vertices().keys().copied().collect();
+        app.choose_modify(kind);
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, vec![], egui::Modifiers::NONE);
+        (app, ctx)
+    }
+    fn frame(
+        app: &mut DrafterApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) {
+        crate::input_tests::frame(app, ctx, events, modifiers);
+    }
+    fn key(key: Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+    fn position(app: &DrafterApp, point: DVec3) -> egui::Pos2 {
+        let p = View {
+            matrix: app.camera.view_projection(1.5).as_dmat4(),
+            size: glam::DVec2::new(600., 400.),
+        }
+        .project(point)
+        .unwrap();
+        egui::pos2(p.x as f32 + 8., p.y as f32 + 8.)
+    }
+    fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+    fn begin(app: &mut DrafterApp) {
+        app.modify
+            .begin(
+                app.history.model(),
+                &app.selection,
+                None,
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.modify.set_reference(DVec3::X).unwrap();
+        app.modify
+            .update(if app.modify.kind() == ModifyKind::Copy {
+                DVec3::Z * 3.
+            } else {
+                DVec3::X * 3.
+            })
+            .unwrap();
+    }
+    #[test]
+    fn transform_parity_keyboard_measurements_escape_and_undo_reset_all_kinds() {
+        for (kind, text) in [
+            (ModifyKind::Move, "2m"),
+            (ModifyKind::Copy, "150cm"),
+            (ModifyKind::Rotate, "90"),
+            (ModifyKind::Scale, "2"),
+        ] {
+            let (mut app, ctx) = fixture(kind);
+            let before = app.model().clone();
+            let depth = app.history.undo_depth();
+            let hover = position(&app, DVec3::ZERO);
+            frame(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(hover)],
+                egui::Modifiers::NONE,
+            );
+            begin(&mut app);
+            frame(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::Text(text.into()),
+                    key(Key::Enter, egui::Modifiers::NONE),
+                ],
+                egui::Modifiers::NONE,
+            );
+            assert!(app.error.is_none(), "{kind:?}: {:?}", app.error);
+            assert_eq!(app.history.undo_depth(), depth + 1);
+            assert!(!app.modify.active());
+            let after = app.model().clone();
+            assert_ne!(after, before);
+            begin(&mut app);
+            let command = app
+                .modify
+                .measure(if kind == ModifyKind::Rotate {
+                    "45"
+                } else {
+                    "3"
+                })
+                .unwrap()
+                .unwrap();
+            app.modify_preview(command);
+            frame(
+                &mut app,
+                &ctx,
+                vec![key(Key::Escape, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            assert_eq!(app.model(), &after);
+            assert!(!app.modify.active());
+            let command = egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            };
+            begin(&mut app);
+            frame(&mut app, &ctx, vec![key(Key::Z, command)], command);
+            assert_eq!(app.model(), &before);
+            assert!(!app.modify.active());
+            frame(&mut app, &ctx, vec![key(Key::Y, command)], command);
+            assert_eq!(app.model(), &after);
+        }
+    }
+    #[test]
+    fn transform_parity_move_two_clicks_and_axis_lock_preview() {
+        let (mut app, ctx) = fixture(ModifyKind::Move);
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        let start = position(&app, DVec3::ZERO);
+        let end = position(&app, DVec3::new(3., 1., 0.));
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            egui::Modifiers::NONE,
+        );
+        frame(
+            &mut app,
+            &ctx,
+            vec![button(start, false)],
+            egui::Modifiers::NONE,
+        );
+        assert!(app.modify.active());
+        frame(
+            &mut app,
+            &ctx,
+            vec![
+                key(Key::ArrowRight, egui::Modifiers::NONE),
+                egui::Event::PointerMoved(end),
+            ],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(app.axis_lock, Some(Axis::X));
+        let (lo, hi) = app.model().bounds().unwrap();
+        assert!(lo.y.abs() < 1e-6 && (hi.y - 2.).abs() < 1e-6);
+        assert!(lo.x > 1.);
+        assert_eq!(app.history.undo_depth(), depth);
+        frame(
+            &mut app,
+            &ctx,
+            vec![button(end, true)],
+            egui::Modifiers::NONE,
+        );
+        frame(
+            &mut app,
+            &ctx,
+            vec![button(end, false)],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        assert!(!app.modify.active());
+        app.history_step(false);
+        assert_eq!(app.model(), &before);
+    }
+    fn shortcut(keyboard_key: Key, kind: ModifyKind) {
+        let (mut app, ctx) = fixture(ModifyKind::Select);
+        let hover = position(&app, DVec3::ZERO);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(hover)],
+            egui::Modifiers::NONE,
+        );
+        frame(
+            &mut app,
+            &ctx,
+            vec![key(keyboard_key, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(app.modify.kind(), kind);
+    }
+    #[test]
+    #[ignore = "gap: M shortcut is not routed to Move"]
+    fn transform_parity_m_shortcut() {
+        shortcut(Key::M, ModifyKind::Move);
+    }
+    #[test]
+    #[ignore = "gap: Q shortcut is not routed to Rotate"]
+    fn transform_parity_q_shortcut() {
+        shortcut(Key::Q, ModifyKind::Rotate);
+    }
+    #[test]
+    #[ignore = "gap: S shortcut is not routed to Scale"]
+    fn transform_parity_s_shortcut() {
+        shortcut(Key::S, ModifyKind::Scale);
+    }
+    #[test]
+    #[ignore = "gap: Ctrl does not toggle Move copy mode"]
+    fn transform_parity_ctrl_copy_toggle() {
+        let (mut app, ctx) = fixture(ModifyKind::Move);
+        let start = position(&app, DVec3::ZERO);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            egui::Modifiers::NONE,
+        );
+        frame(
+            &mut app,
+            &ctx,
+            vec![button(start, false)],
+            egui::Modifiers::NONE,
+        );
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            ..egui::Modifiers::NONE
+        };
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text("3m".into()), key(Key::Enter, ctrl)],
+            ctrl,
+        );
+        assert!(app.error.is_none(), "{:?}", app.error);
+        assert_eq!(app.model().faces().len(), 2);
+    }
+    #[test]
+    #[ignore = "gap: Rotate first click uses selection centroid instead of chosen pivot"]
+    fn transform_parity_rotate_clicked_pivot() {
+        let (mut app, ctx) = fixture(ModifyKind::Rotate);
+        let p = position(&app, DVec3::ZERO);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(p), button(p, true)],
+            egui::Modifiers::NONE,
+        );
+        assert!(app.modify.anchor().unwrap().distance(DVec3::ZERO) < 1e-6);
+    }
+    #[test]
+    #[ignore = "gap: Scale has no corner grips/opposite-corner anchor; uses centroid"]
+    fn transform_parity_scale_opposite_corner_anchor() {
+        let (mut app, ctx) = fixture(ModifyKind::Scale);
+        let p = position(&app, DVec3::ZERO);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(p), button(p, true)],
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            app.modify
+                .anchor()
+                .unwrap()
+                .distance(DVec3::new(2., 2., 0.))
+                < 1e-6
+        );
+    }
+}

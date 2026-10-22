@@ -1,0 +1,13 @@
+   Compiling cindral-core v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-core)
+    Finished `release` profile [optimized] target(s) in 1.80s
+     Running tests/transform_parity_performance.rs (target/release/deps/transform_parity_performance-5a7ef69b1b9ae7bb)
+
+running 1 test
+Move: 20,006 faces / 8 selected vertices / 30 previews; CPU max=0.298444 ms; commit=0.000300 ms
+Copy: 20,006 faces / 8 selected vertices / 30 previews; CPU max=0.246892 ms; commit=0.000350 ms
+Rotate: 20,006 faces / 8 selected vertices / 30 previews; CPU max=0.250133 ms; commit=0.000620 ms
+Scale: 20,006 faces / 8 selected vertices / 30 previews; CPU max=0.359794 ms; commit=0.000510 ms
+test transform_parity_20k_cpu_budget ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+

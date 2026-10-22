@@ -21,6 +21,7 @@ Evidence paths below are relative to the repository. `MU` = `crates/cindral-app/
 | A11 Scale dimensional entry | Grip direction supports target size and multi-axis entries. | missing | MS:345 only scalar/%/x; no grips/directional scale. |
 | A12 Before-first-click typing | Exact response to typing before any anchor/grip is uncertain. | unsure | Q1; MU:128 only accepts viewport text while active; focused field can submit but session returns NotReady. |
 | A13 Immediately-after Move typing | Last displacement can be revised after placement. | missing | MU:60/finish_modify, MS:963 clears session; ignored remeasurement regression. |
+| A14 Rotate/Scale after-placement typing | Whether a completed angle/factor can be revised without restarting needs a trial. | unsure | Q12; MS:963 clears anchor; UI has no last-operation remeasurement state. |
 | I1 Move two-click placement | Pick reference, move pointer, click destination. | matches | MU:247–349 keeps initial press and commits on later release away from start; headless app test. |
 | I2 Move drag-release | Whether drag-release is interchangeable with two clicks in user's version/settings needs a trial. | unsure | Q2; existing `live_move_drag_commits_once_and_escape_restores_geometry_and_mesh` proves Cindral drag behavior only. |
 | I3 Rotate pivot/reference/end | User places pivot, baseline, then final angle. | differs | MU:262/291 substitutes selected-vertex centroid and first-hit reference; no three-stage pivot workflow. |
@@ -29,7 +30,7 @@ Evidence paths below are relative to the repository. `MU` = `crates/cindral-app/
 | I6 Double click | Tool-specific repeat or completion behavior needs confirmation. | unsure | Q3; MU has triple-click only in Select; transform path has no special double-click branch. |
 | I7 Empty first click, no selection | Exact idle/error behavior needs confirmation. | unsure | Q4; MS:582 fails NotReady with no targets; MU:249 explicit plane error if no point. |
 | N1 Move endpoint/midpoint/edge/face | Inferences can position the reference point. | matches | MU:173–230 feeds shared engine result to update; `cindral-inference/src/lib.rs` SnapKind and inference tests; read the code. |
-| N2 Move axis colors | Red X, green Y, blue Z communicate axes. | matches | `cindral-inference/src/lib.rs:9`; `crates/cindral-app/src/lib.rs` inference overlay axis colors; read the code. |
+| N2 Move axis feedback | Red X, green Y, blue Z identify inferred movement direction. | differs | `crates/cindral-app/src/lib.rs:325` suppresses inference overlay while modifying; axis labels exist at 641 but are not drawn in transform mode. MU draws selection/measurement only. |
 | N3 Move arrow locks | Right X, left Y, up Z constrain displacement. | matches | MU:113–124/194; shared hard-lock query; app regression. |
 | N4 Shift inference hold | Hold a previously acquired movement inference. | missing | MU:235 reads Shift for selection only; no inference-hold state. |
 | N5 Rotate plane locking | Arrow/Shift locks choose the rotation plane. | differs | MU:113/258 sets query axis lock but rotation axis still comes from face/work plane; no Shift plane hold. |
@@ -43,12 +44,13 @@ Evidence paths below are relative to the repository. `MU` = `crates/cindral-app/
 | S3 Groups/components | Transform a selected instance without flattening its definition. | matches | OU:669–759 uses instance transforms/duplicate; existing `container_drag_cancel_typed_commit_and_shared_context_dimming`. Narrow scope: one instance. |
 | S4 Editing context | Geometry edits apply to active definition; shared instances update. | matches | `organization_ui::tests::scripted_three_instances_edit_in_place_exit_undo_reverts_all_and_redo_restores_all`; history world/context transform. |
 | S5 Mixed/multiple containers | Transform several selected objects together. | missing | OU:1073 uses one `organization.selected` InstancePath; raw Selection does not hold instance paths. |
-| G1 Isolated raw geometry | Rigid transforms/positive scale produce valid geometry; Copy keeps original. | matches | `cindral-core/src/modification.rs:184`; new real-history geometry tests. |
+| G1 Isolated, disjoint raw geometry | Rigid transforms/positive scale produce valid geometry; Copy keeps original. | matches | `cindral-core/src/modification.rs:184`; new real-history geometry tests. |
 | G2 Connected stretching/autofold | Exact face splitting/healing after nonplanar connected edits requires a fixture trial. | unsure | Q6; `modification.rs:260` updates touched face planes and validates; no general autofold stage in tool. |
 | G3 Faces with holes | Rigid transform should carry inner loops and preserve hole area. | matches | `modification.rs:227–245` maps hole vertices; new holed-face transform contract. |
-| G4 Normals/reflections | Winding/front-back behavior under reflections needs comparison. | unsure | Q7; `modification.rs:276` recomputes plane; loose Scale rejects negative factor, instance Scale permits it. |
+| G4 Normals/reflections | Negative Scale can mirror; exact winding/front-back behavior needs comparison. | unsure | Q7; `modification.rs:276` recomputes plane; loose Scale rejects negative factor, instance Scale permits it. |
 | G5 Curved/soft surfaces | Smooth/soft selection, deformation and seam behavior need comparison. | unsure | Q8; kernel copies edge flags but no analytic curved deformation workflow established. |
 | G6 Imported .skp geometry | Same authored operation should work on supported imported entities; exact fixture behavior unverified. | unsure | Q9; no importer changes/test certification; historical Move-only profiling is not parity proof. |
+| G7 Overlapping coplanar Copy | Shared raw geometry splits/merges at intersections. | differs | `transform_overlapping_copy_splits_intersections` fails with InvalidTopology: intersection has not been split; transactional rollback prevents corruption. |
 | U1 Escape raw preview | Cancel restores model without history entry. | matches | MU:92; `History::cancel_preview`; new four-kind cancellation contract. |
 | U2 Commit/undo/redo | One operation is one undo entry, redo restores result. | matches | MU:36; real History preview/commit contract for all four kinds. |
 | U3 Undo resets raw tool | Undo cancels provisional operation and clears active state before history traversal. | matches | MU:102–110; synthetic app regression. Axis lock persistence assessed separately in Q10. |
@@ -74,6 +76,8 @@ Every unsure row is covered here. Please record SketchUp version, desktop platfo
 10. **U4:** Lock Move to red using Right, start a move, press Escape, start another move and move away from red. Is the lock retained? Repeat after Ctrl+Z during a provisional move.
 11. **P1:** On your Ryzen 5 2400G with a roughly 20k-face model, run the three transforms with recording/timing enabled. Are full preview frames below 16 ms and completed operations below 100 ms? Report geometry selection size and model structure; visual smoothness alone cannot certify either bound.
 
+12. **A14:** Rotate a selected rectangle 90 degrees, click to finish, then immediately type `45` and Enter. Is the same rotation revised to 45 degrees? Repeat Scale: finish factor 2, then immediately type `1.5` and Enter; does it replace or compound the factor?
+
 ## Manual side-by-side script
 
 Start a fresh meter-unit model in each app, Top view, orthographic projection. Prepare two separate 2m × 2m rectangles at (0,0)–(2,2) and (6,0)–(8,2). Select all of the first rectangle using a left-to-right selection box. Use Cindral's labeled toolbar/menu buttons when a shortcut is missing. Ctrl means Windows/Linux Ctrl; use macOS Option for copy. Undo each independent trial to restore the fixture. Expected outcomes are behavioral, not pixel comparisons.
@@ -92,8 +96,44 @@ Start a fresh meter-unit model in each app, Top view, orthographic projection. P
 12. Activate Scale; pick a corner grip, tap **Ctrl**, type **2**, **Enter**. Expected: centered proportional scaling. Undo; repeat without Ctrl to see opposite-corner anchoring. Cindral always uses centroid and cannot toggle anchors.
 13. With first rectangle selected, start each tool using its button, move pointer until preview changes, then press **Escape**. Expected: exact starting geometry, same undo depth, tool no longer provisional. Repeat with an invalid typed value **2m trailing**, **Enter**: error appears and document stays valid; Escape restores original.
 14. Make the first rectangle a group in each app via its context menu. Select the group, Move **2m**, Rotate **90**, Scale **2**, using the pivot/grip procedures above (Cindral's existing centroid workflow for its controls). Expected: instance stays a group, each completed operation adds one undo entry. Press **Ctrl+Z** three times, then **Ctrl+Y** three times: exact geometry states restored. Double-click group, select its face, repeat a Move and undo: operation belongs to editing context.
-15. Run Q1–Q11 separately, then repeat steps 2, 8 and 10 on a roughly 20k-face model in **release mode**. Expected budget: preview <16ms, commit <100ms; record actual frame measurements. A CPU-only probe cannot establish this full-frame result.
+15. Run Q1–Q12 separately, then repeat steps 2, 8 and 10 on a roughly 20k-face model in **release mode**. Expected budget: preview <16ms, commit <100ms; record actual frame measurements. A CPU-only probe cannot establish this full-frame result.
 
 ## Validation and performance
 
-Final test names, release CPU measurements and completion checks are recorded in the completion step below. All automated checks are GPU-free; frontend tests use synthetic egui frames. Imported .skp parity, complex folds, reflection orientation and GPU timings remain unverified. No dependency or non-test behavior changes are authorized by this report.
+The final table contains **51 rows: 18 matches, 8 differs, 13 missing, 12 unsure**. Twelve user trials cover every unsure row. All automated checks are GPU-free; frontend tests use synthetic egui frames. Imported .skp parity, complex folds, reflection orientation and GPU timings remain unverified. No dependency or non-test behavior changes are authorized by this report.
+
+GPU-free test coverage:
+
+- `transform_typed_values_produce_precise_valid_geometry`: Move/Copy signed metric/imperial suffix values, signed rotation degrees and positive scale factors; actual coordinates, originals retained on disjoint Copy, face counts and model validity.
+- `transform_cancel_restores_exact_model_and_history_for_all_kinds`, `transform_absolute_previews_commit_one_entry_and_undo_redo_exactly`: all four kinds, exact model snapshots, no preview history entries, one commit entry, undo/redo and inactive finished session.
+- `transform_invalid_input_preserves_valid_session_and_empty_hit_reports_error`: invalid input preserves last command/measurement; targetless start reports an error.
+- `transform_rigid_and_positive_scale_preserve_hole_area`: inner loops and annulus area under Move/Copy/Rotate/Scale.
+- `modify_ui::transform_parity_tests::transform_parity_keyboard_measurements_escape_and_undo_reset_all_kinds`: synthetic egui text/Enter, Escape, undo and redo across all four kinds.
+- `modify_ui::transform_parity_tests::transform_parity_move_two_clicks_and_axis_lock_preview`: actual pointer press/release frames, Right lock, constrained live geometry, one history entry.
+
+Thirteen desired-behavior tests remain ignored with individual reasons: seven tools tests (compound units, relative coordinates, remeasurement, negative loose Scale, Scale target dimensions, preselection isolation, overlapping Copy) and six frontend tests (M/Q/S, Ctrl Copy, chosen Rotate pivot, opposite Scale corner anchor). Explicit ignored runs confirm all thirteen fail; no production fixes. A fourteenth ignored test is the release-only CPU timing probe, not a known semantic failure.
+
+The initial tests exposed overlapping in-plane copies failing validation. Ordinary precision/history tests now deliberately use disjoint copies along Z; the failing overlap case remains a separate ignored regression and row G7. The first frontend harness attempted an out-of-plane Scale reference and omitted a qualified glam type; corrected only test setup before passing. No product behavior was altered to make tests pass.
+
+Release CPU reproduction (existing `bench-fixtures` feature; no new dependency):
+
+```sh
+cargo test -p cindral-core --features bench-fixtures --release --test transform_parity_performance -- --ignored --nocapture
+```
+
+Ryzen 5 2400G; authored 20,006-face separated fixture, **eight selected vertices** on one isolated solid; thirty absolute previews and one commit per kind. Includes real transactional preview preparation/application and commit, excludes fixture setup, tool command construction, picking, inference, egui, mesh preparation, upload, GPU and presentation. Does not establish whole-model transformation performance or imported .skp parity. Full <16ms/<100ms budget remains **unsure**.
+
+First sample (potentially concurrent with frontend compilation), max preview/commit ms: Move **0.325094/0.000790**, Copy **0.266033/0.000350**, Rotate **0.269203/0.000370**, Scale **0.246553/0.000410**. Final isolated output and values follow; initial figures retained to avoid substituting a favorable run without disclosure.
+
+Final isolated CPU run (after builds and workspace checks):
+
+| Operation | Maximum CPU preview (ms) | CPU commit (ms) |
+| --- | ---: | ---: |
+| Move | 0.298444 | 0.000300 |
+| Copy | 0.246892 | 0.000350 |
+| Rotate | 0.250133 | 0.000620 |
+| Scale | 0.359794 | 0.000510 |
+
+Raw final output: [`transform-release.txt`](transform-release.txt). All CPU subset assertions pass; no inference from these figures to complete presented frames.
+
+Completion: targeted `cargo check -p cindral-tools` and `cargo check -p cindral-app` pass; seven new ordinary tests pass, all thirteen explicitly run ignored semantic regressions fail as documented. `cargo fmt --all`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and one `cargo test --workspace --all-features` pass (**375 passed, zero failed, 40 ignored** across the workspace). App additions are entirely inside a new `#[cfg(test)]` module. No production behavior, dependencies or importer code changed. User's pre-existing `.gitignore` edit excluded. Report and completion committed as separate steps; stopped before fixes.
