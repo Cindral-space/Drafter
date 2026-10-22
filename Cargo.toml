@@ -10,3 +10,17 @@ license = "MIT OR Apache-2.0"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+
+[profile.dev]
+opt-level = 1
+debug-assertions = true
+overflow-checks = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.cindral-core]
+opt-level = 3
+
+[profile.dev.package.cindral-inference]
+opt-level = 3

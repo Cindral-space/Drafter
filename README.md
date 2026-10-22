@@ -38,6 +38,8 @@ See the [UI/UX review](docs/UI_UX_REVIEW.md) for findings, changes and validatio
 cargo run -p cindral-app
 ```
 
+The dev profile keeps debug assertions and overflow checks on while optimizing the workspace crates and dependencies, so everyday testing on imported models stays responsive. With [bacon](https://dystroy.org/bacon/), `bacon run` rebuilds and restarts the dev app on change. Use `bacon run-release` to compare against a fully optimized build without dev debug assertions.
+
 The native window launches maximized on every start, including after closing it at a smaller size. The workspace fills the window and adjusts its canvas and panels when resized. Normal window controls remain available.
 
 The native window uses eframe/winit and wgpu. Linux requires a working Vulkan or OpenGL ES driver and a Wayland or X11 display. To select the OpenGL backend explicitly:
