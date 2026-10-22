@@ -695,4 +695,164 @@ mod tests {
         }
         assert!(a.distance(b) > 100.);
     }
+
+    #[test]
+    fn push_pull_parity_drag_and_click_move_click() {
+        for drag in [false, true] {
+            let mut app = DrafterApp::default();
+            rectangle(&mut app);
+            app.choose_modify(ModifyKind::PushPull);
+            let ctx = egui::Context::default();
+            frame(&mut app, &ctx, vec![]);
+            let start = position(&app, DVec3::new(1., 1., 0.));
+            let end = position(&app, DVec3::new(1., 1., 1.));
+            let depth = app.history.undo_depth();
+            frame(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+            );
+            if !drag {
+                frame(&mut app, &ctx, vec![button(start, false)]);
+                assert!(app.modify.active());
+            }
+            frame(&mut app, &ctx, vec![egui::Event::PointerMoved(end)]);
+            assert_eq!(app.history.undo_depth(), depth);
+            if !drag {
+                frame(&mut app, &ctx, vec![button(end, true)]);
+            }
+            frame(&mut app, &ctx, vec![button(end, false)]);
+            assert!(!app.modify.active());
+            assert_eq!(app.history.undo_depth(), depth + 1);
+            assert!((app.model().bounds().unwrap().1.z - 1.).abs() < 1e-4);
+            app.model().validate().unwrap();
+        }
+    }
+
+    fn parity_key(key: Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn push_pull_parity_escape_and_history_reset() {
+        let mut app = DrafterApp::default();
+        rectangle(&mut app);
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        let ctx = egui::Context::default();
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(300., 200.))],
+        );
+        app.choose_modify(ModifyKind::PushPull);
+        let face = *app.model().faces().keys().next().unwrap();
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        let command = app.modify.measure("150cm").unwrap().unwrap();
+        app.modify_preview(command);
+        assert_ne!(app.model(), &before);
+        frame(
+            &mut app,
+            &ctx,
+            vec![parity_key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert!(!app.modify.active());
+        app.model().validate().unwrap();
+
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.measurement = "2m".into();
+        app.apply_measurement();
+        let solid = app.model().clone();
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        let modifiers = egui::Modifiers {
+            command: true,
+            ctrl: true,
+            ..Default::default()
+        };
+        crate::input_tests::frame(
+            &mut app,
+            &ctx,
+            vec![parity_key(Key::Z, modifiers)],
+            modifiers,
+        );
+        assert_eq!(app.model(), &before);
+        assert!(!app.modify.active());
+        crate::input_tests::frame(
+            &mut app,
+            &ctx,
+            vec![parity_key(Key::Y, modifiers)],
+            modifiers,
+        );
+        assert_eq!(app.model(), &solid);
+        assert!(!app.modify.active());
+        app.model().validate().unwrap();
+    }
+
+    #[test]
+    #[ignore = "Push/Pull parity: P currently activates Polygon"]
+    fn push_pull_parity_p_activates_push_pull() {
+        let mut app = DrafterApp::default();
+        let ctx = egui::Context::default();
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(300., 200.))],
+        );
+        frame(
+            &mut app,
+            &ctx,
+            vec![parity_key(Key::P, egui::Modifiers::NONE)],
+        );
+        assert!(app.modifying);
+        assert_eq!(app.modify.kind(), ModifyKind::PushPull);
+    }
+
+    #[test]
+    #[ignore = "Push/Pull parity: completed operation cannot be remeasured; session is NotReady"]
+    fn push_pull_parity_retype_after_commit_changes_same_extrusion() {
+        let mut app = DrafterApp::default();
+        rectangle(&mut app);
+        app.choose_modify(ModifyKind::PushPull);
+        let face = *app.model().faces().keys().next().unwrap();
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                Some(Hit::Face(face)),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.measurement = "2m".into();
+        app.apply_measurement();
+        app.measurement = "150cm".into();
+        app.apply_measurement();
+        assert!(app.error.is_none(), "{:?}", app.error);
+        assert!((app.model().bounds().unwrap().1.z - 1.5).abs() < 1e-7);
+        app.model().validate().unwrap();
+    }
 }
