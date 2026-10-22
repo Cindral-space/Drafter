@@ -174,6 +174,7 @@ pub struct MeshCache {
 impl MeshCache {
     /// Triangulates all model faces and extracts all edges with cached visibility flags once using a custom face style closure,
     /// returning a populated cache and a full [`MeshUpdate`] (`reset = true`).
+    #[tracing::instrument(level = "info", skip_all, name = "mesh.cpu_rebuild")]
     pub fn rebuild_styled(
         model: &Model,
         style_fn: &impl Fn(FaceId, &Face) -> FaceStyle,

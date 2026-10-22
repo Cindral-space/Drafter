@@ -46,3 +46,11 @@ version = "0.17"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "import_pushpull_benchmark"
+required-features = ["kernel-benchmark"]
+
+[[example]]
+name = "import_pushpull_gpu"
+required-features = ["kernel-benchmark"]

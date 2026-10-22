@@ -89,3 +89,66 @@ fails the preview assertion. Absolute budgets assume an otherwise idle machine.
 optionally uses an actual file opened at root; nested editing contexts need a custom
 selection. No local model is copied/committed. GPU example uses the same workload
 and waits for queue completion; software adapters must be identified separately.
+
+Pre-optimization completed GPU upload confirmation (same fixture, actual Vega 11,
+OpenGL/Mesa 26.2.3): upload mean/max **0.605/4.003 ms**, entire update max
+**59.865 ms**, pick mean/max **13.699/54.848 ms**. Upload remains secondary;
+its first-update maximum includes buffer growth. No full presented-frame claim.
+[Adapter/raw output](benchmarks/2026-10-22-import-pushpull-gpu-before.txt).
+
+## Optimized result
+
+The existing R-tree now prunes both parent and leaf envelopes using a conservative
+ray/slab test, including tolerance/roundoff padding and the maintained translation
+frame. Candidate IDs remain ordered. Picking's initial face query and each
+screen-near candidate's own occlusion ray use it; inference's face query shares it.
+The exact polygon/hole/section tests, pick priorities, kernel algorithms, import
+cleanup, undo semantics and dirty mesh path are unchanged.
+
+| Workload | Before full preview max ms | After full preview max ms | After commit ms |
+| --- | ---: | ---: | ---: |
+| Imported 4,096 faces, CPU | 36.950 | **3.085** | 0.001 |
+| Drawn equivalent 4,096 faces, CPU | 39.834 | **2.654** | 0.049 |
+| Imported 19,600 faces, CPU | 763.673 | **12.635** | 0.001 |
+| Imported 4,096 faces, completed Vega 11 upload | 59.865 | **4.114** | 0.001 |
+| Imported 19,600 faces, completed Vega 11 upload | Not sampled | **12.413** | 0.001 |
+
+At 19,600 faces the CPU-only pick mean/max is now **7.979/8.910 ms**,
+inference **0.938/1.219 ms**, kernel **1.708/2.492 ms**, dirty CPU mesh
+**0.055/0.073 ms**. GPU run completed-upload mean/max **0.606/0.954 ms**;
+begin **0.016 ms**. All 60 updates, cold included, pass <16 ms; commit passes
+<100 ms and no measured interactive phase/update exceeds 250 ms. Thus no worker
+or progress UI is needed for the measured operation. No import quality changes:
+before/after source V/E/F counts are identical. [CPU results](benchmarks/2026-10-22-import-pushpull-after.txt),
+[GPU results and adapter](benchmarks/2026-10-22-import-pushpull-gpu-after.txt).
+
+Correctness compares indexed versus retained exhaustive picking for vertices,
+edges, faces and misses with holes, foreground occlusion, sections, perspective
+and orthographic views, boundary tolerances, preview/cancel, raw translation,
+commit and undo/redo. A 60-preview imported/drawn cube regression compares exact
+face boundary coordinates after every +/- update and checks single-step history,
+undo/redo and cancellation. Existing kernel/local-extrusion equivalence tests
+continue to cover the geometry algorithms; those algorithms were not modified.
+
+```sh
+cargo test -p cindral-core ray_tests
+cargo test -p cindral-tools indexed_pick_equivalence
+cargo test -p cindral-io --test pushpull_import
+WGPU_BACKEND=gl CINDRAL_BENCH_GPU=1 scripts/check-import-pushpull-performance.sh
+```
+
+The benchmark examples are behind the existing `kernel-benchmark` feature. GPU
+runs use a display-free real adapter/device, actual SceneRenderer updates and queue
+completion. They exclude raster/presentation, UI layout and input dispatch. Timings
+are one sequence each, not p95/editor FPS guarantees. `bacon run` used an unoptimized
+debug executable in the earlier session; use `cargo run --release -p cindral-app`
+(or configure bacon's job for release) when comparing these budgets.
+
+Remaining vertex/edge projection scans scale linearly with model size. Very dense
+screen regions can still produce many ray queries; arbitrary nonplanar/holed
+Boolean fallbacks retain their prior unbounded synchronous behavior. No actual
+user SKP was available, so this does not prove every reported file is fixed. If
+such a file still stalls, capture these spans on that exact operation; a bounded
+screen-query index or cancellable worker for a measured general-Boolean fallback
+would be separate options. No redesign was started, and no blanket event-loop
+latency guarantee is made beyond the measured fixtures.

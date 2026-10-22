@@ -109,6 +109,7 @@ impl Engine {
         })
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "inference.best_vertex_candidate")]
     fn best_vertex_candidate(
         &self,
         model: &Model,
@@ -174,6 +175,7 @@ impl Engine {
         best
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "inference.best_midpoint_candidate")]
     fn best_midpoint_candidate(
         &self,
         model: &Model,
@@ -242,6 +244,7 @@ impl Engine {
         best
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "inference.best_on_edge_candidate")]
     fn best_on_edge_candidate(
         &self,
         model: &Model,
@@ -430,6 +433,7 @@ impl Engine {
         update_best(best, candidate);
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "inference.best_face_candidate")]
     fn best_face_candidate(
         &self,
         model: &Model,
@@ -437,7 +441,8 @@ impl Engine {
         ray_dir: DVec3,
     ) -> Option<Candidate> {
         let mut best: Option<Candidate> = None;
-        for (&face_id, face) in model.faces() {
+        for face_id in model.face_candidates_for_ray(query.ray.origin, ray_dir, f64::INFINITY) {
+            let face = &model.faces()[&face_id];
             let Some((position, ray_depth)) =
                 ray_face_intersection(model, face, query.ray.origin, ray_dir)
             else {

@@ -1095,5 +1095,6 @@ mod style_tests {
     }
 }
 
+#[cfg(feature = "kernel-benchmark")]
 /// Imported versus drawn drag performance workload.
 pub mod import_pushpull_benchmark;

@@ -135,6 +135,19 @@ impl Model {
         })
     }
 
+    /// Conservative face candidates along a forward ray, in stable ID order.
+    /// Uses the maintained spatial cache, falling back to all faces when unindexed.
+    /// Direction is normalized here; `max_distance` is in meters (infinity allowed).
+    /// Callers must still test exact face boundaries, holes and visibility.
+    pub fn face_candidates_for_ray(&self, origin: DVec3, direction: DVec3, max_distance: f64) -> Vec<FaceId> {
+        let Some(direction) = direction.try_normalize() else { return Vec::new(); };
+        if !origin.is_finite() || !direction.is_finite() || max_distance.is_nan() || max_distance < 0. { return Vec::new(); }
+        self.spatial.as_ref().map_or_else(
+            || self.faces.keys().copied().collect(),
+            |index| index.ray_faces(origin, direction, max_distance),
+        )
+    }
+
     /// Boundary edge identities for a face, including inner loops.
     pub fn face_edges(&self, id: FaceId) -> Vec<EdgeId> {
         if let Some(spatial) = &self.spatial {

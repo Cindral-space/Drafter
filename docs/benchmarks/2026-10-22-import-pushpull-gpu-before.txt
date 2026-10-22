@@ -1,0 +1,4 @@
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+imported: V=4225 E=8320 F=4096 instances=301 begin=0.019ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=13.699/54.848 inference=0.183/0.281 kernel=0.455/0.721 cpu_mesh=0.057/0.328 upload=0.605/4.003; total_max=59.865 commit=0.001

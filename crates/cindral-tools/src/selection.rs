@@ -385,6 +385,18 @@ pub fn pick_section(
     radius: f64,
     section: Option<&cindral_core::SectionPlane>,
 ) -> Option<Hit> {
+    pick_section_impl(model, ray, view, cursor, radius, section, true)
+}
+// Keep an exhaustive reference for differential tests; production always uses the index.
+fn ray_candidates(model: &Model, origin: DVec3, direction: DVec3, max_distance: f64, indexed: bool) -> Vec<FaceId> {
+    if indexed { model.face_candidates_for_ray(origin, direction, max_distance) }
+    else { model.faces().keys().copied().collect() }
+}
+#[allow(clippy::too_many_arguments)]
+fn pick_section_impl(
+    model: &Model, ray: Ray, view: View, cursor: DVec2, radius: f64,
+    section: Option<&cindral_core::SectionPlane>, indexed: bool,
+) -> Option<Hit> {
     if !cursor.is_finite()
         || !radius.is_finite()
         || radius < 0.0
@@ -398,9 +410,11 @@ pub fn pick_section(
     }
     let ray_dir = ray.direction.try_normalize()?;
 
+    let face_scan = tracing::info_span!("pick.face_candidates").entered();
     // 1. Nearest visible face along picking ray
     let mut best_face: Option<(FaceId, f64)> = None;
-    for (&face_id, face) in model.faces() {
+    for face_id in ray_candidates(model, ray.origin, ray_dir, f64::INFINITY, indexed) {
+        let face = &model.faces()[&face_id];
         let Some((point, t)) = ray_face_intersection(model, face, ray.origin, ray_dir) else {
             continue;
         };
@@ -423,8 +437,10 @@ pub fn pick_section(
         }
     }
 
+    drop(face_scan);
     let max_depth = best_face.map_or(f64::INFINITY, |(_, t)| t + TOLERANCE);
 
+    let vertex_scan = tracing::info_span!("pick.scan_vertices").entered();
     // 2. Vertex candidates within screen radius
     let mut best_vertex: Option<(VertexId, f64, f64)> = None;
     for (&vertex_id, vertex) in model.vertices() {
@@ -446,7 +462,7 @@ pub fn pick_section(
         if ray_depth < 0.0 || ray_depth > max_depth {
             continue;
         }
-        if is_vertex_occluded(model, vertex_id, pos, &view, ray.origin, ray_dir, section) {
+        if is_vertex_occluded(model, vertex_id, pos, &view, ray.origin, ray_dir, section, indexed) {
             continue;
         }
         let candidate = (vertex_id, screen_dist, ray_depth);
@@ -467,6 +483,8 @@ pub fn pick_section(
         }
     }
 
+    drop(vertex_scan);
+    let edge_scan = tracing::info_span!("pick.scan_edges").entered();
     // 3. Edge candidates within screen radius
     let mut best_edge: Option<(EdgeId, f64, f64)> = None;
     for (&edge_id, edge) in model.edges() {
@@ -501,7 +519,7 @@ pub fn pick_section(
         if ray_depth < 0.0 || ray_depth > max_depth {
             continue;
         }
-        if is_edge_occluded(model, edge, p_edge, &view, ray.origin, ray_dir, section) {
+        if is_edge_occluded(model, edge, p_edge, &view, ray.origin, ray_dir, section, indexed) {
             continue;
         }
         let candidate = (edge_id, screen_dist, ray_depth);
@@ -522,6 +540,7 @@ pub fn pick_section(
         }
     }
 
+    drop(edge_scan);
     // 4. Resolve between vertex and edge
     let best_sub: Option<Hit> = match (best_vertex, best_edge) {
         (Some((vid, vsdist, vdepth)), Some((eid, esdist, edepth))) => {
@@ -823,6 +842,7 @@ fn closest_point_on_segment_screen(
 
 #[allow(dead_code)]
 #[tracing::instrument(level = "info", skip_all, name = "pick.vertex_occlusion")]
+#[allow(clippy::too_many_arguments)]
 fn is_vertex_occluded(
     model: &Model,
     vertex_id: VertexId,
@@ -831,6 +851,7 @@ fn is_vertex_occluded(
     ray_origin: DVec3,
     ray_dir: DVec3,
     section: Option<&cindral_core::SectionPlane>,
+    indexed: bool,
 ) -> bool {
     let inv_vp = view.matrix.inverse();
     let (test_origin, test_dir, target_dist) = if inv_vp.is_finite() {
@@ -859,7 +880,8 @@ fn is_vertex_occluded(
         return false;
     }
 
-    for face in model.faces().values() {
+    for id in ray_candidates(model, test_origin, test_dir, target_dist, indexed) {
+        let face = &model.faces()[&id];
         if face.outer.contains(&vertex_id) || face.holes.iter().any(|h| h.contains(&vertex_id)) {
             continue;
         }
@@ -878,6 +900,7 @@ fn is_vertex_occluded(
 
 #[allow(dead_code)]
 #[tracing::instrument(level = "info", skip_all, name = "pick.edge_occlusion")]
+#[allow(clippy::too_many_arguments)]
 fn is_edge_occluded(
     model: &Model,
     edge: &Edge,
@@ -886,6 +909,7 @@ fn is_edge_occluded(
     ray_origin: DVec3,
     ray_dir: DVec3,
     section: Option<&cindral_core::SectionPlane>,
+    indexed: bool,
 ) -> bool {
     let inv_vp = view.matrix.inverse();
     let (test_origin, test_dir, target_dist) = if inv_vp.is_finite() {
@@ -915,7 +939,8 @@ fn is_edge_occluded(
     }
 
     let [v0, v1] = edge.vertices;
-    for face in model.faces().values() {
+    for id in ray_candidates(model, test_origin, test_dir, target_dist, indexed) {
+        let face = &model.faces()[&id];
         let in_outer = face.outer.contains(&v0) && face.outer.contains(&v1);
         let in_hole = face
             .holes
@@ -1395,5 +1420,69 @@ mod tests {
             edge_crossing.edges.contains(&cross_edge_id),
             "crossing edge must be selected by crossing"
         );
+    }
+}
+
+#[cfg(test)]
+mod indexed_pick_equivalence {
+    use super::*;
+    use cindral_core::{BulkFace, BulkGeometry, Command, DocumentHistory};
+    use glam::DMat4;
+
+    fn fixture() -> Model {
+        let mut g = BulkGeometry::default();
+        // Two layers, a hole and tilted/disconnected surfaces: nearest hits and
+        // per-candidate occlusion rays must retain the exhaustive algorithm's choices.
+        for z in [0., 0.8] {
+            for y in 0..3 { for x in 0..3 {
+                let a=g.vertices.len();
+                let origin=DVec3::new(x as f64,y as f64,z);
+                g.vertices.extend([origin,origin+DVec3::X,origin+DVec3::X+DVec3::Y,origin+DVec3::Y]);
+                g.faces.push(BulkFace { outer:vec![a,a+1,a+2,a+3], ..Default::default() });
+            }}
+        }
+        let a=g.vertices.len();
+        g.vertices.extend([DVec3::new(4.,0.,0.),DVec3::new(6.,0.,0.),DVec3::new(6.,2.,0.),DVec3::new(4.,2.,0.),DVec3::new(4.5,0.5,0.),DVec3::new(4.5,1.5,0.),DVec3::new(5.5,1.5,0.),DVec3::new(5.5,0.5,0.)]);
+        g.faces.push(BulkFace { outer:vec![a,a+1,a+2,a+3],holes:vec![vec![a+4,a+5,a+6,a+7]],..Default::default() });
+        g.build(false,false).unwrap()
+    }
+    fn compare(model:&Model) {
+        let bounds=model.bounds().unwrap(); let center=(bounds.0+bounds.1)*0.5;
+        for perspective in [false,true] { for direction in [DVec3::Z,DVec3::new(0.3,-0.4,1.)] {
+            let camera=center+direction*12.;
+            let projection=if perspective { DMat4::perspective_rh(0.8,1.6,0.1,100.) } else { DMat4::orthographic_rh(-5.,5.,-3.125,3.125,0.1,100.) };
+            let view=View {matrix:projection*DMat4::look_at_rh(camera,center,DVec3::Y),size:DVec2::new(1280.,800.)};
+            let inverse=view.matrix.inverse();
+            let mut targets=model.vertices().values().map(|v|v.position).collect::<Vec<_>>();
+            targets.extend(model.edges().values().map(|e|(model.vertices()[&e.vertices[0]].position+model.vertices()[&e.vertices[1]].position)*0.5));
+            targets.extend([DVec3::new(5.,1.,0.),center,center+DVec3::X*4.]);
+            for target in targets { let Some(cursor)=view.project(target) else {continue;};
+                let ndc=DVec2::new(cursor.x/view.size.x*2.-1.,1.-cursor.y/view.size.y*2.);
+                let origin=inverse.project_point3(ndc.extend(0.));
+                let ray=Ray {origin,direction:inverse.project_point3(ndc.extend(1.))-origin};
+                for section in [None, Some(cindral_core::SectionPlane {normal:[1.,0.,0.],distance:1.25,visible:true,name:"cut".into()})] {
+                    for radius in [0.,10.,100.] {
+                        let indexed=pick_section_impl(model,ray,view,cursor,radius,section.as_ref(),true);
+                        let reference=pick_section_impl(model,ray,view,cursor,radius,section.as_ref(),false);
+                        assert_eq!(indexed,reference,"perspective={perspective}, target={target:?}, radius={radius}");
+                    }
+                }
+            }
+        }}
+    }
+    #[test]
+    fn indexed_matches_exhaustive_holes_sections_occlusion_and_camera_views() { compare(&fixture()); }
+    #[test]
+    fn indexed_matches_exhaustive_after_preview_cancel_translation_and_undo() {
+        let mut data=DocumentHistory::new().to_data();
+        data.definitions.get_mut(&cindral_core::DefinitionId(0)).unwrap().geometry=fixture().to_data();
+        let mut h=DocumentHistory::from_data(data).unwrap();
+        let face=*h.model().faces().keys().next().unwrap();
+        // Holes elsewhere deliberately keep this small case on the general path.
+        h.preview(Command::PushPull {face,distance:0.2}).unwrap(); compare(h.model());
+        h.cancel_preview().unwrap(); compare(h.model());
+        let vertices=h.model().vertices().keys().copied().collect();
+        h.preview(Command::Transform {vertices,matrix:DMat4::from_translation(DVec3::new(10.,-4.,2.)),copy:false}).unwrap();
+        compare(h.model()); h.commit_preview().unwrap(); h.undo().unwrap(); compare(h.model()); h.redo().unwrap(); compare(h.model());
     }
 }
