@@ -40,7 +40,13 @@ impl RaySelection {
         let low = DVec3::from_array(bounds.lower());
         let high = DVec3::from_array(bounds.upper());
         let padding = 4. * TOLERANCE
-            + low.abs().max(high.abs()).max(self.origin.abs()).max_element() * f64::EPSILON * 16.;
+            + low
+                .abs()
+                .max(high.abs())
+                .max(self.origin.abs())
+                .max_element()
+                * f64::EPSILON
+                * 16.;
         let low = low - DVec3::splat(padding);
         let high = high + DVec3::splat(padding);
         let mut near = 0_f64;
@@ -48,21 +54,29 @@ impl RaySelection {
         for axis in 0..3 {
             let d = self.direction[axis];
             if d == 0. {
-                if self.origin[axis] < low[axis] || self.origin[axis] > high[axis] { return false; }
+                if self.origin[axis] < low[axis] || self.origin[axis] > high[axis] {
+                    return false;
+                }
             } else {
                 let a = (low[axis] - self.origin[axis]) / d;
                 let b = (high[axis] - self.origin[axis]) / d;
                 near = near.max(a.min(b));
                 far = far.min(a.max(b));
-                if near > far { return false; }
+                if near > far {
+                    return false;
+                }
             }
         }
         true
     }
 }
 impl rstar::SelectionFunction<Item<FaceId>> for RaySelection {
-    fn should_unpack_parent(&self, envelope: &AABB<[f64; 3]>) -> bool { self.intersects(envelope) }
-    fn should_unpack_leaf(&self, leaf: &Item<FaceId>) -> bool { self.intersects(&leaf.bounds) }
+    fn should_unpack_parent(&self, envelope: &AABB<[f64; 3]>) -> bool {
+        self.intersects(envelope)
+    }
+    fn should_unpack_leaf(&self, leaf: &Item<FaceId>) -> bool {
+        self.intersects(&leaf.bounds)
+    }
 }
 
 // Translation/reversal can change a reconstructed bound by an ULP. Find by stable
@@ -120,9 +134,15 @@ impl Spatial {
         Ok(result)
     }
     pub fn ray_faces(&self, origin: DVec3, direction: DVec3, max_distance: f64) -> Vec<FaceId> {
-        let mut ids = self.faces.locate_with_selection_function(RaySelection {
-            origin: origin - self.offset, direction, max_distance,
-        }).map(|item| item.id).collect::<Vec<_>>();
+        let mut ids = self
+            .faces
+            .locate_with_selection_function(RaySelection {
+                origin: origin - self.offset,
+                direction,
+                max_distance,
+            })
+            .map(|item| item.id)
+            .collect::<Vec<_>>();
         ids.sort_unstable();
         ids
     }
@@ -345,33 +365,63 @@ mod ray_tests {
     use super::*;
     #[test]
     fn ray_slabs_keep_boundaries_reject_behind_and_respect_range() {
-        let bounds=AABB::from_corners([0.,0.,0.],[1.,1.,0.]);
-        let ray=|origin,direction,max_distance| RaySelection {origin,direction,max_distance}.intersects(&bounds);
-        assert!(ray(DVec3::new(0.5,0.5,1.),-DVec3::Z,f64::INFINITY));
-        assert!(!ray(DVec3::new(0.5,0.5,1.),DVec3::Z,f64::INFINITY));
-        assert!(!ray(DVec3::new(0.5,0.5,1.),-DVec3::Z,0.5));
-        assert!(ray(DVec3::new(-TOLERANCE,1.+TOLERANCE,1.),-DVec3::Z,1.));
-        assert!(!ray(DVec3::new(-0.01,0.5,1.),-DVec3::Z,1.));
-        assert!(ray(DVec3::new(-1.,0.5,1.),DVec3::new(1.,0.,-1.).normalize(),10.));
-        assert!(ray(DVec3::new(0.5,0.5,0.),DVec3::X,0.));
+        let bounds = AABB::from_corners([0., 0., 0.], [1., 1., 0.]);
+        let ray = |origin, direction, max_distance| {
+            RaySelection {
+                origin,
+                direction,
+                max_distance,
+            }
+            .intersects(&bounds)
+        };
+        assert!(ray(DVec3::new(0.5, 0.5, 1.), -DVec3::Z, f64::INFINITY));
+        assert!(!ray(DVec3::new(0.5, 0.5, 1.), DVec3::Z, f64::INFINITY));
+        assert!(!ray(DVec3::new(0.5, 0.5, 1.), -DVec3::Z, 0.5));
+        assert!(ray(
+            DVec3::new(-TOLERANCE, 1. + TOLERANCE, 1.),
+            -DVec3::Z,
+            1.
+        ));
+        assert!(!ray(DVec3::new(-0.01, 0.5, 1.), -DVec3::Z, 1.));
+        assert!(ray(
+            DVec3::new(-1., 0.5, 1.),
+            DVec3::new(1., 0., -1.).normalize(),
+            10.
+        ));
+        assert!(ray(DVec3::new(0.5, 0.5, 0.), DVec3::X, 0.));
     }
     #[test]
     fn ray_candidates_have_stable_order_and_unindexed_fallback() {
-        let mut g=crate::BulkGeometry::default();
-        for x in [0.,3.] {
-            let a=g.vertices.len();
-            g.vertices.extend([DVec3::new(x,0.,0.),DVec3::new(x+1.,0.,0.),DVec3::new(x+1.,1.,0.),DVec3::new(x,1.,0.)]);
-            g.faces.push(crate::BulkFace {outer:vec![a,a+1,a+2,a+3],..Default::default()});
+        let mut g = crate::BulkGeometry::default();
+        for x in [0., 3.] {
+            let a = g.vertices.len();
+            g.vertices.extend([
+                DVec3::new(x, 0., 0.),
+                DVec3::new(x + 1., 0., 0.),
+                DVec3::new(x + 1., 1., 0.),
+                DVec3::new(x, 1., 0.),
+            ]);
+            g.faces.push(crate::BulkFace {
+                outer: vec![a, a + 1, a + 2, a + 3],
+                ..Default::default()
+            });
         }
-        let mut model=g.build(false,false).unwrap();
-        let ray=(DVec3::new(0.5,0.5,1.),-DVec3::Z);
-        let ids=model.face_candidates_for_ray(ray.0,ray.1,f64::INFINITY);
-        assert_eq!(ids.len(),1);
-        assert_eq!(ids[0],*model.faces.keys().next().unwrap());
-        assert!(model.face_candidates_for_ray(ray.0,ray.1,0.5).is_empty());
-        assert!(model.face_candidates_for_ray(ray.0,DVec3::ZERO,10.).is_empty());
-        assert!(model.face_candidates_for_ray(ray.0,ray.1,f64::NAN).is_empty());
-        model.spatial=None;
-        assert_eq!(model.face_candidates_for_ray(ray.0,ray.1,f64::INFINITY),model.faces.keys().copied().collect::<Vec<_>>());
+        let mut model = g.build(false, false).unwrap();
+        let ray = (DVec3::new(0.5, 0.5, 1.), -DVec3::Z);
+        let ids = model.face_candidates_for_ray(ray.0, ray.1, f64::INFINITY);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], *model.faces.keys().next().unwrap());
+        assert!(model.face_candidates_for_ray(ray.0, ray.1, 0.5).is_empty());
+        assert!(model
+            .face_candidates_for_ray(ray.0, DVec3::ZERO, 10.)
+            .is_empty());
+        assert!(model
+            .face_candidates_for_ray(ray.0, ray.1, f64::NAN)
+            .is_empty());
+        model.spatial = None;
+        assert_eq!(
+            model.face_candidates_for_ray(ray.0, ray.1, f64::INFINITY),
+            model.faces.keys().copied().collect::<Vec<_>>()
+        );
     }
 }

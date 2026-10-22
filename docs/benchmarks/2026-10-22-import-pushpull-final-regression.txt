@@ -1,0 +1,27 @@
+   Compiling cindral-core v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-core)
+   Compiling cindral-skp v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-skp)
+   Compiling cindral-inference v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-inference)
+   Compiling cindral-render v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-render)
+   Compiling cindral-tools v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-tools)
+   Compiling cindral-io v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-io)
+   Compiling cindral-app v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-app)
+    Finished `release` profile [optimized] target(s) in 1m 01s
+imported: V=4225 E=8320 F=4096 instances=301 begin=0.009ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=1.848/2.066 inference=0.174/0.266 kernel=0.377/0.622 cpu_mesh=0.056/0.779 upload=0.000/0.000; total_max=3.426 commit=0.001
+drawn: V=4225 E=8320 F=4096 instances=1 begin=0.008ms
+dirty first update: definitions=1 bytes=2448
+drawn: phase mean/max ms pick=1.718/2.008 inference=0.155/0.226 kernel=0.457/0.745 cpu_mesh=0.042/0.099 upload=0.000/0.000; total_max=2.824 commit=0.057
+imported: V=19881 E=39480 F=19600 instances=301 begin=0.008ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=7.990/11.416 inference=0.844/1.214 kernel=1.791/3.168 cpu_mesh=0.056/0.088 upload=0.000/0.000; total_max=14.712 commit=0.001
+   Compiling cindral-app v0.1.0 (/home/earl/.codex/worktrees/fix-import-pushpull-freeze/Drafter/crates/cindral-app)
+    Finished `release` profile [optimized] target(s) in 3.23s
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+imported: V=4225 E=8320 F=4096 instances=301 begin=0.018ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=1.949/3.128 inference=0.207/0.414 kernel=0.590/1.383 cpu_mesh=0.068/0.667 upload=0.637/2.166; total_max=5.248 commit=0.001
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+imported: V=19881 E=39480 F=19600 instances=301 begin=0.015ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=7.609/10.586 inference=0.773/1.248 kernel=1.688/2.284 cpu_mesh=0.055/0.072 upload=0.725/1.050; total_max=14.486 commit=0.001

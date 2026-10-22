@@ -152,3 +152,13 @@ such a file still stalls, capture these spans on that exact operation; a bounded
 screen-query index or cancellable worker for a measured general-Boolean fallback
 would be separate options. No redesign was started, and no blanket event-loop
 latency guarantee is made beyond the measured fixtures.
+
+Final completion validation: formatting, strict workspace/all-target/all-feature
+Clippy, and the full all-feature workspace tests each ran once and passed:
+**342 tests including the doctest**, seven ignored release workloads. The complete
+runner was then executed against final formatted sources with GPU enabled; every
+case passed its hard deadline/budgets. Final maxima: imported CPU 4,096 / 19,600
+faces **3.426 / 14.712 ms**, drawn CPU **2.824 ms**, completed Vega 11 upload cases
+**5.248 / 14.486 ms**, imported commit **0.001 ms**. Variation from the first after
+samples above is retained rather than replacing evidence. These measurements are
+sequential, without concurrent Cargo/agent/benchmark work. [Final runner output](benchmarks/2026-10-22-import-pushpull-final-regression.txt).

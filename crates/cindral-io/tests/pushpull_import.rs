@@ -340,36 +340,65 @@ fn sixty_imported_and_drawn_previews_preserve_equivalent_geometry_and_history() 
     let mut drawn = DocumentHistory::new();
     let mut rectangle = cindral_tools::ToolSession::new(cindral_tools::ToolKind::Rectangle);
     rectangle.click(DVec3::ZERO).unwrap();
-    drawn.execute(rectangle.click(DVec3::new(1.,1.,0.)).unwrap().unwrap()).unwrap();
+    drawn
+        .execute(rectangle.click(DVec3::new(1., 1., 0.)).unwrap().unwrap())
+        .unwrap();
     let face = *drawn.model().faces().keys().next().unwrap();
-    drawn.execute(Command::PushPull {face,distance:1.}).unwrap();
+    drawn
+        .execute(Command::PushPull { face, distance: 1. })
+        .unwrap();
     let mut imported = imported(source(cube(false)));
     // Compare exact boundary coordinates, independent of allocation IDs and winding.
     let signature = |h: &DocumentHistory| {
-        let mut faces = h.model().faces().values().map(|f| {
-            let mut points=f.outer.iter().map(|id| h.model().vertices()[id].position.to_array().map(|p|(p*1e8).round() as i64)).collect::<Vec<_>>();
-            points.sort(); points
-        }).collect::<Vec<_>>(); faces.sort(); faces
+        let mut faces = h
+            .model()
+            .faces()
+            .values()
+            .map(|f| {
+                let mut points = f
+                    .outer
+                    .iter()
+                    .map(|id| {
+                        h.model().vertices()[id]
+                            .position
+                            .to_array()
+                            .map(|p| (p * 1e8).round() as i64)
+                    })
+                    .collect::<Vec<_>>();
+                points.sort();
+                points
+            })
+            .collect::<Vec<_>>();
+        faces.sort();
+        faces
     };
-    let original=signature(&drawn);
-    assert_eq!(signature(&imported),original);
-    let faces=[top(&drawn,false),top(&imported,false)];
-    let depths=[drawn.undo_depth(),imported.undo_depth()];
+    let original = signature(&drawn);
+    assert_eq!(signature(&imported), original);
+    let faces = [top(&drawn, false), top(&imported, false)];
+    let depths = [drawn.undo_depth(), imported.undo_depth()];
     for i in 1..=60 {
-        let distance=i as f64*0.002*if i%2==0 {1.} else {-1.};
-        for (h,face) in [(&mut drawn,faces[0]),(&mut imported,faces[1])] {
-            h.preview(Command::PushPull {face,distance}).unwrap();
+        let distance = i as f64 * 0.002 * if i % 2 == 0 { 1. } else { -1. };
+        for (h, face) in [(&mut drawn, faces[0]), (&mut imported, faces[1])] {
+            h.preview(Command::PushPull { face, distance }).unwrap();
         }
-        assert_eq!(signature(&drawn),signature(&imported));
+        assert_eq!(signature(&drawn), signature(&imported));
     }
-    let final_shape=signature(&drawn);
-    for (i,h) in [&mut drawn,&mut imported].into_iter().enumerate() {
-        h.commit_preview().unwrap(); assert_eq!(h.undo_depth(),depths[i]+1);
+    let final_shape = signature(&drawn);
+    for (i, h) in [&mut drawn, &mut imported].into_iter().enumerate() {
+        h.commit_preview().unwrap();
+        assert_eq!(h.undo_depth(), depths[i] + 1);
         h.model().validate().unwrap();
-        h.undo().unwrap(); assert_eq!(signature(h),original);
-        h.redo().unwrap(); assert_eq!(signature(h),final_shape);
-        let face=faces[i];
-        h.preview(Command::PushPull {face,distance:0.05}).unwrap();
-        h.cancel_preview().unwrap(); assert_eq!(signature(h),final_shape);
+        h.undo().unwrap();
+        assert_eq!(signature(h), original);
+        h.redo().unwrap();
+        assert_eq!(signature(h), final_shape);
+        let face = faces[i];
+        h.preview(Command::PushPull {
+            face,
+            distance: 0.05,
+        })
+        .unwrap();
+        h.cancel_preview().unwrap();
+        assert_eq!(signature(h), final_shape);
     }
 }
