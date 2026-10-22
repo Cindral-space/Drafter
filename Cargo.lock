@@ -429,6 +429,7 @@ version = "0.1.0"
 dependencies = [
  "cindral-core",
  "glam",
+ "tracing",
 ]
 
 [[package]]
@@ -460,6 +461,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "glam",
+ "tracing",
 ]
 
 [[package]]
@@ -483,6 +485,7 @@ dependencies = [
  "glam",
  "proptest",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

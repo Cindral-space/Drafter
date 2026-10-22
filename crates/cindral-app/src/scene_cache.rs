@@ -75,6 +75,7 @@ impl SceneCache {
     pub(crate) fn occurrences(&self) -> &[Occurrence] {
         &self.occurrences
     }
+    #[tracing::instrument(level = "info", skip_all, name = "mesh.scene_sync")]
     pub(crate) fn sync(&mut self, doc: &DocumentHistory) -> Result<SceneUpdate, KernelError> {
         let changes = doc.document_changes();
         if self.initialized && self.revision == Some(changes.revision) {

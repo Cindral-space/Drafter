@@ -896,6 +896,7 @@ impl SceneRenderer {
     /// - Instance-only batch updates (`geometry` empty) update instance buffers without
     ///   reuploading geometry.
     /// - Textures update camera texture bindings; falls back safely on invalid pixels.
+    #[tracing::instrument(level = "info", skip_all, name = "scene.gpu_upload")]
     pub fn apply_update(
         &mut self,
         device: &wgpu::Device,

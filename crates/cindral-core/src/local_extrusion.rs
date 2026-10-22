@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 /// Return no candidate unless a closed boundary or disjoint planar-sheet proof applies.
+#[tracing::instrument(level = "info", skip_all, name = "extrusion.local_proof")]
 pub(crate) fn prepare(
     model: &Model,
     command: &Command,
@@ -187,6 +188,7 @@ pub(crate) fn prepare(
 /// Coplanarity excludes swept-volume collisions in either normal direction.
 /// Triangle separation additionally excludes overlapping source surfaces at the
 /// base. Work is bounded; ambiguous/expensive inputs retain the general path.
+#[tracing::instrument(level = "info", skip_all, name = "extrusion.planar_sheet")]
 fn planar_sheet(model: &Model, face: FaceId) -> Result<bool, KernelError> {
     let source = &model.faces[&face];
     let index = model.spatial.as_ref().ok_or(KernelError::MissingEntity)?;

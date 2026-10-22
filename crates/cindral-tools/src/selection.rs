@@ -376,6 +376,7 @@ pub fn pick(model: &Model, ray: Ray, view: View, cursor: DVec2, radius: f64) -> 
     pick_section(model, ray, view, cursor, radius, None)
 }
 /// Pick only geometry retained by the local section plane.
+#[tracing::instrument(level = "info", skip_all, name = "pick.total")]
 pub fn pick_section(
     model: &Model,
     ray: Ray,
@@ -821,6 +822,7 @@ fn closest_point_on_segment_screen(
 }
 
 #[allow(dead_code)]
+#[tracing::instrument(level = "info", skip_all, name = "pick.vertex_occlusion")]
 fn is_vertex_occluded(
     model: &Model,
     vertex_id: VertexId,
@@ -875,6 +877,7 @@ fn is_vertex_occluded(
 }
 
 #[allow(dead_code)]
+#[tracing::instrument(level = "info", skip_all, name = "pick.edge_occlusion")]
 fn is_edge_occluded(
     model: &Model,
     edge: &Edge,

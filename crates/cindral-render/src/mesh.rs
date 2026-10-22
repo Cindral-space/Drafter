@@ -265,6 +265,7 @@ impl MeshCache {
     }
 
     /// Update dirty geometry in a translated mesh frame without rebuilding untouched slots.
+    #[tracing::instrument(level = "info", skip_all, name = "mesh.cpu_dirty")]
     pub fn update_styled_in_frame(
         &mut self,
         model: &Model,
@@ -802,6 +803,7 @@ impl GeometryBuffers {
     /// capacity, allocates at least 2× the required size. When growing on an
     /// incremental update (`reset = false`), existing data is copied into the
     /// resized buffer before dirty ranges are written with `queue.write_buffer`.
+    #[tracing::instrument(level = "info", skip_all, name = "mesh.gpu_upload")]
     pub fn apply(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, update: &MeshUpdate) {
         let required_face = (u64::from(update.face_vertices) * FACE_VERTEX_BYTES)
             .max(max_write_end(&update.face_writes));

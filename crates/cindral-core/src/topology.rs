@@ -47,6 +47,7 @@ impl Model {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "topology.intersection_split")]
     pub(crate) fn insert_segment(&mut self, start: DVec3, end: DVec3) -> Result<(), KernelError> {
         geometry::validate_position(start)?;
         geometry::validate_position(end)?;
@@ -120,6 +121,7 @@ impl Model {
     }
 
     /// Erasure dissolves redundant collinear degree-two vertices, preserving style seams.
+    #[tracing::instrument(level = "info", skip_all, name = "topology.heal")]
     pub(crate) fn heal(&mut self) -> Result<(), KernelError> {
         loop {
             let used: BTreeSet<_> = self.edges.values().flat_map(|e| e.vertices).collect();
@@ -178,6 +180,7 @@ impl Model {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip_all, name = "topology.coplanar_rebuild")]
     pub(crate) fn rebuild_faces(&mut self) -> Result<(), KernelError> {
         let mut planes = Vec::<Plane>::new();
         for face in self.faces.values() {

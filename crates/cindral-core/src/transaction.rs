@@ -134,6 +134,7 @@ impl Selection {
     }
 }
 impl Delta {
+    #[tracing::instrument(level = "info", skip_all, name = "delta.prepare")]
     pub fn prepare(
         model: &mut Model,
         command: &Command,
@@ -483,6 +484,7 @@ impl Delta {
         after.validate()?;
         Ok(Self::between(&before, &after, model.next_id))
     }
+    #[tracing::instrument(level = "info", skip_all, name = "undo.delta")]
     pub(crate) fn between(before: &Model, after: &Model, before_next: u64) -> Self {
         let vertices = difference(&before.vertices, &after.vertices);
         let moved: BTreeSet<_> = vertices.keys().copied().collect();
@@ -536,6 +538,7 @@ impl Delta {
     pub fn next_id(&self) -> u64 {
         self.after_next
     }
+    #[tracing::instrument(level = "info", skip_all, name = "dirty.mark")]
     pub fn changes(&self, revision: u64) -> ChangeSet {
         if let Some(t) = &self.translation {
             return ChangeSet {
@@ -554,6 +557,7 @@ impl Delta {
             faces: self.faces.keys().copied().collect(),
         }
     }
+    #[tracing::instrument(level = "info", skip_all, name = "delta.apply")]
     pub fn apply(&self, model: &mut Model, forward: bool) -> Result<(), KernelError> {
         if let Some(t) = &self.translation {
             t.apply(model, forward)?;

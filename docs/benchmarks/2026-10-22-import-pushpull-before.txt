@@ -1,0 +1,6 @@
+imported: V=4225 E=8320 F=4096 instances=301 begin=0.008ms
+dirty first update: definitions=1 bytes=2448
+imported: phase mean/max ms pick=14.207/35.394 inference=0.207/0.325 kernel=0.516/1.009 cpu_mesh=0.065/0.707 upload=0.000/0.000; total_max=36.950 commit=0.001
+drawn: V=4225 E=8320 F=4096 instances=1 begin=0.009ms
+dirty first update: definitions=1 bytes=2448
+drawn: phase mean/max ms pick=15.320/39.070 inference=0.209/0.479 kernel=0.515/1.327 cpu_mesh=0.050/0.105 upload=0.000/0.000; total_max=39.834 commit=0.054

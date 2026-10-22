@@ -527,6 +527,7 @@ impl ModifySession {
     /// Begin a modify operation at the given anchor point and axis.
     ///
     /// Resolves target entities from selection and hit without taking clones of `Model`.
+    #[tracing::instrument(level = "info", skip_all, name = "tool.begin")]
     pub fn begin(
         &mut self,
         model: &Model,
@@ -657,6 +658,7 @@ impl ModifySession {
         Ok(())
     }
     /// Produce an absolute preview mutation command from the initial anchor to the prospective point.
+    #[tracing::instrument(level = "info", skip_all, name = "tool.update")]
     pub fn update(&mut self, point: DVec3) -> Result<Option<Command>, ToolError> {
         if !self.active {
             return Err(ToolError::NotReady);

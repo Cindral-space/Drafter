@@ -220,6 +220,7 @@ impl History {
     }
     /// Replace a provisional edit using the same local delta path as a committed command.
     /// No undo entry is recorded until `commit_preview`; cancellation restores the starting geometry.
+    #[tracing::instrument(level = "info", skip_all, name = "history.preview")]
     pub fn preview(&mut self, command: Command) -> Result<bool, KernelError> {
         if let Some(delta) = &mut self.preview {
             if let Some(changed) = delta.replace_translation(&mut self.model, &command)? {
@@ -275,6 +276,7 @@ impl History {
         Ok(!delta.is_empty())
     }
     /// Record the current provisional delta as exactly one undo entry.
+    #[tracing::instrument(level = "info", skip_all, name = "history.commit")]
     pub fn commit_preview(&mut self) -> Result<bool, KernelError> {
         let Some(delta) = self.preview.take() else {
             return Ok(false);

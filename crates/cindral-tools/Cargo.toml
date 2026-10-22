@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+tracing = "0.1"
 cindral-core = { path = "../cindral-core" }
 cindral-inference = { path = "../cindral-inference" }
 glam = "0.30"

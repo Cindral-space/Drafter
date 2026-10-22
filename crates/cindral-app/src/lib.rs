@@ -1094,3 +1094,6 @@ mod style_tests {
         assert_eq!(app.history.to_data(), before);
     }
 }
+
+/// Imported versus drawn drag performance workload.
+pub mod import_pushpull_benchmark;
