@@ -301,6 +301,9 @@ impl BulkGeometry {
         check()?;
         model.validate_mesh(false)?;
         model.ensure_spatial()?;
+        // Validate the newly built adjacency and spatial indices too, as edits do.
+        #[cfg(debug_assertions)]
+        model.validate_mesh(false)?;
         Ok(model)
     }
 }

@@ -139,6 +139,7 @@ pub fn import_gltf_bytes(
     control.set_progress(0.4);
 
     let mut scene = ImportedScene {
+        root_definition: None,
         definitions: Vec::new(),
         roots: Vec::new(),
         materials,

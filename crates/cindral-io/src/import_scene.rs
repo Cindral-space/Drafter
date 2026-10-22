@@ -26,6 +26,9 @@ pub enum UpAxis {
 pub struct ImportedScene {
     /// Shared local definitions.
     pub definitions: Vec<ImportedDefinition>,
+    /// Source model container, when the format distinguishes loose root geometry.
+    /// Its sole identity placement is promoted; child components remain instances.
+    pub root_definition: Option<usize>,
     /// Top-level placements.
     pub roots: Vec<ImportedInstance>,
     /// Material table; polygon MaterialId is index plus one.
@@ -47,6 +50,7 @@ impl Default for ImportedScene {
     fn default() -> Self {
         Self {
             definitions: Vec::new(),
+            root_definition: None,
             roots: Vec::new(),
             materials: Vec::new(),
             textures: BTreeMap::new(),
@@ -312,6 +316,18 @@ pub fn convert_scene(
         .collect();
     let mut next = (data.materials.len().max(data.tags.len()) + scene.definitions.len() + 2) as u64;
     let definition_count = scene.definitions.len();
+    let source_root = scene.root_definition;
+    if let Some(index) = source_root {
+        if index >= definition_count || scene.roots.len() != 1
+            || scene.roots[0].definition != index
+            || scene.roots[0].transform != DMat4::IDENTITY
+            || scene.roots[0].tag.is_some() || scene.roots[0].material.is_some()
+            || scene.roots[0].hidden
+            || scene.definitions.iter().any(|d| d.instances.iter().any(|n| n.definition == index))
+        {
+            return Err(IoError::Invalid("invalid source root container".into()));
+        }
+    }
     let mut nodes = 0;
     let mut instances = |items: Vec<ImportedInstance>| -> Result<BTreeMap<InstanceId, Instance>> {
         let mut out = BTreeMap::new();
@@ -367,6 +383,13 @@ pub fn convert_scene(
         .get_mut(&DefinitionId(0))
         .ok_or_else(|| IoError::Invalid("missing root".into()))?
         .instances = roots;
+    if let Some(index) = source_root {
+        let root = data.definitions.remove(&DefinitionId(index as u64 + 1))
+            .ok_or_else(|| IoError::Invalid("missing source root".into()))?;
+        data.definitions.insert(DefinitionId(0), DefinitionData {
+            name: "Root".into(), kind: DefinitionKind::Root, ..root
+        });
+    }
     data.next_id = next;
     // Validate the graph before traversing it (including cycles and expanded occurrence cap).
     let history = if options.as_component {
@@ -375,6 +398,7 @@ pub fn convert_scene(
             .get_mut(&DefinitionId(0))
             .ok_or_else(|| IoError::Invalid("missing root".into()))?;
         let children = std::mem::take(&mut root.instances);
+        let geometry = std::mem::replace(&mut root.geometry, Model::default().to_data());
         let id = DefinitionId(data.next_id);
         data.next_id += 1;
         let node = InstanceId(data.next_id);
@@ -384,7 +408,7 @@ pub fn convert_scene(
             DefinitionData {
                 name: "Imported scene".into(),
                 kind: DefinitionKind::Component,
-                geometry: BulkGeometry::default().build(false, false)?.to_data(),
+                geometry,
                 instances: children,
             },
         );
@@ -404,6 +428,8 @@ pub fn convert_scene(
                     hidden: false,
                 },
             );
+        DocumentHistory::from_import_data(data)?
+    } else if source_root.is_some() {
         DocumentHistory::from_import_data(data)?
     } else {
         let source = DocumentHistory::from_import_data(data)?;

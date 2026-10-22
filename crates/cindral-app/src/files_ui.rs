@@ -52,6 +52,7 @@ fn prepare_import(
     })
 }
 pub(crate) struct ImportJob {
+    pub(crate) replace_document: bool,
     pub(crate) generation: u64,
     pub(crate) revision: u64,
     pub(crate) path: PathBuf,
@@ -246,7 +247,10 @@ impl DrafterApp {
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))
         {
-            self.start_import(path.to_owned(), self.files.import_options.clone());
+            self.start_import_mode(path.to_owned(), ImportOptions {
+                as_component: false,
+                ..self.files.import_options.clone()
+            }, true);
             return Ok(());
         }
         let bundle = cindral_io::load_draft(path)?;
@@ -709,6 +713,9 @@ impl DrafterApp {
     }
     /// Spawn a worker thread to import a 3D model file asynchronously.
     pub fn start_import(&mut self, path: PathBuf, options: ImportOptions) {
+        self.start_import_mode(path, options, false);
+    }
+    fn start_import_mode(&mut self, path: PathBuf, options: ImportOptions, replace_document: bool) {
         self.cancel_import();
         self.files.import_summary = None;
         let control = ImportControl::default();
@@ -727,10 +734,12 @@ impl DrafterApp {
                 let res = cindral_io::import_file(&thread_path, &thread_options, &thread_control)
                     .and_then(|mut result| {
                         thread_control.check()?;
-                        base.append_import(result.history.to_data())?;
+                        if !replace_document {
+                            base.append_import(result.history.to_data())?;
+                            result.history = base;
+                        }
                         thread_control.check()?;
-                        result.history = base;
-                        for (key, asset) in old_textures {
+                        for (key, asset) in old_textures.into_iter().filter(|_| !replace_document) {
                             if result.textures.get(&key).is_some_and(|a| a != &asset) {
                                 return Err(cindral_io::IoError::Invalid(
                                     "texture slot collision".into(),
@@ -745,6 +754,7 @@ impl DrafterApp {
         match spawned {
             Ok(_) => {
                 self.files.import_job = Some(ImportJob {
+                    replace_document,
                     generation: self.files.generation,
                     revision,
                     path,
@@ -838,6 +848,16 @@ impl DrafterApp {
                     match result {
                         Ok(import_result) => {
                             let path = job.path.clone();
+                            if job.replace_document {
+                                if let Err(e) = self.backup_current() {
+                                    self.error = Some(e.to_string());
+                                    return;
+                                }
+                                self.files.path = None;
+                                self.files.saved_values = None;
+                                self.files.checked_save_revision = None;
+                                self.files.generation += 1;
+                            }
                             if let Err(e) = self.apply_import_result(import_result, &path) {
                                 self.error = Some(format!("Import failed: {e}"));
                                 self.files.status = "Import failed".into();
@@ -1197,6 +1217,7 @@ mod tests {
         let mut editor = app(directory.path());
         let (sender, receiver) = mpsc::channel();
         editor.files.import_job = Some(ImportJob {
+            replace_document: false,
             generation: editor.files.generation,
             revision: editor.history.revision(),
             path: PathBuf::from("model.gltf"),
@@ -1224,6 +1245,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         let path = PathBuf::from("model.dae");
         editor.files.import_job = Some(ImportJob {
+            replace_document: false,
             generation: editor.files.generation,
             revision: editor.history.revision(),
             path: path.clone(),
@@ -1273,6 +1295,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         let old_gen = editor.files.generation;
         let job = ImportJob {
+            replace_document: false,
             generation: old_gen,
             revision: editor.history.revision(),
             path: PathBuf::from("stale.obj"),
@@ -1288,6 +1311,7 @@ mod tests {
 
         let (_s2, r2) = mpsc::channel();
         let stale_job = ImportJob {
+            replace_document: false,
             generation: old_gen,
             revision: editor.history.revision(),
             path: PathBuf::from("stale.obj"),

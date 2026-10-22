@@ -87,6 +87,10 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
             instances: def.instances.into_iter().map(placement).collect(),
         });
     }
+    // Both independent readers expose the source model as one synthetic identity
+    // placement. Keep its identity explicit so conversion can open loose geometry
+    // at root without exploding actual component placements.
+    scene.root_definition = source.roots.first().map(|n| n.definition);
     scene.roots = source.roots.into_iter().map(placement).collect();
     for (index, (faces, edges)) in assignments.into_iter().enumerate() {
         partition_tagged_geometry(&mut scene, index, faces, edges, control)?;
