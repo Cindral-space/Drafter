@@ -645,7 +645,8 @@ impl DrafterApp {
 
     pub(crate) fn workspace_status(&mut self, ctx: &egui::Context) {
         let readout = self.measurement_readout();
-        self.measurements.update(readout, self.presentation.measurements);
+        self.measurements
+            .update(readout, self.presentation.measurements);
         egui::TopBottomPanel::bottom("workspace_status")
             .frame(egui::Frame::new().fill(Color32::WHITE).inner_margin(egui::Margin::symmetric(16, 8)))
             .show(ctx, |ui| {
@@ -656,7 +657,8 @@ impl DrafterApp {
                         .desired_width(if ctx.content_rect().width() < 900. { 105. } else { 150. })
                         .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { Color32::from_rgb(255, 220, 217) } else { Color32::from_rgb(244, 245, 249) }))
                         .on_hover_text("Type a precise dimension during an operation, then press Enter. Accepts m, cm, mm, ft and in.");
-                    if field.has_focus() && ctx.input(|i| i.key_pressed(Key::Escape)) { self.measurements.escape(); self.error = None; }
+                    if field.changed() { self.measurements.phase = cindral_tools::measurements::BoxPhase::Typing; self.measurements.invalid = false; }
+                    if (field.has_focus() || field.lost_focus()) && ctx.input(|i| i.key_pressed(Key::Escape)) { self.measurements.escape(); self.error = None; }
                     if field.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
                         self.apply_measurement();
                     }

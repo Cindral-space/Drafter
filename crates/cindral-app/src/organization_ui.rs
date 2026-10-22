@@ -26,12 +26,16 @@ pub(crate) struct InstanceDrag {
     pivot: DVec3,
     reference: DVec3,
     radius: f64,
+    extents: DVec3,
+    measure_direction: Option<DVec3>,
+    measured: Option<cindral_tools::measurements::Readout>,
     last: DVec3,
     start: DVec2,
 }
 pub(crate) struct OrganizationUi {
     pub(crate) selected: Option<InstancePath>,
     pub(crate) drag: Option<InstanceDrag>,
+    pub(crate) completed: Option<InstanceDrag>,
     expanded: BTreeSet<InstancePath>,
     rows: Vec<Row>,
     revision: Option<u64>,
@@ -49,6 +53,7 @@ impl Default for OrganizationUi {
         Self {
             selected: None,
             drag: None,
+            completed: None,
             expanded: BTreeSet::new(),
             rows: Vec::new(),
             revision: None,
@@ -157,7 +162,7 @@ impl DrafterApp {
         for n in 1..=path.len() {
             self.organization.expanded.insert(path[..n].to_vec());
         }
-        self.measurements.text.clear();
+        self.measurements.reset();
         self.refresh_mesh();
         Ok(())
     }
@@ -171,7 +176,7 @@ impl DrafterApp {
         let changed = self.history.exit()?;
         self.selection.clear();
         self.organization.selected = None;
-        self.measurements.text.clear();
+        self.measurements.reset();
         if changed {
             self.refresh_mesh();
         }
@@ -693,8 +698,9 @@ impl DrafterApp {
         let planar = offset - self.work_plane.normal * offset.dot(self.work_plane.normal);
         let radius = planar.length().max(1e-5);
         let reference = planar.try_normalize().unwrap_or(DVec3::X);
+        self.organization.completed = None;
         self.organization.drag = Some(InstanceDrag {
-            path,
+            path: path.clone(),
             kind: self.modify.kind(),
             before: instance.transform,
             owner_world: world * instance.transform.inverse(),
@@ -703,6 +709,11 @@ impl DrafterApp {
             pivot,
             reference,
             radius,
+            extents: self
+                .selected_world_bounds(&path)
+                .map_or(DVec3::ONE, |(a, b)| inverse.transform_vector3(b - a).abs()),
+            measure_direction: None,
+            measured: None,
             last: point,
             start: cursor,
         });
@@ -764,60 +775,232 @@ impl DrafterApp {
         }
         self.refresh_mesh();
     }
+    pub(crate) fn instance_readout(&self) -> Option<cindral_tools::measurements::Readout> {
+        use cindral_tools::measurements::{Readout, ValueKind};
+        let drag = self
+            .organization
+            .drag
+            .as_ref()
+            .or(self.organization.completed.as_ref())?;
+        if let Some(out) = drag.measured {
+            return Some(out);
+        }
+        let delta = drag.last - drag.anchor;
+        let (label, value, kind) = match drag.kind {
+            ModifyKind::Rotate => {
+                let d = drag.last - drag.pivot;
+                let normal = self.work_plane.normal.normalize_or_zero();
+                (
+                    "Angle",
+                    d.dot(normal.cross(drag.reference))
+                        .atan2(d.dot(drag.reference))
+                        .to_degrees(),
+                    ValueKind::Angle,
+                )
+            }
+            ModifyKind::Scale => (
+                "Scale",
+                (drag.last - drag.pivot).length() / drag.radius,
+                ValueKind::Factor,
+            ),
+            _ => ("Distance", delta.length(), ValueKind::Length),
+        };
+        Some(Readout {
+            label,
+            values: [value, 0., 0.],
+            count: 1,
+            kind,
+        })
+    }
     pub(crate) fn instance_measurement(&mut self) -> bool {
-        let Some(drag) = self.organization.drag.clone() else {
+        use cindral_tools::measurements::{parse, Measurement, Quantity, Readout, ValueKind};
+        let Some(mut drag) = self
+            .organization
+            .drag
+            .clone()
+            .or(self.organization.completed.clone())
+        else {
             return false;
         };
-        let text = self.measurements.text.trim();
-        let parsed = match drag.kind {
-            ModifyKind::Move | ModifyKind::Copy => {
-                cindral_tools::parse_length(text).map_err(|e| e.to_string())
-            }
-            ModifyKind::Rotate => text
-                .trim_end_matches("deg")
-                .trim()
-                .parse::<f64>()
-                .map_err(|e| e.to_string()),
-            ModifyKind::Scale => {
-                if let Some(value) = text.strip_suffix('%') {
-                    value
-                        .trim()
-                        .parse::<f64>()
-                        .map(|v| v / 100.)
-                        .map_err(|e| e.to_string())
-                } else {
-                    text.trim_end_matches('x')
-                        .trim()
-                        .parse::<f64>()
-                        .map_err(|e| e.to_string())
+        let replacing = self.organization.drag.is_none();
+        let settings = self.presentation.measurements;
+        let result = (|| -> Result<Org, String> {
+            let input = parse(&self.measurements.text, settings).map_err(|e| e.to_string())?;
+            let bad = || "Input is not supported by this container tool".to_string();
+            let to_transform = |delta: DMat4| {
+                drag.owner_world.inverse()
+                    * drag.context_world
+                    * delta
+                    * drag.context_world.inverse()
+                    * drag.owner_world
+                    * drag.before
+            };
+            let mut readout = Readout {
+                label: "Distance",
+                values: [0.; 3],
+                count: 1,
+                kind: ValueKind::Length,
+            };
+            let command = match input {
+                Measurement::Copies { count, divide }
+                    if matches!(drag.kind, ModifyKind::Move | ModifyKind::Copy) =>
+                {
+                    let delta = drag.last - drag.anchor;
+                    if delta.length() <= cindral_core::TOLERANCE {
+                        return Err(bad());
+                    }
+                    Org::DuplicateMany {
+                        path: drag.path.clone(),
+                        transforms: (1..=count)
+                            .map(|i| {
+                                to_transform(DMat4::from_translation(
+                                    delta * (i as f64) / if divide { count as f64 } else { 1. },
+                                ))
+                            })
+                            .collect(),
+                    }
                 }
-            }
-            _ => return false,
-        };
-        match parsed {
-            Ok(value)
-                if value.is_finite() && (drag.kind != ModifyKind::Scale || value.abs() > 1e-8) =>
-            {
-                self.preview_instance(&drag, drag.last, Some(value));
-                if self.error.is_none() {
-                    match self.history.commit_preview() {
-                        Ok(_) => {
-                            self.organization.drag = None;
-                            self.measurements.text.clear();
+                input => {
+                    let values = match input {
+                        Measurement::Values(v) => v,
+                        Measurement::Slope(deg) if drag.kind == ModifyKind::Rotate => {
+                            vec![Quantity::Degrees(deg)]
                         }
-                        Err(e) => self.error = Some(e.to_string()),
+                        Measurement::Copies {
+                            count,
+                            divide: false,
+                        } if drag.kind == ModifyKind::Scale => vec![Quantity::Number(count as f64)],
+                        _ => return Err(bad()),
+                    };
+                    if values.is_empty() || values.len() > 3 {
+                        return Err(bad());
+                    }
+                    let delta = match drag.kind {
+                        ModifyKind::Move | ModifyKind::Copy if values.len() == 1 => {
+                            let n = values[0].length(settings).map_err(|e| e.to_string())?;
+                            let direction = drag.measure_direction.unwrap_or_else(|| {
+                                (drag.last - drag.anchor)
+                                    .try_normalize()
+                                    .unwrap_or(DVec3::X)
+                            });
+                            readout.values[0] = n;
+                            self.instance_delta(&drag, drag.anchor + direction, Some(n))
+                        }
+                        ModifyKind::Rotate if values.len() == 1 => {
+                            let n = values[0].number().map_err(|e| e.to_string())?;
+                            readout.label = "Angle";
+                            readout.kind = ValueKind::Angle;
+                            readout.values[0] = n;
+                            self.instance_delta(&drag, drag.last, Some(n))
+                        }
+                        ModifyKind::Scale => {
+                            readout.label = "Scale";
+                            readout.kind = ValueKind::Factor;
+                            readout.count = values.len();
+                            let mut factors = DVec3::ONE;
+                            for (axis, q) in values.iter().enumerate() {
+                                let extent = if values.len() == 1 {
+                                    drag.extents.max_element()
+                                } else {
+                                    drag.extents[axis]
+                                };
+                                let n = match q {
+                                    Quantity::Number(n) => *n,
+                                    Quantity::Length(n) if extent > cindral_core::TOLERANCE => {
+                                        n / extent
+                                    }
+                                    _ => return Err(bad()),
+                                };
+                                if !n.is_finite() || n.abs() <= cindral_core::TOLERANCE {
+                                    return Err(bad());
+                                }
+                                factors[axis] = n;
+                                readout.values[axis] = n;
+                            }
+                            if values.len() == 1 {
+                                factors = DVec3::splat(factors.x);
+                            }
+                            DMat4::from_translation(drag.pivot)
+                                * DMat4::from_scale(factors)
+                                * DMat4::from_translation(-drag.pivot)
+                        }
+                        _ => return Err(bad()),
+                    };
+                    let transform = to_transform(delta);
+                    if matches!(drag.kind, ModifyKind::Move | ModifyKind::Copy) {
+                        let direction = drag.measure_direction.unwrap_or_else(|| {
+                            (drag.last - drag.anchor)
+                                .try_normalize()
+                                .unwrap_or(DVec3::X)
+                        });
+                        drag.measure_direction = Some(direction);
+                        drag.last = drag.anchor + direction * readout.values[0];
+                    }
+                    drag.measured = Some(readout);
+                    if drag.kind == ModifyKind::Copy {
+                        Org::Duplicate {
+                            path: drag.path.clone(),
+                            transform,
+                        }
+                    } else {
+                        Org::Transform {
+                            path: drag.path.clone(),
+                            transform,
+                        }
+                    }
+                }
+            };
+            Ok(command)
+        })();
+        match result {
+            Ok(command) => {
+                let validation = match &command {
+                    Org::Transform { transform, .. } | Org::Duplicate { transform, .. } => {
+                        cindral_core::validate_instance_transform(*transform)
+                    }
+                    Org::DuplicateMany { transforms, .. } => transforms
+                        .iter()
+                        .try_for_each(|m| cindral_core::validate_instance_transform(*m)),
+                    _ => Ok(()),
+                };
+                if let Err(error) = validation {
+                    self.error = Some(error.to_string());
+                    self.measurements.invalid = true;
+                    return true;
+                }
+                let applied = if replacing {
+                    self.history.replace_organization(command)
+                } else {
+                    self.history.organization(command)
+                };
+                match applied {
+                    Ok(true) => {
+                        self.organization.drag = None;
+                        self.organization.completed = Some(drag);
+                        self.measurements.completed();
+                        self.error = None;
+                        self.refresh_mesh();
+                    }
+                    result => {
+                        self.error = Some(
+                            result
+                                .err()
+                                .map(|e| e.to_string())
+                                .unwrap_or_else(|| "No change".into()),
+                        )
                     }
                 }
             }
-            Ok(_) => self.error = Some("Measurement must be finite and nondegenerate".into()),
             Err(error) => self.error = Some(error),
         }
+        self.measurements.invalid = self.error.is_some();
         true
     }
     pub(crate) fn organization_pointer(&mut self, response: &egui::Response) -> bool {
         let ctx = &response.ctx;
         let keyboard = !ctx.wants_keyboard_input();
         if keyboard && ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.organization.completed = None;
             if self.organization.drag.is_some() {
                 self.organization.drag = None;
                 match self.history.cancel_preview() {
@@ -829,6 +1012,8 @@ impl DrafterApp {
             }
             if !self.history.context().is_empty()
                 && !self.modify.active()
+                && !self.modify.editing_completed()
+                && !self.tool.editing_completed()
                 && self.tool.anchor().is_none()
             {
                 if let Err(e) = self.exit_context() {
@@ -862,10 +1047,7 @@ impl DrafterApp {
                     if i.key_pressed(Key::ArrowDown) {
                         self.axis_lock = None;
                     }
-
-
                 });
-
             }
             let Some(position) = ctx.input(|i| i.pointer.hover_pos()) else {
                 return true;
@@ -920,12 +1102,20 @@ impl DrafterApp {
                 if let Err(e) = self.history.commit_preview() {
                     self.error = Some(e.to_string());
                 }
+                if self.error.is_none() {
+                    self.organization.completed = Some(drag);
+                    self.measurements.completed();
+                }
                 self.organization.drag = None;
             }
             return true;
         }
         if !response.hovered() {
             return false;
+        }
+        if ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
+            self.organization.completed = None;
+            self.measurements.reset();
         }
         let rect = response.rect;
         let Some(position) = ctx.input(|i| i.pointer.hover_pos()) else {
@@ -1396,5 +1586,122 @@ mod tests {
         assert_eq!(app.modify.guides(), &[root_guide]);
         app.enter_context(path).unwrap();
         assert_eq!(app.modify.guides(), &[part_guide]);
+    }
+}
+
+#[cfg(test)]
+mod measurement_replacement_tests {
+    use super::*;
+    fn container(kind: DefinitionKind) -> (DrafterApp, InstancePath) {
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline {
+            points: vec![
+                DVec3::ZERO,
+                DVec3::X * 2.,
+                (DVec3::X + DVec3::Y) * 2.,
+                DVec3::Y * 2.,
+            ],
+            closed: true,
+        })
+        .unwrap();
+        app.selection
+            .vertices
+            .extend(app.model().vertices().keys().copied().collect::<Vec<_>>());
+        let path = app.create_container(kind).unwrap();
+        (app, path)
+    }
+    #[test]
+    fn containers_retype_transform_and_arrays_one_undo_step() {
+        for definition in [DefinitionKind::Group, DefinitionKind::Component] {
+            for kind in [
+                ModifyKind::Move,
+                ModifyKind::Copy,
+                ModifyKind::Rotate,
+                ModifyKind::Scale,
+            ] {
+                let (mut app, path) = container(definition);
+                let before = app.document().instance(&path).unwrap().transform;
+                let depth = app.history.undo_depth();
+                app.choose_modify(kind);
+                app.begin_instance_drag(path.clone(), DVec3::X, DVec2::ZERO)
+                    .unwrap();
+                app.organization.drag.as_mut().unwrap().last = DVec3::X * 5.;
+                let entries = match kind {
+                    ModifyKind::Copy => ["5m", "3x", "/2"],
+                    ModifyKind::Rotate => ["90deg", "8:12", "-90"],
+                    ModifyKind::Scale => ["2", "4m", "2,3,1"],
+                    _ => ["2m", "3m", "4m"],
+                };
+                for text in entries {
+                    app.measurements.text = text.into();
+                    app.apply_measurement();
+                    assert!(
+                        app.error.is_none(),
+                        "{definition:?} {kind:?} {text}: {:?}",
+                        app.error
+                    );
+                    assert_eq!(app.history.undo_depth(), depth + 1);
+                }
+                app.measurements.text = "bad".into();
+                app.apply_measurement();
+                assert!(app.error.is_some());
+                assert_eq!(app.history.undo_depth(), depth + 1);
+                let after = app.document().to_data();
+                app.history_step(false);
+                assert_eq!(app.document().instance(&path).unwrap().transform, before);
+                if kind == ModifyKind::Copy {
+                    assert_eq!(app.document().instances(DefinitionId(0)).unwrap().len(), 1);
+                }
+                app.history_step(true);
+                assert_eq!(app.document().to_data(), after);
+            }
+        }
+    }
+    #[test]
+    fn tape_selected_component_resizes_only_selected_occurrence() {
+        let (mut app, path) = container(DefinitionKind::Component);
+        let definition = app.document().instance(&path).unwrap().definition;
+        let original_transform = app.document().instance(&path).unwrap().transform;
+        let original = app.document().definition_model(definition).unwrap().clone();
+        app.organize(Org::AddInstance {
+            definition,
+            name: "Other".into(),
+            transform: DMat4::from_translation(DVec3::X * 10.),
+        })
+        .unwrap();
+        let others = app.document().instances(DefinitionId(0)).unwrap().clone();
+        app.organization.selected = Some(path.clone());
+        app.choose_modify(ModifyKind::TapeMeasure);
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                None,
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.modify.update(DVec3::X * 2.).unwrap();
+        app.modify.finish();
+        let depth = app.history.undo_depth();
+        for text in ["4m", "6m"] {
+            app.measurements.text = text.into();
+            app.apply_measurement();
+            assert!(app.tape_resize.is_some());
+            app.confirm_tape_resize(true);
+            assert!(app.error.is_none(), "{:?}", app.error);
+            assert_eq!(app.history.undo_depth(), depth + 1);
+        }
+        assert_eq!(app.document().definition_model(definition), Some(&original));
+        for (id, node) in others {
+            if id != path[0] {
+                assert_eq!(app.document().instance(&[id]), Some(&node));
+            }
+        }
+        app.history_step(false);
+        assert_eq!(
+            app.document().instance(&path).unwrap().transform,
+            original_transform
+        );
     }
 }

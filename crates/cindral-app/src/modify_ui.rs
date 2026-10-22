@@ -14,7 +14,11 @@ impl DrafterApp {
         self.draw_drag = None;
     }
     pub(crate) fn cancel_modify(&mut self) {
+        self.tape_resize = None;
+        self.tape_target = None;
+        self.tape_resized = false;
         self.organization.drag = None;
+        self.organization.completed = None;
         match self.history.cancel_preview() {
             Ok(true) => self.refresh_mesh(),
             Err(e) => self.error = Some(e.to_string()),
@@ -37,7 +41,10 @@ impl DrafterApp {
         self.modify.finish();
         self.modify_press = None;
         match self.history.commit_preview() {
-            Ok(true) => { self.error = None; self.measurements.completed(); },
+            Ok(true) => {
+                self.error = None;
+                self.measurements.completed();
+            }
             Ok(false) => {
                 if self.error.is_none() {
                     self.error = Some(
@@ -60,21 +67,49 @@ impl DrafterApp {
     pub(crate) fn modify_measurement(&mut self) {
         let before = self.modify.clone();
         let replacing = self.modify.editing_completed();
-        match self.modify.measure_with_settings(&self.measurements.text, self.presentation.measurements) {
+        match self
+            .modify
+            .measure_with_settings(&self.measurements.text, self.presentation.measurements)
+        {
             Ok(Some(command)) => {
-                let result = if replacing { self.history.replace_last(command) } else { self.history.preview_atomic(command).and_then(|_| self.history.commit_preview()) };
+                let result = if replacing {
+                    self.history.replace_last(command)
+                } else {
+                    self.history
+                        .preview_atomic(command)
+                        .and_then(|_| self.history.commit_preview())
+                };
                 match result {
-                    Ok(true) => { self.modify.finish(); self.modify_press = None; self.measurements.completed(); self.error = None; self.refresh_mesh(); }
-                    result => { self.modify = before; self.error = Some(result.err().map(|e| e.to_string()).unwrap_or_else(|| "No change".into())); }
+                    Ok(true) => {
+                        self.modify.finish();
+                        self.modify_press = None;
+                        self.measurements.completed();
+                        self.error = None;
+                        self.refresh_mesh();
+                    }
+                    result => {
+                        self.modify = before;
+                        self.error = Some(
+                            result
+                                .err()
+                                .map(|e| e.to_string())
+                                .unwrap_or_else(|| "No change".into()),
+                        );
+                    }
                 }
             }
             Ok(None) => {
                 if self.modify.kind() == ModifyKind::TapeMeasure {
                     self.last_tape = self.modify.measurement();
-                    self.modify.finish(); self.measurements.completed(); self.error = None;
+                    self.modify.finish();
+                    self.measurements.completed();
+                    self.error = None;
                 }
             }
-            Err(e) => { self.modify = before; self.error = Some(e.to_string()); }
+            Err(e) => {
+                self.modify = before;
+                self.error = Some(e.to_string());
+            }
         }
         self.measurements.invalid = self.error.is_some();
     }
@@ -93,7 +128,7 @@ impl DrafterApp {
         let escape = response.ctx.input(|i| i.key_pressed(Key::Escape));
         if keyboard_free && escape {
             self.cancel_modify();
-            self.measurements.text.clear();
+            self.measurements.reset();
             self.error = None;
             return;
         }
@@ -123,9 +158,7 @@ impl DrafterApp {
                 if i.key_pressed(Key::ArrowDown) {
                     self.axis_lock = None;
                 }
-
             });
-
         }
         let Some(position) = response.ctx.input(|i| i.pointer.hover_pos()) else {
             return;
@@ -224,7 +257,11 @@ impl DrafterApp {
             return;
         }
         if pressed && !self.modify.active() {
+            self.modify.cancel();
             self.measurements.reset();
+            self.tape_resize = None;
+            self.tape_target = None;
+            self.tape_resized = false;
             if point.is_none() {
                 self.error = Some(
                     "Cannot start tool: pointer ray does not intersect the editing plane or a face"
@@ -311,6 +348,9 @@ impl DrafterApp {
             }
             if released {
                 if self.modify.kind() == ModifyKind::TapeMeasure
+                    && self
+                        .modify_press
+                        .is_some_and(|start| start.distance(cursor) > 3.)
                     && self
                         .modify
                         .measurement()
@@ -627,7 +667,7 @@ mod tests {
         assert!((max.z - 4.).abs() < 1e-4);
     }
     #[test]
-    fn triple_click_routes_connected_selection_and_tape_does_not_edit_history() {
+    fn triple_click_selection_and_pending_tape_resize_preserve_history() {
         let mut app = DrafterApp::default();
         rectangle(&mut app);
         let ctx = egui::Context::default();
@@ -662,8 +702,11 @@ mod tests {
         app.apply_measurement();
         assert_eq!(app.model(), &before);
         assert_eq!(app.history.undo_depth(), depth);
-        assert_eq!(app.modify.guides().len(), 1);
-        assert_eq!(app.last_tape, Some(5.));
+        assert!(app.tape_resize.is_some());
+        assert!(app.modify.guides().is_empty());
+        app.confirm_tape_resize(false);
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
     }
     #[test]
     fn guide_lines_clip_across_the_view_even_with_an_endpoint_behind_camera() {
@@ -1748,7 +1791,6 @@ mod utility_parity_tests {
         send(app, ctx, vec![button(p, false, egui::Modifiers::NONE)]);
     }
     #[test]
-    #[ignore = "Stationary first release can infer a nonzero submicron distance and prematurely finish Tape"]
     fn utility_parity_tape_two_click_distance_and_escape() {
         let (mut app, ctx) = setup(ModifyKind::TapeMeasure);
         let before = app.model().clone();
@@ -1811,6 +1853,8 @@ mod utility_parity_tests {
                     key(Key::Enter, egui::Modifiers::NONE),
                 ],
             );
+            assert!(app.tape_resize.is_some());
+            app.confirm_tape_resize(true);
             let expected = if text == "2m" { 2. } else { 1.5 };
             assert!((app.last_tape.unwrap() - expected).abs() < 1e-7);
             assert!(!app.modify.active());

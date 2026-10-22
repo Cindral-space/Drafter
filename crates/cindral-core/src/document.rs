@@ -56,6 +56,13 @@ pub enum OrganizationCommand {
         /// Absolute placement in the owning definition.
         transform: DMat4,
     },
+    /// Duplicate a container at multiple absolute placements as one operation.
+    DuplicateMany {
+        /// Original occurrence.
+        path: InstancePath,
+        /// One to 256 destination placements.
+        transforms: Vec<DMat4>,
+    },
     /// Remove a container occurrence (shared-parent changes affect every occurrence of that parent).
     Delete(InstancePath),
     /// Break one instance's definition-sharing link (including its private nested groups).
@@ -768,11 +775,127 @@ impl DocumentHistory {
         self.cancel_preview()?;
         let id = self.active_definition();
         if !matches!(self.undo.last(), Some(DocumentEntry::Geometry(owner)) if *owner == id) {
-            return Err(invalid("Last operation is no longer editable in this context"));
+            return Err(invalid(
+                "Last operation is no longer editable in this context",
+            ));
         }
         let changed = self.history_mut(id)?.replace_last(command)?;
-        if changed { self.redo.clear(); self.geometry_changed(id); }
+        if changed {
+            self.redo.clear();
+            self.geometry_changed(id);
+        }
         Ok(changed)
+    }
+    /// Replace a graph-only placement/copy operation without copying document geometry.
+    pub fn replace_organization(
+        &mut self,
+        command: OrganizationCommand,
+    ) -> Result<bool, KernelError> {
+        if !matches!(
+            command,
+            OrganizationCommand::Transform { .. }
+                | OrganizationCommand::Duplicate { .. }
+                | OrganizationCommand::DuplicateMany { .. }
+        ) {
+            return Err(invalid("Unsupported placement replacement"));
+        }
+        self.cancel_preview()?;
+        let Some(DocumentEntry::Organization { delta, steps }) = self.undo.last().cloned() else {
+            return Err(invalid("No completed container operation"));
+        };
+        if !steps.is_empty() {
+            return Err(invalid("Last operation changes geometry"));
+        }
+        let original_graph = self.graph.clone();
+        delta.apply(&mut self.graph, false)?;
+        let old = self.undo.pop().ok_or(KernelError::MissingEntity)?;
+        let result = self.organization(command);
+        if !matches!(result, Ok(true)) {
+            self.graph = original_graph;
+            self.undo.push(old);
+        } else {
+            for id in original_graph
+                .definitions
+                .keys()
+                .filter(|id| !self.graph.definitions.contains_key(id))
+            {
+                self.geometry.remove(id);
+            }
+        }
+        result
+    }
+    /// Resize all loose geometry and child containers in the active context as one undo step.
+    /// Replacement uses the original geometry and placements of the preceding resize.
+    pub fn resize_active(&mut self, matrix: DMat4, replacing: bool) -> Result<bool, KernelError> {
+        validate_instance_transform(matrix)?;
+        self.cancel_preview()?;
+        let id = self.active_definition();
+        let mut before = self.graph.clone();
+        let old_steps = if replacing {
+            let Some(DocumentEntry::Organization { delta, steps }) = self.undo.last() else {
+                return Err(invalid("No completed resize"));
+            };
+            if steps.iter().any(|owner| *owner != id) {
+                return Err(invalid("Resize context changed"));
+            }
+            delta.apply(&mut before, false)?;
+            steps.clone()
+        } else {
+            Vec::new()
+        };
+        let mut after = before.clone();
+        for instance in after
+            .definitions
+            .get_mut(&id)
+            .ok_or(KernelError::MissingEntity)?
+            .instances
+            .values_mut()
+        {
+            instance.transform = matrix * instance.transform;
+            validate_instance_transform(instance.transform)?;
+        }
+        after.validate()?;
+        let vertices = self
+            .history(id)
+            .model()
+            .vertices()
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut steps = Vec::new();
+        let mut dirty = BTreeMap::new();
+        if !vertices.is_empty() {
+            let command = Command::Transform {
+                vertices,
+                matrix,
+                copy: false,
+            };
+            let changed = if replacing && !old_steps.is_empty() {
+                self.history_mut(id)?.replace_last(command)?
+            } else {
+                self.history_mut(id)?.execute(command)?
+            };
+            if changed {
+                steps.push(id);
+                dirty.insert(id, self.history(id).changes().clone());
+            } else if replacing {
+                return Ok(false);
+            }
+        }
+        if steps.is_empty() && after == before {
+            return Ok(false);
+        }
+        if replacing {
+            self.undo.pop();
+        }
+        self.graph = after.clone();
+        self.undo.push(DocumentEntry::Organization {
+            delta: GraphDelta::between(&before, &after),
+            steps,
+        });
+        self.redo.clear();
+        self.changed(dirty, true, false);
+        Ok(true)
     }
     /// Replace a live geometry preview in the active definition, shared by every instance.
     pub fn preview(&mut self, command: Command) -> Result<bool, KernelError> {
@@ -1379,6 +1502,29 @@ impl DocumentHistory {
                     .ok_or(KernelError::MissingEntity)?
                     .instances
                     .insert(node.id, node);
+            }
+            OrganizationCommand::DuplicateMany { path, transforms } => {
+                if transforms.is_empty() || transforms.len() > 256 {
+                    return Err(invalid("Array count must be between 1 and 256"));
+                }
+                let (owner, original) = node_mut(&mut after, &path)?;
+                for transform in transforms {
+                    validate_instance_transform(transform)?;
+                    let mut node = original.clone();
+                    node.id = InstanceId(after.allocate()?);
+                    node.transform = transform;
+                    node.name = format!("{} copy", node.name);
+                    if self.definition_kind(node.definition) == Some(DefinitionKind::Group) {
+                        node.definition =
+                            self.clone_definition(node.definition, &mut after, &mut created)?;
+                    }
+                    after
+                        .definitions
+                        .get_mut(&owner)
+                        .ok_or(KernelError::MissingEntity)?
+                        .instances
+                        .insert(node.id, node);
+                }
             }
             OrganizationCommand::Delete(path) => {
                 let (owner, node) = node_mut(&mut after, &path)?;

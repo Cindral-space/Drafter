@@ -9,8 +9,8 @@ use cindral_render::{
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
 mod dae_ui;
 mod files_ui;
-mod modify_ui;
 mod measurements_ui;
+mod modify_ui;
 mod organization_ui;
 mod presentation_ui;
 #[cfg(feature = "kernel-benchmark")]
@@ -45,6 +45,9 @@ pub struct DrafterApp {
     drag_axis: DVec3,
     paint_color: [u8; 4],
     last_tape: Option<f64>,
+    tape_resize: Option<measurements_ui::TapeResize>,
+    tape_target: Option<measurements_ui::TapeTarget>,
+    tape_resized: bool,
     guide_definition: cindral_core::DefinitionId,
     guide_cache: std::collections::BTreeMap<cindral_core::DefinitionId, Vec<cindral_tools::Guide>>,
     history: History,
@@ -82,6 +85,9 @@ impl Default for DrafterApp {
             drag_axis: DVec3::Z,
             paint_color: [210, 130, 75, 255],
             last_tape: None,
+            tape_resize: None,
+            tape_target: None,
+            tape_resized: false,
             guide_definition: cindral_core::DefinitionId(0),
             guide_cache: Default::default(),
             history: History::new(),
@@ -140,6 +146,7 @@ impl DrafterApp {
             self.refresh_mesh();
         }
         self.organization.drag = None;
+        self.organization.completed = None;
         self.modify.cancel();
         self.modifying = false;
         self.tool.set_kind(kind);
@@ -221,11 +228,15 @@ impl DrafterApp {
     }
     fn history_step(&mut self, redo: bool) {
         self.measurements.reset();
+        self.tape_resize = None;
+        self.tape_target = None;
+        self.tape_resized = false;
         if let Ok(true) = self.history.cancel_preview() {
             self.refresh_mesh();
         }
         self.modify.cancel();
         self.organization.drag = None;
+        self.organization.completed = None;
         self.selection.clear();
         self.selection_start = None;
         let result = if redo {
@@ -248,23 +259,43 @@ impl DrafterApp {
             return;
         }
         if self.modifying {
+            if self.modify.kind() == ModifyKind::TapeMeasure {
+                self.request_tape_resize();
+                return;
+            }
             self.modify_measurement();
             return;
         }
         let before = self.tool.clone();
         let replacing = self.tool.editing_completed();
-        match self.tool.measure_with_settings(&self.measurements.text, self.presentation.measurements) {
+        match self
+            .tool
+            .measure_with_settings(&self.measurements.text, self.presentation.measurements)
+        {
             Ok(Some(command)) => {
-                let result = if replacing { self.history.replace_last(command) } else { self.history.execute(command) };
+                let result = if replacing {
+                    self.history.replace_last(command)
+                } else {
+                    self.history.execute(command)
+                };
                 if matches!(result, Ok(true)) {
-                    self.refresh_mesh(); self.error = None;
+                    self.refresh_mesh();
+                    self.error = None;
                     self.measurements.completed();
                 } else {
-                    self.error = Some(result.err().map(|e| e.to_string()).unwrap_or_else(|| "No change".into()));
+                    self.error = Some(
+                        result
+                            .err()
+                            .map(|e| e.to_string())
+                            .unwrap_or_else(|| "No change".into()),
+                    );
                     self.tool = before;
                 }
             }
-            Ok(None) => { self.measurements.applied(); self.error = None; }
+            Ok(None) => {
+                self.measurements.applied();
+                self.error = None;
+            }
             Err(error) => self.error = Some(error.to_string()),
         }
         self.measurements.invalid = self.error.is_some();
@@ -371,6 +402,9 @@ impl DrafterApp {
     }
 
     fn viewport_input(&mut self, response: &egui::Response) {
+        if self.tape_resize.is_some() {
+            return;
+        }
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
         let drawing_drag =
@@ -385,7 +419,9 @@ impl DrafterApp {
                 self.camera.orbit(Vec2::new(delta.x, delta.y));
             }
         }
-        if self.capture_measurement_keys(response) { return; }
+        if self.capture_measurement_keys(response) {
+            return;
+        }
         if self.section_input(response) {
             return;
         }
@@ -459,7 +495,7 @@ impl DrafterApp {
             if keyboard_free {
                 if i.key_pressed(Key::Escape) {
                     self.tool.cancel();
-                    self.measurements.text.clear();
+                    self.measurements.reset();
                     self.axis_lock = None;
                     self.error = None;
                     self.draw_press = None;
@@ -541,10 +577,6 @@ impl DrafterApp {
                     }
                 }
             }
-            if !keyboard_free {
-                return;
-            }
-
         });
         if self.modifying {
             self.draw_press = None;
@@ -556,6 +588,8 @@ impl DrafterApp {
             .ctx
             .input(|i| i.pointer.button_pressed(PointerButton::Primary))
         {
+            self.tool.end_remeasurement();
+            self.measurements.reset();
             self.draw_press = self.snap.clone();
         }
 
@@ -609,7 +643,9 @@ impl DrafterApp {
             Ok(Some(command)) => {
                 if !self.commit(command) {
                     self.tool = before;
-                } else { self.measurements.completed(); }
+                } else {
+                    self.measurements.completed();
+                }
             }
             Ok(None) => self.error = None,
             Err(error) => self.error = Some(error.to_string()),
@@ -665,6 +701,7 @@ impl DrafterApp {
         let ui_profile = cindral_core::profile::Scope::new(7);
         self.workspace_header(ctx);
         self.workspace_status(ctx);
+        self.tape_resize_window(ctx);
         self.recovery_window(ctx);
         self.autosave_tick(ctx);
         self.scene_tabs(ctx);

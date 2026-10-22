@@ -16,9 +16,25 @@ pub enum LengthUnit {
 }
 impl LengthUnit {
     /// Meters per display unit.
-    pub fn meters(self) -> f64 { match self { Self::Meter => 1., Self::Centimeter => 0.01, Self::Millimeter => 0.001, Self::Inch => 0.0254, Self::Foot => 0.3048 } }
+    pub fn meters(self) -> f64 {
+        match self {
+            Self::Meter => 1.,
+            Self::Centimeter => 0.01,
+            Self::Millimeter => 0.001,
+            Self::Inch => 0.0254,
+            Self::Foot => 0.3048,
+        }
+    }
     /// Unambiguous suffix.
-    pub fn suffix(self) -> &'static str { match self { Self::Meter => "m", Self::Centimeter => "cm", Self::Millimeter => "mm", Self::Inch => "in", Self::Foot => "ft" } }
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::Meter => "m",
+            Self::Centimeter => "cm",
+            Self::Millimeter => "mm",
+            Self::Inch => "in",
+            Self::Foot => "ft",
+        }
+    }
 }
 /// Units, precision and numeric locale shared by all tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -31,4 +47,12 @@ pub struct MeasurementSettings {
     /// Use comma decimal mark and semicolon list separator.
     pub decimal_comma: bool,
 }
-impl Default for MeasurementSettings { fn default() -> Self { Self { unit: LengthUnit::Meter, precision: 3, decimal_comma: false } } }
+impl Default for MeasurementSettings {
+    fn default() -> Self {
+        Self {
+            unit: LengthUnit::Meter,
+            precision: 3,
+            decimal_comma: false,
+        }
+    }
+}

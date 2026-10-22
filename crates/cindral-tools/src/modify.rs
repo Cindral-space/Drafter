@@ -10,9 +10,9 @@ use cindral_core::{
 };
 use glam::{DMat4, DVec3};
 
+use crate::measurements::{self, Measurement, MeasurementSettings, MeasurementTool, Quantity};
 use crate::selection::{Hit, Selection};
 use crate::session::plane_basis_for;
-use crate::measurements::{self, Measurement, MeasurementSettings, MeasurementTool};
 use crate::ToolError;
 
 /// Supported interactive modify tools.
@@ -340,6 +340,10 @@ pub struct ModifySession {
     axis: DVec3,
     reference_dir: Option<DVec3>,
     reference_radius: f64,
+    scale_extents: DVec3,
+    scale_factors: Option<(DVec3, usize)>,
+    tape_baseline: Option<f64>,
+    resize_factor: Option<f64>,
     current_pointer: Option<DVec3>,
     measurement: Option<f64>,
     measurement_direction: Option<DVec3>,
@@ -366,6 +370,10 @@ impl ModifySession {
             axis: DVec3::Z,
             reference_dir: None,
             reference_radius: 1.,
+            scale_extents: DVec3::ONE,
+            scale_factors: None,
+            tape_baseline: None,
+            resize_factor: None,
             current_pointer: None,
             measurement: None,
             measurement_direction: None,
@@ -414,6 +422,9 @@ impl ModifySession {
         self.axis = DVec3::Z;
         self.reference_dir = None;
         self.reference_radius = 1.;
+        self.tape_baseline = None;
+        self.resize_factor = None;
+        self.scale_factors = None;
         self.current_pointer = None;
         self.measurement = None;
         self.measurement_direction = None;
@@ -438,7 +449,10 @@ impl ModifySession {
 
     /// The most recent numerical measurement (distance in meters, angle in degrees, or scale factor).
     pub fn measurement(&self) -> Option<f64> {
-        self.completed.as_deref().and_then(|s| s.measurement).or(self.measurement)
+        self.completed
+            .as_deref()
+            .and_then(|s| s.measurement)
+            .or(self.measurement)
     }
 
     /// Set the color for face painting.
@@ -579,6 +593,18 @@ impl ModifySession {
         self.anchor = Some(point);
         self.axis = norm_axis;
         self.reference_dir = reference_dir;
+        if self.kind == ModifyKind::TapeMeasure {
+            target_vertices = model.vertices().keys().copied().collect();
+        }
+        let mut min = DVec3::splat(f64::INFINITY);
+        let mut max = DVec3::splat(f64::NEG_INFINITY);
+        for id in &target_vertices {
+            if let Some(v) = model.vertices().get(id) {
+                min = min.min(v.position);
+                max = max.max(v.position);
+            }
+        }
+        self.scale_extents = max - min;
         self.target_vertices = target_vertices;
         self.target_face = target_face;
         self.target_edges = target_edges;
@@ -781,12 +807,29 @@ impl ModifySession {
         self.measure_with_settings(text, MeasurementSettings::default())
     }
     /// Shared parser entry point with document units and locale.
-    pub fn measure_with_settings(&mut self, text: &str, settings: MeasurementSettings) -> Result<Option<Command>, ToolError> {
+    pub fn measure_with_settings(
+        &mut self,
+        text: &str,
+        settings: MeasurementSettings,
+    ) -> Result<Option<Command>, ToolError> {
         self.apply_input(&measurements::parse(text, settings)?, settings)
     }
     /// True until the next begin/cancel/tool change after a completed operation.
-    pub fn editing_completed(&self) -> bool { self.completed.is_some() }
+    pub fn editing_completed(&self) -> bool {
+        self.completed.is_some()
+    }
 
+    /// Absolute model resize multiplier requested by the most recent Tape entry.
+    pub fn resize_factor(&self) -> Option<f64> {
+        self.resize_factor
+    }
+    /// Anchor retained through completion for confirmed Tape resizing.
+    pub fn measurement_anchor(&self) -> Option<DVec3> {
+        self.completed
+            .as_deref()
+            .and_then(|s| s.anchor)
+            .or(self.anchor)
+    }
     fn measure_value(&mut self, value: f64) -> Result<Option<Command>, ToolError> {
         if !self.active {
             return Err(ToolError::NotReady);
@@ -815,7 +858,9 @@ impl ModifySession {
             ModifyKind::Move | ModifyKind::Copy => {
                 let is_copy = self.kind == ModifyKind::Copy;
                 let dist = value;
-                let dir = if let Some(dir) = self.measurement_direction { dir } else if let Some(p) = self.current_pointer {
+                let dir = if let Some(dir) = self.measurement_direction {
+                    dir
+                } else if let Some(p) = self.current_pointer {
                     let d = p - anchor;
                     if d.length() > TOLERANCE {
                         d.normalize()
@@ -876,7 +921,9 @@ impl ModifySession {
             ModifyKind::FollowMe => {
                 let face = self.target_face.ok_or(ToolError::NotReady)?;
                 let dist = value;
-                let dir = if let Some(dir) = self.measurement_direction { dir } else if let Some(p) = self.current_pointer {
+                let dir = if let Some(dir) = self.measurement_direction {
+                    dir
+                } else if let Some(p) = self.current_pointer {
                     let d = p - anchor;
                     if d.length() > TOLERANCE {
                         d.normalize()
@@ -901,7 +948,9 @@ impl ModifySession {
             }
             ModifyKind::TapeMeasure => {
                 let dist = value;
-                let dir = if let Some(dir) = self.measurement_direction { dir } else if let Some(p) = self.current_pointer {
+                let dir = if let Some(dir) = self.measurement_direction {
+                    dir
+                } else if let Some(p) = self.current_pointer {
                     let d = p - anchor;
                     if d.length() > TOLERANCE {
                         d.normalize()
@@ -929,19 +978,186 @@ impl ModifySession {
             return None;
         }
 
-        let source = self.clone();
         let cmd = match self.kind {
             ModifyKind::TapeMeasure => {
-                let _ = self.add_guide();
+                if self.resize_factor.is_none() {
+                    let _ = self.add_guide();
+                }
                 None
             }
             ModifyKind::Select => None,
             _ => self.last_command.take(),
         };
 
+        let source = self.clone();
         self.cancel();
         self.completed = Some(Box::new(source));
         cmd
+    }
+}
+
+impl MeasurementTool for ModifySession {
+    fn readout(&self) -> measurements::Readout {
+        if let Some(source) = &self.completed {
+            return source.readout();
+        }
+        use measurements::{Readout, ValueKind};
+        if let Some((factors, count)) = self.scale_factors {
+            return Readout {
+                label: "Scale",
+                values: factors.to_array(),
+                count,
+                kind: ValueKind::Factor,
+            };
+        }
+        let label = match self.kind {
+            ModifyKind::Rotate => "Angle",
+            ModifyKind::Scale => "Scale",
+            ModifyKind::Select | ModifyKind::Eraser | ModifyKind::PaintBucket => "",
+            _ => "Distance",
+        };
+        Readout {
+            label,
+            values: [self.measurement().unwrap_or(0.), 0., 0.],
+            count: usize::from(!label.is_empty() && self.measurement().is_some()),
+            kind: match self.kind {
+                ModifyKind::Rotate => ValueKind::Angle,
+                ModifyKind::Scale => ValueKind::Factor,
+                _ => ValueKind::Length,
+            },
+        }
+    }
+    fn apply_input(
+        &mut self,
+        input: &Measurement,
+        settings: MeasurementSettings,
+    ) -> Result<Option<Command>, ToolError> {
+        let mut candidate = self.completed.as_deref().unwrap_or(self).clone();
+        candidate.completed = None;
+        if !candidate.active
+            || matches!(
+                candidate.kind,
+                ModifyKind::Select | ModifyKind::Eraser | ModifyKind::PaintBucket
+            )
+        {
+            return Err(ToolError::NotReady);
+        }
+        let bad =
+            || ToolError::InvalidMeasurement("Input is not supported by this modify tool".into());
+        let command = match input {
+            Measurement::Copies { count, divide }
+                if matches!(candidate.kind, ModifyKind::Move | ModifyKind::Copy) =>
+            {
+                if !(1..=256).contains(count) {
+                    return Err(bad());
+                }
+                let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
+                let delta = candidate.current_pointer.ok_or(ToolError::NotReady)? - anchor;
+                if delta.length() <= TOLERANCE {
+                    return Err(bad());
+                }
+                let commands = (1..=*count)
+                    .map(|i| Command::Transform {
+                        vertices: candidate.target_vertices.clone(),
+                        matrix: DMat4::from_translation(
+                            delta * (i as f64) / if *divide { *count as f64 } else { 1. },
+                        ),
+                        copy: true,
+                    })
+                    .collect();
+                let command = Command::Batch(commands);
+                candidate.last_command = Some(command.clone());
+                Some(command)
+            }
+            Measurement::Copies {
+                count,
+                divide: false,
+            } if candidate.kind == ModifyKind::Scale => candidate.measure_value(*count as f64)?,
+            Measurement::Values(values)
+                if candidate.kind == ModifyKind::Scale
+                    && !values.is_empty()
+                    && values.len() <= 3 =>
+            {
+                let mut factors = DVec3::ONE;
+                for (axis, q) in values.iter().enumerate() {
+                    let extent = if values.len() == 1 {
+                        candidate.scale_extents.max_element()
+                    } else {
+                        candidate.scale_extents[axis]
+                    };
+                    let factor = match q {
+                        Quantity::Length(length) if extent > TOLERANCE => length / extent,
+                        Quantity::Number(n) => *n,
+                        _ => return Err(bad()),
+                    };
+                    if !factor.is_finite() || factor.abs() <= TOLERANCE {
+                        return Err(bad());
+                    }
+                    factors[axis] = factor;
+                }
+                if values.len() == 1 {
+                    factors = DVec3::splat(factors.x);
+                }
+                let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
+                let command = Command::Transform {
+                    vertices: candidate.target_vertices.clone(),
+                    matrix: DMat4::from_translation(anchor)
+                        * DMat4::from_scale(factors)
+                        * DMat4::from_translation(-anchor),
+                    copy: false,
+                };
+                candidate.scale_factors = Some((factors, values.len()));
+                candidate.measurement = Some(factors.x);
+                candidate.last_command = Some(command.clone());
+                Some(command)
+            }
+            Measurement::Values(values)
+                if candidate.kind == ModifyKind::TapeMeasure && values.len() == 1 =>
+            {
+                let desired = values[0].length(settings)?;
+                let baseline = candidate
+                    .tape_baseline
+                    .or(candidate.measurement)
+                    .ok_or(ToolError::NotReady)?;
+                if baseline <= TOLERANCE || desired <= TOLERANCE {
+                    return Err(bad());
+                }
+                let factor = desired / baseline;
+                if !factor.is_finite() {
+                    return Err(bad());
+                }
+                candidate.tape_baseline = Some(baseline);
+                candidate.resize_factor = Some(factor);
+                candidate.measurement = Some(desired);
+                let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
+                let command = Command::Transform {
+                    vertices: candidate.target_vertices.clone(),
+                    matrix: DMat4::from_translation(anchor)
+                        * DMat4::from_scale(DVec3::splat(factor))
+                        * DMat4::from_translation(-anchor),
+                    copy: false,
+                };
+                candidate.last_command = Some(command.clone());
+                Some(command)
+            }
+            Measurement::Values(values) if values.len() == 1 => {
+                let value = match candidate.kind {
+                    ModifyKind::Rotate | ModifyKind::Scale => values[0].number()?,
+                    _ => values[0].length(settings)?,
+                };
+                if !value.is_finite() || (candidate.kind == ModifyKind::Scale && value <= TOLERANCE)
+                {
+                    return Err(bad());
+                }
+                candidate.measure_value(value)?
+            }
+            Measurement::Slope(deg) if candidate.kind == ModifyKind::Rotate => {
+                candidate.measure_value(*deg)?
+            }
+            _ => return Err(bad()),
+        };
+        *self = candidate;
+        Ok(command)
     }
 }
 
@@ -1295,15 +1511,12 @@ mod tests {
         session.measure("0.5").expect("0.5");
         assert_eq!(session.measurement(), Some(0.5));
 
-        // Scale <= 0 is rejected as invalid measurement
+        // Zero scales are rejected; negative factors reflect.
         assert!(matches!(
             session.measure("0"),
             Err(ToolError::InvalidMeasurement(_))
         ));
-        assert!(matches!(
-            session.measure("-1"),
-            Err(ToolError::InvalidMeasurement(_))
-        ));
+        assert!(session.measure("-1").unwrap().is_some());
     }
 
     #[test]
@@ -1475,9 +1688,9 @@ mod tests {
         assert_eq!(update_res, None);
         assert_eq!(session.measurement(), Some(4.0));
 
-        // measure produces NO command
+        // Typed measurement proposes a resize; the app requires confirmation.
         let measure_res = session.measure("5m").expect("measure");
-        assert_eq!(measure_res, None);
+        assert!(measure_res.is_some());
         assert_eq!(session.measurement(), Some(5.0));
 
         // add_guide persists a construction line
@@ -1609,41 +1822,5 @@ mod tests {
             )
             .expect("scaled axis normalized");
         assert_eq!(session.axis, DVec3::Z);
-    }
-}
-
-impl MeasurementTool for ModifySession {
-    fn readout(&self) -> measurements::Readout {
-        use measurements::{Readout,ValueKind};
-        let label = match self.kind { ModifyKind::Rotate => "Angle",ModifyKind::Scale => "Scale",ModifyKind::Select|ModifyKind::Eraser|ModifyKind::PaintBucket => "",_ => "Distance" };
-        Readout { label, values:[self.measurement().unwrap_or(0.),0.,0.],count:usize::from(!label.is_empty() && self.measurement().is_some()),kind:match self.kind {ModifyKind::Rotate=>ValueKind::Angle,ModifyKind::Scale=>ValueKind::Factor,_=>ValueKind::Length} }
-    }
-    fn apply_input(&mut self, input: &Measurement, settings: MeasurementSettings) -> Result<Option<Command>, ToolError> {
-        let mut candidate = self.completed.as_deref().unwrap_or(self).clone();
-        candidate.completed = None;
-        if !candidate.active || matches!(candidate.kind,ModifyKind::Select|ModifyKind::Eraser|ModifyKind::PaintBucket) { return Err(ToolError::NotReady); }
-        let bad = || ToolError::InvalidMeasurement("Input is not supported by this modify tool".into());
-        let command = match input {
-            Measurement::Copies{count,divide} if matches!(candidate.kind,ModifyKind::Move|ModifyKind::Copy) => {
-                if !(1..=256).contains(count) { return Err(bad()); }
-                let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
-                let delta = candidate.current_pointer.ok_or(ToolError::NotReady)? - anchor;
-                if delta.length() <= TOLERANCE { return Err(bad()); }
-                let commands = (1..=*count).map(|i| Command::Transform { vertices:candidate.target_vertices.clone(), matrix:DMat4::from_translation(delta*(i as f64)/if *divide { *count as f64 } else {1.}), copy:true }).collect();
-                let command = Command::Batch(commands); candidate.last_command=Some(command.clone()); Some(command)
-            }
-            Measurement::Values(values) if values.len()==1 => {
-                let value = match candidate.kind {
-                    ModifyKind::Rotate | ModifyKind::Scale => values[0].number()?,
-                    _ => values[0].length(settings)?,
-                };
-                if !value.is_finite() || (candidate.kind==ModifyKind::Scale && value<=TOLERANCE) { return Err(bad()); }
-                candidate.measure_value(value)?
-            }
-            Measurement::Slope(deg) if candidate.kind==ModifyKind::Rotate => candidate.measure_value(*deg)?,
-            _ => return Err(bad()),
-        };
-        *self = candidate;
-        Ok(command)
     }
 }

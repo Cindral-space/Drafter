@@ -232,7 +232,6 @@ fn transform_rigid_and_positive_scale_preserve_hole_area() {
 }
 
 #[test]
-#[ignore = "gap: scalar length parser rejects compound feet/inches"]
 fn transform_move_compound_feet_inches() {
     let (mut history, face) = square();
     let mut session = prepared(&history, face, ModifyKind::Move);
@@ -243,7 +242,6 @@ fn transform_move_compound_feet_inches() {
 }
 
 #[test]
-#[ignore = "gap: positive-only loose geometry Scale rejects reflection factor"]
 fn transform_scale_negative_factor() {
     let (mut history, face) = square();
     let mut session = prepared(&history, face, ModifyKind::Scale);
@@ -257,7 +255,6 @@ fn transform_scale_negative_factor() {
 }
 
 #[test]
-#[ignore = "gap: Scale has no directional target-dimension entry or grips"]
 fn transform_scale_target_dimension() {
     let (mut history, face) = square();
     let mut session = prepared(&history, face, ModifyKind::Scale);
@@ -268,7 +265,6 @@ fn transform_scale_target_dimension() {
 }
 
 #[test]
-#[ignore = "gap: finish clears anchor so last Move cannot be remeasured"]
 fn transform_move_remeasure_completed_operation() {
     let (mut history, face) = square();
     let mut session = prepared(&history, face, ModifyKind::Move);
@@ -278,8 +274,7 @@ fn transform_move_remeasure_completed_operation() {
     history.commit_preview().unwrap();
     session.finish();
     let command = session.measure("150cm").unwrap().unwrap();
-    history.preview(command).unwrap();
-    history.commit_preview().unwrap();
+    history.replace_last(command).unwrap();
     assert!((history.model().bounds().unwrap().0.x - 1.5).abs() < 1e-8);
 }
 

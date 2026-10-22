@@ -389,16 +389,18 @@ fn test_typed_unit_measurements_and_invalid_errors_and_cancel() {
             end: DVec3::new(10.0, 0.0, 0.0)
         }
     );
-    // Next measure falls back to previous_direction (+X)
+    // Re-entry revises the same segment from its original start.
     let line_cmd2 = session.measure("5000mm").unwrap().expect("line cmd2");
     assert_eq!(
         line_cmd2,
         Command::AddEdge {
-            start: DVec3::new(10.0, 0.0, 0.0),
-            end: DVec3::new(15.0, 0.0, 0.0)
+            start: DVec3::ZERO,
+            end: DVec3::new(5.0, 0.0, 0.0)
         }
     );
-    // Measure along preview direction (+Y)
+    // A new operation uses its own preview direction (+Y).
+    session.cancel();
+    session.click(DVec3::new(15., 0., 0.)).unwrap();
     session.pointer_move(DVec3::new(15.0, 5.0, 0.0)).unwrap();
     let line_cmd3 = session.measure("2m").unwrap().expect("line cmd3");
     assert_eq!(
@@ -409,24 +411,20 @@ fn test_typed_unit_measurements_and_invalid_errors_and_cancel() {
         }
     );
 
-    // Negative / zero measurement rejected
+    // Zero is rejected; signed length flips the original direction.
     assert!(matches!(
         session.measure("0m"),
         Err(ToolError::InvalidMeasurement(_))
     ));
-    assert!(matches!(
-        session.measure("-5m"),
-        Err(ToolError::InvalidMeasurement(_))
-    ));
+    assert!(
+        matches!(session.measure("-5m").unwrap(),Some(Command::AddEdge{end,..}) if end==DVec3::new(15.,-5.,0.))
+    );
 
     // 3. Measure on Rectangle
     session.set_kind(ToolKind::Rectangle);
     session.click(DVec3::ZERO).unwrap();
-    assert!(matches!(
-        session.measure("10m"), // Missing comma
-        Err(ToolError::InvalidMeasurement(_))
-    ));
-    // State preserved after bad measurement!
+    assert!(session.measure("10m").is_err()); // A partial width needs a live height.
+                                              // State preserved after bad measurement!
     assert_eq!(session.anchor(), Some(DVec3::ZERO));
     let rect_cmd = session.measure("4m, 3m").unwrap().expect("rect cmd");
     if let Command::AddPolyline { points, closed } = rect_cmd {

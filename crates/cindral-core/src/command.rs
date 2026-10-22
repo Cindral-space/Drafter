@@ -222,9 +222,12 @@ impl History {
     /// Commands refer to the model before that operation. Invalid commands restore it exactly.
     pub fn replace_last(&mut self, command: Command) -> Result<bool, KernelError> {
         self.cancel_preview()?;
-        let Some(old) = self.undo.pop() else { return Ok(false); };
+        let Some(old) = self.undo.pop() else {
+            return Ok(false);
+        };
         old.delta.apply(&mut self.model, false)?;
-        let prepared = crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water);
+        let prepared =
+            crate::transaction::Delta::prepare(&mut self.model, &command, self.high_water);
         let delta = match prepared {
             Ok(delta) if !delta.is_empty() => delta,
             result => {

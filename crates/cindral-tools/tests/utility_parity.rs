@@ -121,7 +121,7 @@ fn utility_parity_tape_units_distance_cancel_and_invalid_input_are_atomic() {
         let mut s = begin(&h, ModifyKind::TapeMeasure, None);
         assert!(s.update(V::new(3., 4., 0.)).unwrap().is_none());
         assert_eq!(s.measurement(), Some(5.));
-        assert!(s.measure(text).unwrap().is_none());
+        assert!(s.measure(text).unwrap().is_some());
         assert!((s.measurement().unwrap() - expected).abs() < 1e-7);
         let measurement = s.measurement();
         assert!(s.measure("invalid").is_err());
@@ -173,7 +173,6 @@ fn utility_parity_eraser_face_interior_does_not_erase() {
 }
 
 #[test]
-#[ignore = "Tape Measure parser does not support compound feet/inches"]
 fn utility_parity_tape_compound_imperial() {
     let (h, _) = square();
     let mut s = begin(&h, ModifyKind::TapeMeasure, None);

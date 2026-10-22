@@ -8,7 +8,9 @@ use crate::ToolError;
 /// Rejects unknown units, invalid numbers, non-finite values, and malformed or trailing input.
 pub fn parse_length(input: &str) -> Result<f64, ToolError> {
     match crate::measurements::parse(input, Default::default())? {
-        crate::measurements::Measurement::Values(values) if values.len() == 1 => values[0].length(Default::default()),
+        crate::measurements::Measurement::Values(values) if values.len() == 1 => {
+            values[0].length(Default::default())
+        }
         _ => Err(ToolError::InvalidMeasurement(input.into())),
     }
 }

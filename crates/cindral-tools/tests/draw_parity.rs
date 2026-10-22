@@ -117,7 +117,7 @@ fn draw_invalid_measurements_preserve_state_and_recover() {
         let mut tool = prepared(kind);
         let anchors = tool.anchors().to_vec();
         let preview = tool.preview();
-        for invalid in ["nonsense", "NaN", "0", "3'6\""] {
+        for invalid in ["nonsense", "NaN", "0", "3'bad\""] {
             assert!(tool.measure(invalid).is_err(), "{kind:?}: {invalid}");
             assert_eq!(tool.anchors(), anchors);
             assert_eq!(tool.preview(), preview);
@@ -132,7 +132,6 @@ fn draw_invalid_measurements_preserve_state_and_recover() {
 }
 
 #[test]
-#[ignore = "gap: compound feet/inches input is unsupported by parse_length"]
 fn draw_compound_imperial_length() {
     assert!((parse_length("3'6\"").unwrap() - 1.0668).abs() < 1e-9);
 }
@@ -155,7 +154,6 @@ fn draw_line_remeasurement_revises_last_segment() {
 }
 
 #[test]
-#[ignore = "gap: idle Circle measurement cannot configure side count; separate Segments UI exists"]
 fn draw_circle_sides_before_center() {
     let mut tool = ToolSession::new(ToolKind::Circle);
     assert!(tool.measure("12").unwrap().is_none());
@@ -164,7 +162,6 @@ fn draw_circle_sides_before_center() {
 }
 
 #[test]
-#[ignore = "gap: rectangle partial dimensions require two nonempty lengths"]
 fn draw_rectangle_partial_dimension_preserves_other_dimension() {
     let mut tool = prepared(ToolKind::Rectangle);
     let command = tool.measure("4m,").unwrap().unwrap();
