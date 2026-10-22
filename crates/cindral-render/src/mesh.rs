@@ -1624,6 +1624,81 @@ mod tests {
     }
 
     #[test]
+    fn push_pull_cleanup_audit_incremental_cache_matches_fresh_geometry() {
+        fn check(cache: &mut MeshCache, history: &History) {
+            let changes = history.changes();
+            cache
+                .update(
+                    history.model(),
+                    &changes.faces.iter().copied().collect::<Vec<_>>(),
+                    &changes.edges.iter().copied().collect::<Vec<_>>(),
+                )
+                .unwrap();
+            let (fresh, _) = MeshCache::rebuild(history.model()).unwrap();
+            assert_eq!(
+                cache.face_slots.keys().collect::<Vec<_>>(),
+                fresh.face_slots.keys().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                cache.edge_slots.keys().collect::<Vec<_>>(),
+                fresh.edge_slots.keys().collect::<Vec<_>>()
+            );
+            for (id, slot) in &fresh.face_slots {
+                let actual = &cache.face_slots[id];
+                assert_eq!(actual.active_tris, slot.active_tris);
+                assert_eq!(
+                    &cache.face_data
+                        [actual.start_tri * 3..(actual.start_tri + actual.active_tris) * 3],
+                    &fresh.face_data[slot.start_tri * 3..(slot.start_tri + slot.active_tris) * 3]
+                );
+            }
+            for (id, slot) in &fresh.edge_slots {
+                assert_eq!(cache.edge_slots[id].vertices, slot.vertices);
+            }
+        }
+        let mut history = History::new();
+        history
+            .execute(Command::AddPolyline {
+                points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+                closed: true,
+            })
+            .unwrap();
+        let face = *history.model().faces().keys().next().unwrap();
+        let (mut cache, _) = MeshCache::rebuild(history.model()).unwrap();
+        history
+            .execute(Command::PushPull { face, distance: 1. })
+            .unwrap();
+        check(&mut cache, &history);
+        for distance in [0.25, 0.5, 0.75] {
+            history
+                .preview(Command::PushPull { face, distance })
+                .unwrap();
+            check(&mut cache, &history);
+        }
+        history.cancel_preview().unwrap();
+        check(&mut cache, &history);
+        history
+            .execute(Command::PushPull { face, distance: 1. })
+            .unwrap();
+        check(&mut cache, &history);
+        history.undo().unwrap();
+        check(&mut cache, &history);
+        history.redo().unwrap();
+        check(&mut cache, &history);
+        history
+            .execute(Command::PushPull {
+                face,
+                distance: -3.,
+            })
+            .unwrap();
+        check(&mut cache, &history);
+        assert!(cache.face_slots.is_empty());
+        assert!(cache.edge_slots.is_empty());
+        assert!(cache.face_data.iter().all(|v| *v == FaceVertex::zeroed()));
+        assert!(cache.edge_data.iter().all(|v| *v == EdgeVertex::zeroed()));
+    }
+
+    #[test]
     fn incremental_update_writes_only_dirty_ranges_and_skips_unchanged() {
         let mut history = History::new();
         // Square A at x in 0..1
