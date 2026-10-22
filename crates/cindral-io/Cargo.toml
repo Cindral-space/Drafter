@@ -32,3 +32,6 @@ required-features = ["bench-fixtures"]
 [[example]]
 name = "dae_benchmark"
 required-features = ["bench-fixtures"]
+
+[dev-dependencies]
+cindral-tools = { path = "../cindral-tools" }
