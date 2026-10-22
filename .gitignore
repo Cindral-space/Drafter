@@ -3,3 +3,5 @@
 *.cdraft.autosave
 
 /tests/fixtures/skp-local/
+
+/SKP/
