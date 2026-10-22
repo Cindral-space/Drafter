@@ -64,7 +64,7 @@ fn attached_sheet() -> History {
 }
 
 #[test]
-fn repeated_outward_pull_audit_records_wall_seams_without_old_caps() {
+fn repeated_outward_pull_heals_wall_seams_without_old_caps() {
     let mut h = square();
     pull(&mut h, 0., 1.);
     let before = h.model().clone();
@@ -76,16 +76,16 @@ fn repeated_outward_pull_audit_records_wall_seams_without_old_caps() {
             after.edges().len(),
             after.faces().len()
         ),
-        (12, 20, 10)
+        (8, 12, 6)
     );
-    assert_eq!(ring_edges(&after, 1.), 4);
+    assert_eq!(ring_edges(&after, 1.), 0);
     assert!(
         !after.faces().values().any(|f| {
             f.outer
                 .iter()
                 .all(|v| (after.vertices()[v].position.z - 1.).abs() < TOLERANCE)
         }),
-        "old horizontal cap is removed; its boundary ring survives between wall faces"
+        "old horizontal cap must be removed"
     );
     assert!((after.closed_solid_volume().unwrap().unwrap() - 8.).abs() < TOLERANCE);
     h.undo().unwrap();
@@ -129,9 +129,9 @@ fn replacing_preview_does_not_accumulate_intermediate_rings() {
     for distance in [0.25, 0.5, 0.75] {
         h.preview(Command::PushPull { face, distance }).unwrap();
         h.model().validate().unwrap();
-        assert_eq!(h.model().faces().len(), 10);
-        assert_eq!(h.model().edges().len(), 20);
-        assert_eq!(ring_edges(h.model(), 1.), 4);
+        assert_eq!(h.model().faces().len(), 6);
+        assert_eq!(h.model().edges().len(), 12);
+        assert_eq!(ring_edges(h.model(), 1.), 0);
         assert_eq!(h.undo_depth(), depth);
     }
     assert_eq!(ring_edges(h.model(), 1.25), 0);
@@ -141,11 +141,11 @@ fn replacing_preview_does_not_accumulate_intermediate_rings() {
 }
 
 #[test]
-fn attached_sheet_audit_records_retained_base_and_three_face_edge() {
+fn attached_sheet_replaces_base_without_three_face_edge() {
     let h = attached_sheet();
     let m = h.model();
     m.validate().unwrap();
-    assert_eq!(m.faces().len(), 7);
+    assert_eq!(m.faces().len(), 6);
     let shared = m
         .edges()
         .values()
@@ -170,13 +170,12 @@ fn attached_sheet_audit_records_retained_base_and_three_face_edge() {
         })
         .count();
     assert_eq!(
-        incident, 3,
-        "base, neighbor sheet and wall all use old shared edge"
+        incident, 2,
+        "only the neighbor sheet and new wall use the shared edge"
     );
 }
 
 #[test]
-#[ignore = "Cleanup defect: local outward extrusion retains the old cap perimeter and coplanar wall subdivisions"]
 fn repeated_outward_pull_should_heal_uniform_box_walls() {
     let mut h = square();
     pull(&mut h, 0., 1.);
@@ -197,7 +196,32 @@ fn repeated_outward_pull_should_heal_uniform_box_walls() {
 }
 
 #[test]
-#[ignore = "Cleanup defect: attached open-sheet extrusion retains the starting face as a prism base"]
+fn wall_cleanup_preserves_a_painted_boundary() {
+    let mut h = square();
+    pull(&mut h, 0., 1.);
+    let wall = *h
+        .model()
+        .faces()
+        .iter()
+        .find(|(_, f)| f.plane.normal.x.abs() > 0.9)
+        .unwrap()
+        .0;
+    h.execute(Command::PaintFace {
+        faces: vec![wall],
+        color: [210, 20, 10, 255],
+    })
+    .unwrap();
+    pull(&mut h, 1., 1.);
+    assert_eq!(h.model().faces()[&wall].color, [210, 20, 10, 255]);
+    assert_eq!(
+        h.model().faces().len(),
+        7,
+        "only the material boundary should divide a wall"
+    );
+    assert!((h.model().closed_solid_volume().unwrap().unwrap() - 8.).abs() < TOLERANCE);
+}
+
+#[test]
 fn attached_sheet_should_replace_starting_face() {
     let h = attached_sheet();
     let m = h.model();

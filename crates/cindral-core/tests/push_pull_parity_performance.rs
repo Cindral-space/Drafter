@@ -35,4 +35,27 @@ fn push_pull_parity_20k_cpu_budget() {
     assert_eq!(fixture.history.undo_depth(), depth + 1);
     assert!(worst < Duration::from_millis(16), "CPU preview {worst:?}");
     assert!(commit < Duration::from_millis(100), "CPU commit {commit:?}");
+    // A second extrusion exercises merging with existing walls, rather than
+    // only creating new walls on an initially subdivided supporting face.
+    let mut worst = Duration::ZERO;
+    for i in 1..=30 {
+        let start = Instant::now();
+        fixture
+            .history
+            .preview(Command::PushPull {
+                face,
+                distance: i as f64 * 0.01,
+            })
+            .unwrap();
+        worst = worst.max(start.elapsed());
+    }
+    fixture.history.commit_preview().unwrap();
+    println!(
+        "20,006-face repeated-extrusion cleanup CPU preview max={:.3} ms; samples=30",
+        worst.as_secs_f64() * 1000.
+    );
+    assert!(
+        worst < Duration::from_millis(16),
+        "CPU wall cleanup {worst:?}"
+    );
 }

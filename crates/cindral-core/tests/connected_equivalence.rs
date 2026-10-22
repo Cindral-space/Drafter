@@ -20,6 +20,47 @@ use cindral_core::benchmark::reference_execute;
 use cindral_core::connected_fixture::connected_solid;
 use cindral_core::{Command, FaceId, History, Model, VertexId, TOLERANCE};
 
+#[test]
+fn repeated_support_face_extension_heals_only_local_walls() {
+    let (mut history, face) = connected_solid(4).unwrap();
+    history
+        .execute(Command::PushPull {
+            face,
+            distance: 0.1,
+        })
+        .unwrap();
+    let before = history.model().clone();
+    let counts = (
+        before.vertices().len(),
+        before.edges().len(),
+        before.faces().len(),
+    );
+    history
+        .execute(Command::PushPull {
+            face,
+            distance: 0.1,
+        })
+        .unwrap();
+    assert_closed_manifold(history.model());
+    assert_eq!(
+        (
+            history.model().vertices().len(),
+            history.model().edges().len(),
+            history.model().faces().len()
+        ),
+        counts
+    );
+    assert!(
+        history.changes().faces.len() < 20,
+        "wall cleanup escaped its local patch"
+    );
+    let after = history.model().clone();
+    history.undo().unwrap();
+    assert_eq!(history.model(), &before);
+    history.redo().unwrap();
+    assert_eq!(history.model(), &after);
+}
+
 // ---------------------------------------------------------------------------
 // Geometry and boundary verification helpers
 // ---------------------------------------------------------------------------

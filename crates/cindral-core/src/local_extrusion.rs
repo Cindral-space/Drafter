@@ -3,7 +3,7 @@ use crate::{
     Command, DVec3, Edge, EdgeId, Face, FaceId, KernelError, Model, Plane, Vertex, VertexId,
     TOLERANCE,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 /// Return no candidate unless a closed boundary or disjoint planar-sheet proof applies.
 #[tracing::instrument(level = "info", skip_all, name = "extrusion.local_proof")]
 pub(crate) fn prepare(
@@ -45,6 +45,27 @@ pub(crate) fn prepare(
             .all(|v| (v.position - origin).dot(direction) <= TOLERANCE)
     };
     let delta = source.plane.normal * *distance;
+    let boundary = index
+        .face_edges
+        .get(face)
+        .ok_or(KernelError::MissingEntity)?;
+    let attached = boundary
+        .iter()
+        .any(|edge| index.edge_faces[edge].iter().any(|other| other != face));
+    // Include only the walls that can merge with this sweep, rather than
+    // reconstructing the entire connected imported object.
+    let walls: BTreeSet<_> = boundary
+        .iter()
+        .flat_map(|edge| &index.edge_faces[edge])
+        .filter(|other| {
+            *other != face
+                && !model.faces[other].plane.equivalent(&source.plane)
+                && model.faces[other].plane.normal.dot(normal).abs() <= TOLERANCE
+                && model.faces[other].color == source.color
+                && model.faces[other].material == source.material
+        })
+        .copied()
+        .collect();
     if !supported(normal) {
         // A blind interior pocket is local only if its coplanar neighboring faces stay
         // above the cavity, and the swept prism does not reach any other shell surface.
@@ -123,9 +144,9 @@ pub(crate) fn prepare(
     }
     cap.plane.distance += cap.plane.normal.dot(delta);
     after.faces.insert(*face, cap);
-    if !closed {
-        // The general open-surface path extrudes a complete prism, including its
-        // base. Closed solids instead replace the source boundary with the cap.
+    if !closed && !attached {
+        // An isolated profile needs a bottom closure. An attached sheet instead
+        // replaces its starting face; keeping it creates a three-face junction.
         let base = FaceId::from_raw(after.allocate()?);
         after.faces.insert(base, source.clone());
     }
@@ -180,6 +201,42 @@ pub(crate) fn prepare(
                 hidden: false,
             },
         );
+    }
+    if !walls.is_empty() {
+        for id in walls {
+            before.faces.insert(id, model.faces[&id].clone());
+            after.faces.insert(id, model.faces[&id].clone());
+            for edge in &index.face_edges[&id] {
+                let e = &model.edges[edge];
+                before.edges.insert(*edge, e.clone());
+                after.edges.insert(*edge, e.clone());
+                for v in e.vertices {
+                    before.vertices.insert(v, model.vertices[&v].clone());
+                    after.vertices.insert(v, model.vertices[&v].clone());
+                }
+            }
+        }
+        // Border vertices still used outside this patch must not be dissolved
+        // while healing coplanar walls inside it.
+        for v in before.vertices.keys() {
+            if index.adjacency[v].iter().any(|edge| {
+                !before.edges.contains_key(edge)
+                    || index.edge_faces[edge]
+                        .iter()
+                        .any(|id| !before.faces.contains_key(id))
+            }) {
+                after.protected.insert(*v);
+            }
+        }
+        let mut polygons = Vec::new();
+        for id in after.faces.keys() {
+            for triangle in after.triangulate(*id)? {
+                if let Some(p) = crate::csg::Polygon::new(triangle.to_vec()) {
+                    polygons.push(p);
+                }
+            }
+        }
+        crate::modification::surfaces(&mut after, polygons, source.color, source.material)?;
     }
     after.validate()?;
     Ok(Some((before, after)))

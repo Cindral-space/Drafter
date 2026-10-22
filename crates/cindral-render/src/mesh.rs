@@ -1685,6 +1685,13 @@ mod tests {
         check(&mut cache, &history);
         history.redo().unwrap();
         check(&mut cache, &history);
+        let face = *history
+            .model()
+            .faces()
+            .iter()
+            .find(|(_, f)| f.plane.normal.z > 0.9 && (f.plane.distance - 2.).abs() < 1e-7)
+            .unwrap()
+            .0;
         history
             .execute(Command::PushPull {
                 face,

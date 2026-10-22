@@ -402,3 +402,172 @@ fn sixty_imported_and_drawn_previews_preserve_equivalent_geometry_and_history() 
         assert_eq!(signature(h), final_shape);
     }
 }
+
+#[test]
+fn imported_closed_box_extension_heals_old_perimeter() {
+    let mut h = imported(source(cube(false)));
+    let face = top(&h, false);
+    h.execute(Command::PushPull {
+        face,
+        distance: 0.2,
+    })
+    .unwrap();
+    h.model().validate().unwrap();
+    assert_eq!(
+        (
+            h.model().vertices().len(),
+            h.model().edges().len(),
+            h.model().faces().len()
+        ),
+        (8, 12, 6)
+    );
+    assert!(!h.model().edges().values().any(|e| {
+        e.vertices
+            .iter()
+            .all(|v| (h.model().vertices()[v].position.z - 1.).abs() < TOLERANCE)
+    }));
+}
+
+#[test]
+fn imported_attached_open_surfaces_replace_base_in_both_edit_paths() {
+    for folded in [false, true] {
+        let g = BulkGeometry {
+            vertices: vec![
+                DVec3::ZERO,
+                DVec3::X,
+                DVec3::X + DVec3::Y,
+                DVec3::Y,
+                DVec3::new(2., 0., if folded { -1. } else { 0. }),
+                DVec3::new(2., 1., if folded { -1. } else { 0. }),
+            ],
+            faces: [vec![0, 1, 2, 3], vec![1, 4, 5, 2]]
+                .into_iter()
+                .map(|outer| BulkFace {
+                    outer,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut h = imported(source(g));
+        let face = *h
+            .model()
+            .faces()
+            .iter()
+            .find(|(_, f)| {
+                f.outer
+                    .iter()
+                    .all(|v| h.model().vertices()[v].position.x <= 1.)
+            })
+            .unwrap()
+            .0;
+        let before = h.to_data();
+        h.preview(Command::PushPull {
+            face,
+            distance: 0.2,
+        })
+        .unwrap();
+        h.model().validate().unwrap();
+        assert!(
+            !h.model().faces().values().any(|f| f.outer.iter().all(|v| {
+                let p = h.model().vertices()[v].position;
+                p.x <= 1. && p.z.abs() < TOLERANCE
+            })),
+            "folded={folded}: starting face survived"
+        );
+        let after = h.to_data();
+        h.cancel_preview().unwrap();
+        same_geometry(&h.to_data(), &before);
+        h.preview(Command::PushPull {
+            face,
+            distance: 0.2,
+        })
+        .unwrap();
+        h.commit_preview().unwrap();
+        same_geometry(&h.to_data(), &after);
+        h.undo().unwrap();
+        same_geometry(&h.to_data(), &before);
+        h.redo().unwrap();
+        same_geometry(&h.to_data(), &after);
+    }
+}
+
+/// Opt-in check against a private file; never stages or copies its source data.
+#[test]
+fn private_skp_starting_faces_are_replaced_when_present() {
+    let Some(path) = std::env::var_os("CINDRAL_SKP_CLEANUP_FILE") else {
+        return;
+    };
+    let mut h = import_file(
+        std::path::Path::new(&path),
+        &ImportOptions {
+            as_component: false,
+            ..Default::default()
+        },
+        &ImportControl::default(),
+    )
+    .unwrap()
+    .history;
+    let mut definitions = std::collections::BTreeSet::new();
+    let mut checked = 0;
+    for occurrence in h.occurrences().unwrap() {
+        if !definitions.insert(occurrence.definition) {
+            continue;
+        }
+        h.enter(occurrence.path).unwrap();
+        let Some(face) = h.model().faces().keys().copied().max_by(|a, b| {
+            h.model()
+                .face_area(*a)
+                .unwrap()
+                .total_cmp(&h.model().face_area(*b).unwrap())
+        }) else {
+            continue;
+        };
+        let positions = |m: &Model, f: &Face| {
+            let mut points = f
+                .outer
+                .iter()
+                .map(|v| m.vertices()[v].position.to_array().map(f64::to_bits))
+                .collect::<Vec<_>>();
+            points.sort();
+            points
+        };
+        let original = positions(h.model(), &h.model().faces()[&face]);
+        // Only attached source faces are subject to replacement; isolated
+        // imported profiles intentionally keep a closure on first extrusion.
+        let boundary = h.model().face_edges(face);
+        let attached = h.model().faces().iter().any(|(other, _)| {
+            *other != face
+                && h.model()
+                    .face_edges(*other)
+                    .iter()
+                    .any(|e| boundary.contains(e))
+        });
+        if !attached {
+            continue;
+        }
+        let before = h.to_data();
+        h.preview(Command::PushPull {
+            face,
+            distance: 0.05,
+        })
+        .unwrap();
+        h.model().validate().unwrap();
+        assert!(
+            !h.model()
+                .faces()
+                .values()
+                .any(|f| positions(h.model(), f) == original),
+            "definition {:?}: original face remains",
+            occurrence.definition
+        );
+        h.cancel_preview().unwrap();
+        same_geometry(&h.to_data(), &before);
+        checked += 1;
+        if checked == 3 {
+            break;
+        }
+    }
+    assert!(checked > 0, "no attached faces exercised");
+    eprintln!("private SKP cleanup: {checked} definitions exercised");
+}

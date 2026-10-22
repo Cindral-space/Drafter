@@ -437,7 +437,7 @@ fn polygon_contains(p: &crate::csg::Polygon, point: DVec3) -> bool {
         .all(|(a, b)| (*b - *a).cross(point - *a).dot(n) >= -TOLERANCE * (*b - *a).length())
 }
 #[tracing::instrument(level = "info", skip_all, name = "modification.surfaces")]
-fn surfaces(
+pub(crate) fn surfaces(
     m: &mut Model,
     polygons: Vec<crate::csg::Polygon>,
     color: [u8; 4],
@@ -457,6 +457,7 @@ fn surfaces_with_index(
     let mut result = Model {
         next_id: next,
         vertices: old.vertices.clone(),
+        protected: old.protected.clone(),
         ..Model::default()
     };
     // Segment insertion already maintains this index while the construction has no faces.
@@ -691,6 +692,14 @@ fn push_pull(m: &mut Model, face: FaceId, distance: f64) -> Result<(), KernelErr
     }
     let (original, closed, flip) = oriented(m)?;
     let tool = prism(m, face, delta)?;
+    let cap_rings = std::iter::once(&f.outer)
+        .chain(&f.holes)
+        .map(|ring| {
+            ring.iter()
+                .map(|v| m.position(*v).map(|p| p + delta))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let polygons = if closed {
         let outward = f.plane.normal * if flip[&face] { -1. } else { 1. };
         if delta.dot(outward) > 0. {
@@ -700,6 +709,24 @@ fn push_pull(m: &mut Model, face: FaceId, distance: f64) -> Result<(), KernelErr
         }
     } else {
         let mut polygons = tool;
+        let usage = edge_usage(m);
+        let attached = std::iter::once(&f.outer).chain(&f.holes).any(|ring| {
+            ring.iter().zip(ring.iter().cycle().skip(1)).any(|(a, b)| {
+                let mut pair = [*a, *b];
+                pair.sort();
+                usage[&pair].iter().any(|(other, _)| *other != face)
+            })
+        });
+        if attached {
+            // Only an isolated profile needs the prism's starting cap. Imported
+            // open shells and attached sheets must replace the selected surface.
+            polygons.retain(|polygon| {
+                !polygon
+                    .vertices
+                    .iter()
+                    .all(|p| f.plane.signed_distance(*p).abs() <= TOLERANCE)
+            });
+        }
         for id in m.faces.keys().filter(|id| **id != face) {
             for t in m.triangulate(*id)? {
                 if let Some(p) = crate::csg::Polygon::new(t.to_vec()) {
@@ -710,6 +737,32 @@ fn push_pull(m: &mut Model, face: FaceId, distance: f64) -> Result<(), KernelErr
         polygons
     };
     surfaces(m, polygons, f.color, f.material)?;
+    // Keep the tool's target identity when reconstruction leaves the translated
+    // cap intact. Intersections that split/change the cap retain their new IDs.
+    if !m.faces.contains_key(&face) {
+        let cap = m
+            .faces
+            .iter()
+            .find(|(_, candidate)| {
+                let rings = std::iter::once(&candidate.outer)
+                    .chain(&candidate.holes)
+                    .collect::<Vec<_>>();
+                rings.len() == cap_rings.len()
+                    && rings.iter().zip(&cap_rings).all(|(actual, expected)| {
+                        actual.len() == expected.len()
+                            && actual.iter().all(|v| {
+                                expected
+                                    .iter()
+                                    .any(|p| m.vertices[v].position.distance(*p) <= TOLERANCE)
+                            })
+                    })
+            })
+            .map(|(id, _)| *id);
+        if let Some(id) = cap {
+            let cap = m.faces.remove(&id).ok_or(KernelError::MissingEntity)?;
+            m.faces.insert(face, cap);
+        }
+    }
     if closed && !m.faces.is_empty() && edge_usage(m).values().any(|f| f.len() != 2) {
         return Err(invalid("extrusion would open a closed solid"));
     }
