@@ -856,3 +856,292 @@ mod tests {
         app.model().validate().unwrap();
     }
 }
+
+#[cfg(test)]
+mod select_parity {
+    use super::*;
+
+    fn fixture() -> (DrafterApp, egui::Context) {
+        let mut app = DrafterApp::default();
+        for x in [0., 4.] {
+            app.execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::new(x, 0., 0.),
+                    DVec3::new(x + 2., 0., 0.),
+                    DVec3::new(x + 2., 2., 0.),
+                    DVec3::new(x, 2., 0.),
+                ],
+                closed: true,
+            })
+            .unwrap();
+        }
+        app.choose_modify(ModifyKind::Select);
+        let ctx = egui::Context::default();
+        send(&mut app, &ctx, vec![], egui::Modifiers::NONE);
+        (app, ctx)
+    }
+
+    fn point(app: &DrafterApp, world: DVec3) -> egui::Pos2 {
+        let view = View {
+            matrix: app.camera.view_projection(1.5).as_dmat4(),
+            size: glam::DVec2::new(600., 400.),
+        };
+        let p = view.project(world).unwrap();
+        egui::pos2(p.x as f32 + 8., p.y as f32 + 8.)
+    }
+
+    fn send(
+        app: &mut DrafterApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        mods: egui::Modifiers,
+    ) {
+        crate::input_tests::frame(app, ctx, events, mods);
+    }
+
+    fn button(p: egui::Pos2, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: p,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers,
+        }
+    }
+
+    fn click(app: &mut DrafterApp, ctx: &egui::Context, p: egui::Pos2, mods: egui::Modifiers) {
+        send(
+            app,
+            ctx,
+            vec![egui::Event::PointerMoved(p), button(p, true, mods)],
+            mods,
+        );
+        send(app, ctx, vec![button(p, false, mods)], mods);
+    }
+
+    fn key(key: Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn select_parity_units_and_clicks_do_not_edit_geometry() {
+        let (mut app, ctx) = fixture();
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        let p = point(&app, DVec3::new(1., 1., 0.));
+        for clicked in [false, true] {
+            if clicked {
+                click(&mut app, &ctx, p, egui::Modifiers::NONE);
+                assert_eq!(app.selection.faces.len(), 1);
+                assert!(app.selection.edges.is_empty());
+            }
+            for text in ["2m", "150cm", "3'6\""] {
+                send(
+                    &mut app,
+                    &ctx,
+                    vec![
+                        egui::Event::PointerMoved(p),
+                        egui::Event::Text(text.into()),
+                        key(Key::Enter, egui::Modifiers::NONE),
+                    ],
+                    egui::Modifiers::NONE,
+                );
+                assert!(app.measurement.is_empty());
+                assert_eq!(app.model(), &before);
+                assert_eq!(app.history.undo_depth(), depth);
+                assert!(!app.modify.active());
+            }
+        }
+        app.model().validate().unwrap();
+    }
+
+    #[test]
+    fn select_parity_empty_click_clears() {
+        let (mut app, ctx) = fixture();
+        let p = point(&app, DVec3::new(1., 1., 0.));
+        click(&mut app, &ctx, p, egui::Modifiers::NONE);
+        assert_eq!(app.selection.faces.len(), 1);
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        click(&mut app, &ctx, egui::pos2(40., 40.), egui::Modifiers::NONE);
+        assert_eq!(app.selection, Selection::default());
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn select_parity_escape_cancels_box_without_model_change() {
+        let (mut app, ctx) = fixture();
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        let p = egui::pos2(40., 40.);
+        send(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(p),
+                button(p, true, egui::Modifiers::NONE),
+            ],
+            egui::Modifiers::NONE,
+        );
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(500., 300.))],
+            egui::Modifiers::NONE,
+        );
+        assert!(app.selection_start.is_some());
+        send(
+            &mut app,
+            &ctx,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        send(
+            &mut app,
+            &ctx,
+            vec![button(egui::pos2(500., 300.), false, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        assert!(app.selection_start.is_none());
+        assert!(!app.modify.active());
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert_eq!(app.selection, Selection::default());
+    }
+
+    #[test]
+    fn select_parity_undo_redo_resets_box() {
+        let (mut app, ctx) = fixture();
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        let p = point(&app, DVec3::new(1., 1., 0.));
+        click(&mut app, &ctx, p, egui::Modifiers::NONE);
+        app.selection_start = Some(glam::DVec2::new(40., 40.));
+        let mods = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(p), key(Key::Z, mods)],
+            mods,
+        );
+        assert_eq!(app.model().faces().len(), 1);
+        assert_eq!(app.history.undo_depth(), depth - 1);
+        assert!(app.selection_start.is_none());
+        assert_eq!(app.selection, Selection::default());
+        send(&mut app, &ctx, vec![key(Key::Y, mods)], mods);
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert!(!app.modify.active());
+        app.model().validate().unwrap();
+    }
+
+    #[test]
+    #[ignore = "Select has no face double-click expansion; routes to single select"]
+    fn select_parity_double_face_expands() {
+        let (mut app, ctx) = fixture();
+        let p = point(&app, DVec3::new(1., 1., 0.));
+        for _ in 0..2 {
+            click(&mut app, &ctx, p, egui::Modifiers::NONE);
+        }
+        assert_eq!(app.selection.faces.len(), 1);
+        assert_eq!(app.selection.edges.len(), 4);
+    }
+
+    #[test]
+    #[ignore = "Select has no edge double-click expansion; routes to single select"]
+    fn select_parity_double_edge_expands() {
+        let (mut app, ctx) = fixture();
+        let p = point(&app, DVec3::new(1., 0., 0.));
+        for _ in 0..2 {
+            click(&mut app, &ctx, p, egui::Modifiers::NONE);
+        }
+        assert_eq!(app.selection.edges.len(), 1);
+        assert_eq!(app.selection.faces.len(), 1);
+    }
+
+    #[test]
+    #[ignore = "Ctrl is not read for additive raw-geometry selection"]
+    fn select_parity_ctrl_adds() {
+        let (mut app, ctx) = fixture();
+        let a = point(&app, DVec3::new(1., 1., 0.));
+        let b = point(&app, DVec3::new(5., 1., 0.));
+        click(&mut app, &ctx, a, egui::Modifiers::NONE);
+        click(
+            &mut app,
+            &ctx,
+            b,
+            egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(app.selection.faces.len(), 2);
+    }
+
+    #[test]
+    #[ignore = "Shift inserts selected entities instead of toggling membership"]
+    fn select_parity_shift_toggles() {
+        let (mut app, ctx) = fixture();
+        let p = point(&app, DVec3::new(1., 1., 0.));
+        click(&mut app, &ctx, p, egui::Modifiers::NONE);
+        click(&mut app, &ctx, p, egui::Modifiers::SHIFT);
+        assert!(app.selection.faces.is_empty());
+    }
+
+    #[test]
+    #[ignore = "Ctrl+Shift adds rather than subtracting raw geometry"]
+    fn select_parity_ctrl_shift_subtracts() {
+        let (mut app, ctx) = fixture();
+        let a = point(&app, DVec3::new(1., 1., 0.));
+        let b = point(&app, DVec3::new(5., 1., 0.));
+        click(&mut app, &ctx, a, egui::Modifiers::NONE);
+        click(&mut app, &ctx, b, egui::Modifiers::SHIFT);
+        assert_eq!(app.selection.faces.len(), 2);
+        click(
+            &mut app,
+            &ctx,
+            a,
+            egui::Modifiers {
+                ctrl: true,
+                command: true,
+                shift: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(app.selection.faces.len(), 1);
+    }
+
+    #[test]
+    #[ignore = "Ctrl+A has no Select-all routing"]
+    fn select_parity_ctrl_a_selects_all() {
+        let (mut app, ctx) = fixture();
+        let mods = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        send(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(egui::pos2(40., 40.)),
+                key(Key::A, mods),
+            ],
+            mods,
+        );
+        assert_eq!(app.selection.faces.len(), 2);
+        assert_eq!(app.selection.edges.len(), 8);
+    }
+}

@@ -1,0 +1,22 @@
+2026-10-22 Select audit CPU performance evidence
+CPU: AMD Ryzen 5 2400G with Radeon Vega Graphics (lscpu)
+Build: cargo test -p cindral-tools --release --test select_parity_performance -- --ignored --nocapture
+Isolated rerun after builds/checks completed (no concurrent agent/build):
+timeout 90s target/release/deps/select_parity_performance-0b8233fed4058fab --ignored --nocapture
+Underlying test exit 101 (16 ms assertion fails); outer capture command printed its output.
+Source has since been formatted; panic line in this raw binary predates formatting.
+
+running 1 test
+19,600 disconnected faces / 30 picks: CPU pick max=23.184 ms; box release=36.451 ms; connected release=50.861 ms; excludes inference/UI/GPU
+
+thread 'select_parity_20k_cpu_budget' (154901) panicked at crates/cindral-tools/tests/select_parity_performance.rs:49:5:
+CPU pick 23.183808ms
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test select_parity_20k_cpu_budget ... FAILED
+
+failures:
+
+failures:
+    select_parity_20k_cpu_budget
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s

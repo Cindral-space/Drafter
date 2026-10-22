@@ -1,6 +1,6 @@
 # Select parity audit
 
-2026-10-22. Audit only; no production changes or SketchUp execution. Desktop behavior, paraphrased from established knowledge and the official [selection reference](https://help.sketchup.com/en/sketchup/selecting-geometry). Artwork, wording and branding differences are intentional. Evidence paths are repository-relative; line numbers refer to the audited production code. `matches` applies to the stated scope only. Windows Ctrl maps to Ctrl in Cindral Linux; macOS uses Option for selection addition/subtraction. Unknown details are trials below, not defects.
+2026-10-22. Audit only; no production changes or SketchUp execution. Desktop behavior, paraphrased from established knowledge and the official [selection reference](https://help.sketchup.com/en/sketchup/selecting-geometry). Artwork, wording and branding differences are intentional. Evidence paths are repository-relative; line numbers refer to the audited production code. Short filenames refer to `crates/cindral-app/src/`, except `selection.rs` in `crates/cindral-tools/src/`. `matches` applies to the stated scope only. Windows Ctrl maps to Ctrl in Cindral Linux; macOS uses Option for selection addition/subtraction. Unknown details are trials below, not defects.
 
 | Behavior | Expected (SketchUp) | Cindral status (matches / differs / missing / unsure) | Evidence (test name, file:line, or read the code) |
 | --- | --- | --- | --- |
@@ -39,8 +39,9 @@
 | B1 Moving selection box | Show box before release. | matches | `modify_ui.rs:387` paints direction-dependent outline; selected membership changes on release. GPU appearance not tested. |
 | B2 Selected highlight | Identify selected entities. | matches | `modify_ui.rs:363` outlines selected edges/face rings; `organization_overlay` bounds selected container. No required color/artwork matching. Face-interior distinction needs Q8. |
 | B3 Empty/no target feedback | Empty click deselects without error. | matches | `modify_ui.rs:237`; empty click app regression. No invalid geometry command is attempted. |
-| B4 Vertex-near click | Independent raw vertices are not ordinary selectable entities. | differs | `pick_section_impl` prioritizes `Hit::Vertex` before edges; Select stores it. Can leave only a vertex selected when clicking a corner. |
-| P1 ~20k-face latency | Project target: live feedback <16 ms, release commit/release <100 ms on Ryzen 5 2400G. | unsure | No end-to-end Select timing yet. Release CPU probe added in test step excludes egui, inference, rendering/GPU. SketchUp timing also unmeasured; see Q9. |
+| B4 Vertex-near click | Independent raw vertices are not ordinary selectable entities. | differs | `pick_section_impl` breaks coincident vertex/edge ties toward `Hit::Vertex`; Select stores it. Ignored `select_parity_corner_does_not_select_standalone_vertex` confirms the gap. |
+| P1 ~20k-face CPU budget | Project target: live feedback <16 ms; release action <100 ms, Ryzen 5 2400G. | differs | Release CPU-only probe: pick max 23.184 ms, box release 36.451 ms, connected release 50.861 ms. Picking alone misses feedback budget. Raw evidence: `docs/TOOL_PARITY/select-release.txt`. This is a project-budget difference, not a SketchUp timing claim. |
+| P2 Complete viewport latency | Full live feedback <16 ms and release <100 ms; SketchUp baseline needs Q9. | unsure | No egui/inference/overlay/GPU timing in this audit. Passing CPU release timings do not certify full release latency; measured CPU picking already misses the feedback target. |
 
 ## Questions for the user
 
@@ -54,7 +55,7 @@ Please include SketchUp version and platform once. Each trial resolves the liste
 6. **Q6 (U1/U2):** Select a face, begin dragging a box in empty space, press Escape while holding the mouse and release. Is the old selection preserved? Select a face again and press Escape without dragging; does it clear?
 7. **Q7 (U3):** Draw a rectangle, select its face, undo, then redo. Is the recreated face selected? Does the next click behave as a fresh selection click?
 8. **Q8 (B2):** Select just a face, then deselect and double-click that face. Can you distinguish face-only selection from face-and-edges selection by the highlight? Cindral currently outlines both cases similarly.
-9. **Q9 (P1):** In your ~20k-face model, drag a selection box and release in each app's release build. Is feedback immediate or visibly delayed? If available, report frame/release timings and hardware; subjective feedback alone cannot certify 16/100 ms.
+9. **Q9 (P2):** In your ~20k-face model, drag a selection box and release in each app's release build. Is feedback immediate or visibly delayed? If available, report frame/release timings and hardware; subjective feedback alone cannot certify 16/100 ms.
 
 ## Side-by-side manual script
 
@@ -77,4 +78,8 @@ Use default shortcuts and top view in both apps. Start with two separated, visib
 
 ## Headless validation
 
-Tests and final measured results are recorded below and in `docs/AGENT_LOG.md` after the test step. Ignored desired-behavior tests document gaps without changing production code. No GPU, SDK, SketchUp binary, assets, new dependencies or Python is used.
+Nine new ordinary tests pass: five public-API contracts in `crates/cindral-tools/tests/select_parity.rs` and four synthetic-egui input tests in the test-only `select_parity` module appended to `crates/cindral-app/src/modify_ui.rs`. Existing tests additionally cover Space activation, triple click, holes/occlusion and edit contexts. Seven new desired-behavior tests were explicitly run and failed at the expected assertions, then remain `#[ignore]` with gap reasons: face/edge double click, Ctrl addition, Shift toggle, Ctrl+Shift subtraction, Ctrl+A and corner vertex selection. No implementation fix was made.
+
+The ignored `crates/cindral-tools/tests/select_parity_performance.rs` probe uses 19,600 authored, separated quads (78,400 vertices), an orthographic overview, 30 identical interior picks, a full-enclosure region release and a connected-component release. Setup is outside timing; cold and subsequent picks included. Run with `cargo test -p cindral-tools --release --test select_parity_performance -- --ignored --nocapture`. On the local Ryzen 5 2400G, the isolated run misses 16 ms (23.184 ms maximum pick); box/connected CPU releases are 36.451/50.861 ms. A first run with possible build contention measured 26.804/36.622/56.646 ms; the isolated rerun confirms the failure. It remains ignored with the measured reason. No renderer, inference, egui, selection highlight preparation or presented-frame timing; no representative private .skp workload certification. Select does not commit geometry, so release selection work is measured instead of a kernel commit.
+
+Completion validation and limitations are in `docs/AGENT_LOG.md`. Counts: **19 matches / 5 differs / 7 missing / 7 unsure** across 38 rows. No GPU, SDK, SketchUp binary, assets, new dependencies or Python used.
