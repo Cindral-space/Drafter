@@ -4,6 +4,8 @@ Audit only, 2026-10-22. Desktop SketchUp baseline; shortcuts/modifiers use Windo
 
 Expected behavior is paraphrased from established workflows and checked against [Erasing and Undoing](https://help.sketchup.com/en/sketchup/erasing-and-undoing), [Measuring Distance](https://help.sketchup.com/en/measuring-distance), [Using Guides](https://help.sketchup.com/en/using-guides), [Applying Materials](https://help.sketchup.com/en/sketchup/applying-materials), [softening](https://help.sketchup.com/en/sketchup/softening-smoothing-and-hiding-geometry), and the [desktop reference card](https://download.sketchup.com/QRC2025/HC-QRC2025-en-SU-Windows.pdf). Recent help describes three Tape modes; older versions may differ. No documentation text reproduced.
 
+Totals: **52 rows: 15 matches / 8 differs / 16 missing / 13 unsure**. Abbreviated sources: `modify.rs` and `units.rs` are under `crates/cindral-tools/src/`; `modify_ui.rs`, `workspace_ui.rs`, `organization_ui.rs` and `lib.rs` are under `crates/cindral-app/src/`. Existing CPU evidence includes `chord_splits_edges_and_erasure_heals_midpoints`, `midpoint_and_on_edge_snapping_respect_priority_and_perspective`, `locked_axis_snaps_compatible_collinear_and_crossing_edges_and_partially_clipped_segments`, `splitting_and_healing_painted_faces_preserves_material_and_history`, and `construction_guides_stay_local_to_their_definition`.
+
 | Behavior | Expected (SketchUp) | Cindral status (matches / differs / missing / unsure) | Evidence (test name, file:line, or read the code) |
 | --- | --- | --- | --- |
 | All: activation E/T/B | Activate Eraser/Tape/Paint respectively | missing | `crates/cindral-app/src/lib.rs:412` shortcut list lacks all three; toolbar works |
@@ -21,7 +23,7 @@ Expected behavior is paraphrased from established workflows and checked against 
 | Eraser: guides | Clicking a guide removes it | missing | `Guide` is session-local, `Hit` has no guide variant; `modify.rs:187` |
 | Eraser: holes/curved surfaces/normals | Exact surviving faces and orientation on nontrivial erase require Q2 | unsure | Rebuilds topology; modifier smoothing absent; no equivalent curved/holed SketchUp trial |
 | Eraser: double-click | Exact extra behavior requires Q3 | unsure | App only handles presses; no Eraser double-click branch |
-| Tape: measure two points | First click anchors, pointer reports distance, second click ends | matches | `modify.rs:675`; `modify_ui.rs:330`; UI test added below; Cindral additionally creates a guide |
+| Tape: measure two points | First click anchors, pointer reports distance, second click ends | differs | `utility_parity_tape_two_click_distance_and_escape` fails: stationary first release inferred 0.000000542294m and finished with a tiny guide; `modify_ui.rs:330` |
 | Tape: measure-only mode | Measure without creating construction geometry | missing | `modify.rs:974` always calls add_guide; Ctrl has no mode toggle |
 | Tape: edge hover length | Before anchoring, hovering an edge displays its length | missing | `modify_ui.rs:416` only current/last measurement; no hovered-edge length |
 | Tape: edge-offset guide | Guide is parallel to source edge at entered perpendicular offset | differs | `modify.rs:513`: guide is through original anchor in pointer direction, independent of source edge |
@@ -37,7 +39,7 @@ Expected behavior is paraphrased from established workflows and checked against 
 | Tape: geometry snaps and axes | Snap to endpoints, midpoints, edges, faces and axes; pointer measurement follows inferred point | matches | `modify_ui.rs:177` Query/infer -> update; shared inference tests; visual overlay excluded |
 | Tape: arrow locks | Right/Left/Up constrain X/Y/Z | matches | `modify_ui.rs:114` -> Query.axis_lock; UI arrow-lock test |
 | Tape: Shift inference hold | Hold current inference while moving | missing | Shift only additive selection; no stored held inference |
-| Tape: inference feedback | Identify snap and axis direction visually, including axis colors | missing | `lib.rs:762` suppresses paint_snap_overlay in modify mode; no measuring segment in modify_overlay |
+| Tape: inference feedback | Identify snap and axis direction visually, including axis colors | missing | `lib.rs:326` suppresses paint_snap_overlay in modify mode; no measuring segment in modify_overlay |
 | Tape: guide undo/redo | Construction aids participate in undo/redo | missing | `modify.rs:974`: Vec push, no history command; ignored UI regression |
 | Tape: cancel before completion | Escape removes pending interaction without adding guide or changing model/history | matches | `modify_ui.rs:93`; CPU/UI cancel tests |
 | Tape: guides in edit context | Keep construction aids in their definition context | matches | `organization_ui.rs:1403` construction_guides_stay_local_to_their_definition |
@@ -87,7 +89,7 @@ Use desktop default shortcuts in SketchUp, Cindral toolbar buttons Eraser/Measur
 4. Eraser: press on first loose line, drag across second, release. Expected: both highlighted during stroke and erased on release, one undo restores both. Cindral commits first target on press.
 5. Eraser: tap Ctrl, click diagonal; undo. Hold Shift, click diagonal; undo. Expected: soften/smooth then hide while preserving surface, respectively. Cindral lacks modes; stop/undo if it deletes.
 6. Select Eraser, click diagonal with no modifiers. Expected: one square face replaces the two triangular regions; undo restores divider.
-7. Activate Tape Measure; Ctrl-cycle to Measure mode in SketchUp. Click first square corner, move to diagonal opposite corner, click. Expected: approximately 14.142136m; no guide in Measure mode. Cindral measures but adds an infinite guide.
+7. Activate Tape Measure; Ctrl-cycle to Measure mode in SketchUp. Click first square corner, move to diagonal opposite corner, click. Expected: approximately 14.142136m; no guide in Measure mode. Cindral may finish immediately with a tiny guide on the first release; otherwise it measures and adds an infinite guide.
 8. Tape: click midpoint of bottom horizontal edge; move straight up, type `2m`, Enter. Expected in guide mode: horizontal guide 2m above bottom. Cindral creates vertical line through original anchor. Repeat from same edge with `150cm`, then `3'6"`; expected offsets 1.5m and 1.0668m. Cindral rejects compound imperial.
 9. Tape: click first corner, press Right arrow, move diagonally; then Escape. Expected: X constrained live distance; cancellation adds no guide or history entry. Repeat using Left/Y and Up/Z on a suitable 3D view.
 10. Tape: click first corner, move toward opposite corner, hold Shift and move away. Expected: held inference; Cindral does not hold it. Escape.
@@ -102,3 +104,21 @@ Use desktop default shortcuts in SketchUp, Cindral toolbar buttons Eraser/Measur
 CPU tests: `cargo test -p cindral-tools --test utility_parity`; synthetic app tests use filter `utility_parity`. Ignored tests preserve confirmed missing/different contracts and must fail when explicitly run; they do not implement fixes. Existing organization tests provide material/context coverage. No tests assert the Q1–Q12 unknown SketchUp outcomes.
 
 Release probe and final measured results are recorded after execution below. All CPU probes exclude GPU, mesh rebuilding, UI presentation, picking and inference. A passing CPU subset cannot establish the full project latency budget. No performance claim is made for imported geometry or whole-model painting/erasing.
+
+Final validation: seven new ordinary tests pass (four tool/kernel, three synthetic-egui); nine known desired-behavior regressions fail on explicit ignored runs. The additional ignored test is the opt-in release probe. Keyboard/cancel/history app tests establish a session directly where necessary: they do not disguise the separate, ignored first-click routing failure. Completion checks: formatting, strict workspace/all-target/all-feature Clippy and workspace/all-feature tests pass (390 passed, 0 failed, 58 ignored). Only tests and documentation changed.
+
+Release CPU probe reproduction:
+
+```sh
+cargo test --release -p cindral-app --features kernel-benchmark utility_parity_release_cpu_probe -- --ignored --nocapture --test-threads=1
+```
+
+Ryzen 5 2400G; 20,000 authored faces in 10,000 disconnected triangulated squares, ten synthetic pointer/command updates per tool, one edge/face target, one guide completion for Tape. Fixture creation, begin/target resolution and validation setup are outside timing. Command generation plus kernel provisional application are inside update timing for Eraser/Paint; Tape only updates distance. Commit is the prepared history commit for Eraser/Paint, session guide completion for Tape. This is not the app's immediate-click path or a connected/full-selection workload.
+
+| Tool | Isolated max CPU update (ms) | Prepared commit/finish (ms) |
+| --- | ---: | ---: |
+| Eraser | 0.126181 | 0.001100 |
+| Paint Bucket | 0.051161 | 0.000700 |
+| Tape Measure | 0.000900 | 0.000910 |
+
+All measured CPU subsets pass their bounds. Earlier sample, concurrent with compilation/workspace checks, update/commit ms: Eraser 0.198492/0.001330; Paint 0.100241/0.001290; Tape 0.002270/0.001080. Isolated output: [utility-release.txt](utility-release.txt). No full viewport or SketchUp latency measurement; performance row remains unsure.

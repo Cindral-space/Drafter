@@ -1691,3 +1691,354 @@ mod offset_follow_me_parity_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod utility_parity_tests {
+    use super::*;
+    fn send(app: &mut DrafterApp, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let modifiers = events
+            .iter()
+            .find_map(|e| match e {
+                egui::Event::Key { modifiers, .. }
+                | egui::Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        crate::input_tests::frame(app, ctx, events, modifiers);
+    }
+    fn key(key: Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+    fn pos(app: &DrafterApp, point: DVec3) -> egui::Pos2 {
+        let view = View {
+            matrix: app.camera.view_projection(1.5).as_dmat4(),
+            size: glam::DVec2::new(600., 400.),
+        };
+        let p = view.project(point).unwrap();
+        egui::pos2(p.x as f32 + 8., p.y as f32 + 8.)
+    }
+    fn button(p: egui::Pos2, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: p,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers,
+        }
+    }
+    fn setup(kind: ModifyKind) -> (DrafterApp, egui::Context) {
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline {
+            points: vec![
+                DVec3::ZERO,
+                DVec3::X * 10.,
+                (DVec3::X + DVec3::Y) * 10.,
+                DVec3::Y * 10.,
+            ],
+            closed: true,
+        })
+        .unwrap();
+        app.camera.set_view(StandardView::Top);
+        app.camera.projection = Projection::Orthographic;
+        app.camera.target = glam::Vec3::new(5., 5., 0.);
+        app.camera.distance = 30.;
+        app.choose_modify(kind);
+        let ctx = egui::Context::default();
+        send(&mut app, &ctx, vec![]);
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(308., 208.))],
+        );
+        (app, ctx)
+    }
+    fn click(app: &mut DrafterApp, ctx: &egui::Context, point: DVec3) {
+        let p = pos(app, point);
+        send(app, ctx, vec![egui::Event::PointerMoved(p)]);
+        send(app, ctx, vec![button(p, true, egui::Modifiers::NONE)]);
+        send(app, ctx, vec![button(p, false, egui::Modifiers::NONE)]);
+    }
+    #[test]
+    #[ignore = "Stationary first release can infer a nonzero submicron distance and prematurely finish Tape"]
+    fn utility_parity_tape_two_click_distance_and_escape() {
+        let (mut app, ctx) = setup(ModifyKind::TapeMeasure);
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        click(&mut app, &ctx, DVec3::ZERO);
+        assert!(
+            app.modify.active(),
+            "error={:?} last={:?} guides={:?}",
+            app.error,
+            app.last_tape,
+            app.modify.guides()
+        );
+        let p = pos(&app, DVec3::new(10., 10., 0.));
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        assert!((app.modify.measurement().unwrap() - 200_f64.sqrt()).abs() < 1e-5);
+        send(
+            &mut app,
+            &ctx,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(!app.modify.active());
+        assert!(app.modify.guides().is_empty());
+        assert_eq!(app.model(), &before);
+        click(&mut app, &ctx, DVec3::ZERO);
+        click(&mut app, &ctx, DVec3::new(10., 10., 0.));
+        assert!(!app.modify.active());
+        assert!((app.last_tape.unwrap() - 200_f64.sqrt()).abs() < 1e-5);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert_eq!(app.model(), &before);
+    }
+    #[test]
+    fn utility_parity_tape_keyboard_units_and_arrow_lock() {
+        for text in ["2m", "150cm"] {
+            let (mut app, ctx) = setup(ModifyKind::TapeMeasure);
+            app.modify
+                .begin(
+                    app.history.model(),
+                    &Selection::default(),
+                    None,
+                    DVec3::ZERO,
+                    DVec3::Z,
+                )
+                .unwrap();
+            let p = pos(&app, DVec3::new(8., 6., 0.));
+            send(
+                &mut app,
+                &ctx,
+                vec![
+                    key(Key::ArrowRight, egui::Modifiers::NONE),
+                    egui::Event::PointerMoved(p),
+                ],
+            );
+            assert_eq!(app.axis_lock, Some(Axis::X));
+            assert!((app.modify.measurement().unwrap() - 8.).abs() < 1e-4);
+            send(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::Text(text.into()),
+                    key(Key::Enter, egui::Modifiers::NONE),
+                ],
+            );
+            let expected = if text == "2m" { 2. } else { 1.5 };
+            assert!((app.last_tape.unwrap() - expected).abs() < 1e-7);
+            assert!(!app.modify.active());
+        }
+    }
+    #[test]
+    fn utility_parity_click_history_and_undo_reset() {
+        for kind in [ModifyKind::Eraser, ModifyKind::PaintBucket] {
+            let (mut app, ctx) = setup(kind);
+            let before = app.model().clone();
+            let depth = app.history.undo_depth();
+            let point = if kind == ModifyKind::Eraser {
+                DVec3::X * 5.
+            } else {
+                DVec3::new(5., 5., 0.)
+            };
+            click(&mut app, &ctx, point);
+            assert!(!app.modify.active());
+            assert_eq!(app.history.undo_depth(), depth + 1);
+            app.model().validate().unwrap();
+            let after = app.model().clone();
+            app.choose_modify(ModifyKind::TapeMeasure);
+            app.modify
+                .begin(
+                    app.history.model(),
+                    &Selection::default(),
+                    None,
+                    DVec3::ZERO,
+                    DVec3::Z,
+                )
+                .unwrap();
+            assert!(app.modify.active());
+            let command = egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            };
+            send(&mut app, &ctx, vec![key(Key::Z, command)]);
+            assert!(!app.modify.active());
+            assert_eq!(app.model(), &before);
+            send(&mut app, &ctx, vec![key(Key::Y, command)]);
+            assert_eq!(app.model(), &after);
+        }
+    }
+    #[test]
+    #[ignore = "E/T/B activation shortcuts are not routed"]
+    fn utility_parity_activation_shortcuts() {
+        for (key_code, kind) in [
+            (Key::E, ModifyKind::Eraser),
+            (Key::T, ModifyKind::TapeMeasure),
+            (Key::B, ModifyKind::PaintBucket),
+        ] {
+            let (mut app, ctx) = setup(ModifyKind::Select);
+            send(&mut app, &ctx, vec![key(key_code, egui::Modifiers::NONE)]);
+            assert_eq!(app.modify.kind(), kind);
+        }
+    }
+    #[test]
+    #[ignore = "Eraser currently commits on press instead of waiting for stroke release"]
+    fn utility_parity_eraser_stroke_defers_until_release() {
+        let (mut app, ctx) = setup(ModifyKind::Eraser);
+        let before = app.model().clone();
+        let p = pos(&app, DVec3::X * 5.);
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        send(&mut app, &ctx, vec![button(p, true, egui::Modifiers::NONE)]);
+        assert_eq!(app.model(), &before);
+        send(
+            &mut app,
+            &ctx,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.model(), &before);
+    }
+    #[test]
+    #[ignore = "Ctrl Eraser is not routed to soften/smooth; currently deletes edge"]
+    fn utility_parity_eraser_ctrl_softens_preserving_geometry() {
+        let (mut app, ctx) = setup(ModifyKind::Eraser);
+        app.execute(Command::AddEdge {
+            start: DVec3::ZERO,
+            end: (DVec3::X + DVec3::Y) * 10.,
+        })
+        .unwrap();
+        let count = app.model().edges().len();
+        let p = pos(&app, DVec3::new(5., 5., 0.));
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        send(&mut app, &ctx, vec![button(p, true, ctrl)]);
+        send(&mut app, &ctx, vec![button(p, false, ctrl)]);
+        assert_eq!(app.model().edges().len(), count);
+        assert!(app.model().edges().values().any(|e| e.soft && e.smooth));
+    }
+    #[test]
+    #[ignore = "Tape guide creation bypasses command history"]
+    fn utility_parity_tape_guide_undo() {
+        let (mut app, ctx) = setup(ModifyKind::TapeMeasure);
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                None,
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.modify.update(DVec3::X * 3.).unwrap();
+        app.measurement = "2m".into();
+        app.apply_measurement();
+        assert_eq!(app.modify.guides().len(), 1);
+        let command = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        send(&mut app, &ctx, vec![key(Key::Z, command)]);
+        assert!(app.modify.guides().is_empty());
+    }
+    #[test]
+    fn utility_parity_tape_escape_preserves_model_history_and_guides() {
+        let (mut app, ctx) = setup(ModifyKind::TapeMeasure);
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        app.modify
+            .begin(
+                app.history.model(),
+                &Selection::default(),
+                None,
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+        app.modify.update(DVec3::X * 3.).unwrap();
+        send(
+            &mut app,
+            &ctx,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(!app.modify.active());
+        assert!(app.modify.guides().is_empty());
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+    }
+    #[test]
+    #[ignore = "Alt sampler is not routed; click paints instead of sampling"]
+    fn utility_parity_paint_alt_samples_without_painting() {
+        let (mut app, ctx) = setup(ModifyKind::PaintBucket);
+        let before = app.model().clone();
+        let p = pos(&app, DVec3::new(5., 5., 0.));
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        send(&mut app, &ctx, vec![button(p, true, alt)]);
+        send(&mut app, &ctx, vec![button(p, false, alt)]);
+        assert_eq!(app.model(), &before);
+        let face = *app.model().faces().keys().next().unwrap();
+        assert_eq!(app.paint_color, app.model().faces()[&face].color);
+    }
+    #[cfg(feature = "kernel-benchmark")]
+    #[test]
+    #[ignore = "release-only 20k-face CPU subset; excludes picking/inference/mesh/UI/GPU"]
+    #[allow(clippy::assertions_on_constants)]
+    fn utility_parity_release_cpu_probe() {
+        assert!(!cfg!(debug_assertions), "run --release");
+        let mut within_budget = true;
+        for kind in [
+            ModifyKind::Eraser,
+            ModifyKind::PaintBucket,
+            ModifyKind::TapeMeasure,
+        ] {
+            let mut h = cindral_core::benchmark::tiled_squares(100, 100)
+                .unwrap()
+                .history;
+            let face = *h.model().faces().keys().next().unwrap();
+            let edge = *h.model().edges().keys().next().unwrap();
+            let hit = if kind == ModifyKind::Eraser {
+                Hit::Edge(edge)
+            } else {
+                Hit::Face(face)
+            };
+            let mut s = ModifySession::new(kind);
+            s.begin(
+                h.model(),
+                &Selection::default(),
+                Some(hit),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
+            .unwrap();
+            let mut max_ms = 0_f64;
+            for sample in 1..=10 {
+                let start = std::time::Instant::now();
+                if let Some(c) = s.update(DVec3::X * sample as f64).unwrap() {
+                    h.preview(c).unwrap();
+                }
+                max_ms = max_ms.max(start.elapsed().as_secs_f64() * 1000.);
+            }
+            let start = std::time::Instant::now();
+            s.finish();
+            if kind != ModifyKind::TapeMeasure {
+                assert!(h.commit_preview().unwrap());
+            }
+            let commit_ms = start.elapsed().as_secs_f64() * 1000.;
+            println!("{kind:?}: 20,000 faces, one target, 10 CPU updates; max={max_ms:.6}ms commit={commit_ms:.6}ms");
+            within_budget &= max_ms < 16. && commit_ms < 100.;
+        }
+        assert!(
+            within_budget,
+            "CPU subset exceeds budget; see printed measurements"
+        );
+    }
+}

@@ -1,0 +1,24 @@
+   Compiling cindral-app v0.1.0 (/home/earl/Desktop/Cindral/Drafter/crates/cindral-app)
+    Finished `release` profile [optimized] target(s) in 31.88s
+     Running unittests src/lib.rs (target/release/deps/cindral_app-aa0a603d510c340b)
+
+running 1 test
+test modify_ui::utility_parity_tests::utility_parity_release_cpu_probe ... Eraser: 20,000 faces, one target, 10 CPU updates; max=0.126181ms commit=0.001100ms
+PaintBucket: 20,000 faces, one target, 10 CPU updates; max=0.051161ms commit=0.000700ms
+TapeMeasure: 20,000 faces, one target, 10 CPU updates; max=0.000900ms commit=0.000910ms
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 87 filtered out; finished in 0.64s
+
+     Running unittests src/main.rs (target/release/deps/cindral_app-27a873fe408f4cc9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples/renderer_benchmark.rs (target/release/examples/renderer_benchmark-d0cfa31651765a6f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
