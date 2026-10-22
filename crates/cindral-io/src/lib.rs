@@ -189,3 +189,6 @@ pub use import_dae::{import_dae, import_dae_bytes};
 
 mod import_skp;
 pub use import_skp::{import_skp, import_skp_bytes};
+
+mod export_dae;
+pub use export_dae::{export_dae, DaeControl, DaeOptions, DaeSelection, DaeUnits};
