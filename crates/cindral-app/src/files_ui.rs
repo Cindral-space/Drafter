@@ -60,6 +60,7 @@ pub(crate) struct ImportJob {
     pub(crate) receiver: mpsc::Receiver<cindral_io::Result<PreparedImport>>,
 }
 pub(crate) struct FileState {
+    pub(crate) dae: crate::dae_ui::DaeUi,
     path: Option<PathBuf>,
     saved_values: Option<DraftBundle>,
     checked_save_revision: Option<(u64, u64)>,
@@ -116,6 +117,7 @@ impl Default for FileState {
         let directory = state_directory();
         let snapshot = snapshot_path(&directory, 0);
         Self {
+            dae: Default::default(),
             path: None,
             saved_values: None,
             checked_save_revision: None,
@@ -149,6 +151,7 @@ enum Action {
     Obj,
     Stl,
     Gltf,
+    Dae,
     Recover(PathBuf),
     Discard(PathBuf),
 }
@@ -360,6 +363,7 @@ impl DrafterApp {
                     );
                 }
             }
+            Action::Dae => { self.files.dae.open = true; }
             Action::Recover(path) => {
                 self.cancel_import();
                 let bundle = cindral_io::load_draft(&path)?;
@@ -416,6 +420,7 @@ impl DrafterApp {
                     ("OBJ…", Action::Obj),
                     ("STL…", Action::Stl),
                     ("glTF 2.0…", Action::Gltf),
+                    ("COLLADA…", Action::Dae),
                 ] {
                     if ui.button(text).clicked() {
                         action = Some(a);
@@ -476,6 +481,7 @@ impl DrafterApp {
         }
     }
     pub(crate) fn file_tick(&mut self, ctx: &egui::Context) {
+        self.dae_window(ctx);
         self.import_tick(ctx);
         self.import_window(ctx);
         if !self.files.checked {
