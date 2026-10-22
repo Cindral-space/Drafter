@@ -443,6 +443,15 @@ fn surfaces(
     color: [u8; 4],
     material: Option<crate::MaterialId>,
 ) -> Result<(), KernelError> {
+    surfaces_with_index(m, polygons, color, material, true)
+}
+fn surfaces_with_index(
+    m: &mut Model,
+    polygons: Vec<crate::csg::Polygon>,
+    color: [u8; 4],
+    material: Option<crate::MaterialId>,
+    indexed: bool,
+) -> Result<(), KernelError> {
     let next = m.next_id;
     let old = m.clone();
     let mut result = Model {
@@ -450,11 +459,24 @@ fn surfaces(
         vertices: old.vertices.clone(),
         ..Model::default()
     };
+    // Segment insertion already maintains this index while the construction has no faces.
+    // Reusing it avoids an exhaustive intersection scan for every polygon boundary.
+    if indexed {
+        result.ensure_spatial()?;
+    }
     let insertion_span =
         tracing::info_span!("surfaces.insert_segments", polygons = polygons.len()).entered();
+    let mut inserted = std::collections::BTreeSet::new();
     for p in &polygons {
         for (a, b) in p.vertices.iter().zip(p.vertices.iter().cycle().skip(1)) {
-            if a.distance(*b) > TOLERANCE {
+            // Triangulated polygons repeat shared boundaries. Preserve first-insertion
+            // order and use exact endpoint bits: no new tolerance/merging semantics.
+            let mut key = [
+                a.to_array().map(f64::to_bits),
+                b.to_array().map(f64::to_bits),
+            ];
+            key.sort();
+            if a.distance(*b) > TOLERANCE && (!indexed || inserted.insert(key)) {
                 result.insert_segment(*a, *b)?;
             }
         }
@@ -520,10 +542,10 @@ fn surfaces(
     drop(seam_span);
     result.heal_scope = None;
     let heal_span = tracing::info_span!("surfaces.heal").entered();
-    result.heal()?;
+    result.heal_with_adjacency(indexed)?;
     drop(heal_span);
     let rebuild_span = tracing::info_span!("surfaces.rebuild_faces").entered();
-    result.rebuild_faces()?;
+    result.rebuild_faces_with_adjacency(indexed)?;
     drop(rebuild_span);
     let mut remove = Vec::new();
     for id in result.faces.keys() {
@@ -571,6 +593,13 @@ fn surfaces(
         result.insert_segment(old.position(e.vertices[0])?, old.position(e.vertices[1])?)?;
     }
     // Wire endpoints may split a retained surface edge; propagate those splits into its rings.
+    let vertex_tree = rstar::RTree::bulk_load(
+        result
+            .vertices
+            .iter()
+            .map(|(id, v)| rstar::primitives::GeomWithData::new(v.position.to_array(), *id))
+            .collect(),
+    );
     let mut faces = std::mem::take(&mut result.faces);
     for face in faces.values_mut() {
         for ring in std::iter::once(&mut face.outer).chain(face.holes.iter_mut()) {
@@ -578,11 +607,23 @@ fn surfaces(
             for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
                 let pa = result.position(*a)?;
                 let pb = result.position(*b)?;
-                let mut points: Vec<_> = result
-                    .vertices
-                    .iter()
-                    .filter(|(_, v)| crate::geometry::on_segment(v.position, pa, pb))
-                    .map(|(id, v)| (*id, crate::geometry::parameter(v.position, pa, pb)))
+                let candidates: BTreeSet<_> = if indexed {
+                    let bounds =
+                        crate::spatial::envelope([pa, pb]).ok_or(KernelError::MissingEntity)?;
+                    vertex_tree
+                        .locate_in_envelope_intersecting(&crate::spatial::expanded(bounds))
+                        .map(|item| item.data)
+                        .collect()
+                } else {
+                    result.vertices.keys().copied().collect()
+                };
+                let mut points: Vec<_> = candidates
+                    .into_iter()
+                    .filter_map(|id| {
+                        let p = result.vertices[&id].position;
+                        crate::geometry::on_segment(p, pa, pb)
+                            .then(|| (id, crate::geometry::parameter(p, pa, pb)))
+                    })
                     .collect();
                 points.sort_by(|a, b| a.1.total_cmp(&b.1));
                 expanded.extend(
@@ -832,5 +873,55 @@ impl Model {
         }
         let volume = crate::csg::total_signed_volume(&polygons);
         Ok(Some(volume.abs()))
+    }
+}
+
+#[cfg(test)]
+mod surface_index_equivalence {
+    use super::*;
+    #[test]
+    fn indexed_reconstruction_matches_exhaustive_segments() {
+        for transform in [
+            glam::DMat4::IDENTITY,
+            glam::DMat4::from_translation(DVec3::new(200., -100., 30.))
+                * glam::DMat4::from_rotation_x(0.37),
+            glam::DMat4::from_scale(DVec3::new(-1., 2., 1.)),
+        ] {
+            let polygons = [
+                vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y],
+                vec![DVec3::ZERO, DVec3::X + DVec3::Y, DVec3::Y],
+                vec![
+                    DVec3::X,
+                    DVec3::X * 2.,
+                    DVec3::X * 2. + DVec3::Y,
+                    DVec3::X + DVec3::Y,
+                ],
+                vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Z, DVec3::Z],
+            ]
+            .into_iter()
+            .map(|points| {
+                crate::csg::Polygon::new(
+                    points
+                        .into_iter()
+                        .map(|p| transform.transform_point3(p))
+                        .collect(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+            let mut indexed = Model::default();
+            let mut exhaustive = Model::default();
+            surfaces_with_index(
+                &mut indexed,
+                polygons.clone(),
+                [20, 30, 40, 255],
+                None,
+                true,
+            )
+            .unwrap();
+            surfaces_with_index(&mut exhaustive, polygons, [20, 30, 40, 255], None, false).unwrap();
+            assert_eq!(indexed.to_data(), exhaustive.to_data());
+            indexed.validate().unwrap();
+        }
     }
 }

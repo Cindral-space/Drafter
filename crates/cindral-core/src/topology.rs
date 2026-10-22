@@ -80,6 +80,9 @@ impl Model {
             let c = self.position(edge.vertices[0])?;
             let d = self.position(edge.vertices[1])?;
             let points = geometry::intersections(start, end, c, d);
+            if points.is_empty() {
+                continue;
+            }
             let mut edge_cuts = edge.vertices.to_vec();
             for point in points {
                 let vertex = self.intern(point)?;
@@ -123,6 +126,17 @@ impl Model {
     /// Erasure dissolves redundant collinear degree-two vertices, preserving style seams.
     #[tracing::instrument(level = "info", skip_all, name = "topology.heal")]
     pub(crate) fn heal(&mut self) -> Result<(), KernelError> {
+        self.heal_with_adjacency(true)
+    }
+    pub(crate) fn heal_with_adjacency(&mut self, cached: bool) -> Result<(), KernelError> {
+        let mut adjacency = BTreeMap::<VertexId, BTreeSet<EdgeId>>::new();
+        if cached {
+            for (id, edge) in &self.edges {
+                for vertex in edge.vertices {
+                    adjacency.entry(vertex).or_default().insert(*id);
+                }
+            }
+        }
         loop {
             let used: BTreeSet<_> = self.edges.values().flat_map(|e| e.vertices).collect();
             self.vertices
@@ -137,7 +151,16 @@ impl Model {
                 {
                     continue;
                 }
-                let incident: Vec<_> = self.incident_edges(*vertex).collect();
+                let incident: Vec<_> = if cached {
+                    adjacency
+                        .get(vertex)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| self.edges.get(id).map(|e| (*id, e)))
+                        .collect()
+                } else {
+                    self.incident_edges(*vertex).collect()
+                };
                 if let [(id_a, a), (id_b, b)] = incident.as_slice() {
                     if (a.soft, a.smooth, a.hidden) != (b.soft, b.smooth, b.hidden) {
                         continue;
@@ -176,12 +199,35 @@ impl Model {
             self.edges.remove(&b);
             self.vertices.remove(&vertex);
             self.add_edge_ids(start, end, style, Some(a.min(b)))?;
+            if cached {
+                adjacency.remove(&vertex);
+                for endpoint in [start, end] {
+                    let ids = adjacency.entry(endpoint).or_default();
+                    ids.remove(&a);
+                    ids.remove(&b);
+                    if self.edges.contains_key(&a.min(b)) {
+                        ids.insert(a.min(b));
+                    }
+                }
+            }
         }
         Ok(())
     }
 
     #[tracing::instrument(level = "info", skip_all, name = "topology.coplanar_rebuild")]
     pub(crate) fn rebuild_faces(&mut self) -> Result<(), KernelError> {
+        self.rebuild_faces_with_adjacency(true)
+    }
+    pub(crate) fn rebuild_faces_with_adjacency(&mut self, cached: bool) -> Result<(), KernelError> {
+        let mut adjacency = BTreeMap::<VertexId, Vec<VertexId>>::new();
+        if cached {
+            // Match incident-edge iteration order without scanning all edges per vertex.
+            for edge in self.edges.values() {
+                let [a, b] = edge.vertices;
+                adjacency.entry(a).or_default().push(b);
+                adjacency.entry(b).or_default().push(a);
+            }
+        }
         let mut planes = Vec::<Plane>::new();
         for face in self.faces.values() {
             if !planes.iter().any(|plane| plane.equivalent(&face.plane)) {
@@ -189,10 +235,13 @@ impl Model {
             }
         }
         for (id, vertex) in &self.vertices {
-            let neighbors: Vec<_> = self
-                .incident_edges(*id)
-                .filter_map(|(_, edge)| edge.vertices.into_iter().find(|other| other != id))
-                .collect();
+            let neighbors: Vec<_> = if cached {
+                adjacency.get(id).cloned().unwrap_or_default()
+            } else {
+                self.incident_edges(*id)
+                    .filter_map(|(_, edge)| edge.vertices.into_iter().find(|other| other != id))
+                    .collect()
+            };
             for (i, a) in neighbors.iter().enumerate() {
                 for b in &neighbors[i + 1..] {
                     if let Some(plane) = Plane::through(

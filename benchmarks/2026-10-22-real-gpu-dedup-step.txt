@@ -1,0 +1,82 @@
+Adapter: AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+import + initial CPU mesh + textures=208.337ms
+first full UI frame incl tessellation=27.074ms
+hover full frame: mean=3.090 max=5.357ms n=200
+  pick: mean=0.201 max=0.348ms
+  inference/snap: mean=0.268 max=0.581ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.000 max=0.000ms
+  mesh rebuild: mean=0.000 max=0.000ms
+  GPU upload (CPU): mean=0.000 max=0.000ms
+  shadow pass (CPU): mean=0.024 max=0.065ms
+  UI/outliner: mean=0.299 max=0.664ms
+  bounds/sections: mean=0.001 max=0.002ms
+  render + GPU completion: mean=2.120 max=3.877ms
+component Move begin=3.248ms
+component Move preview full frame: mean=2.559 max=3.729ms n=60
+  pick: mean=0.000 max=0.000ms
+  inference/snap: mean=0.193 max=0.264ms
+  tool update: mean=0.000 max=0.000ms
+  kernel edit: mean=0.011 max=0.031ms
+  mesh rebuild: mean=0.008 max=0.022ms
+  GPU upload (CPU): mean=0.012 max=0.025ms
+  shadow pass (CPU): mean=0.015 max=0.027ms
+  UI/outliner: mean=0.232 max=0.383ms
+  bounds/sections: mean=0.023 max=0.082ms
+  render + GPU completion: mean=1.926 max=3.057ms
+component Move release/commit frame=2.432ms
+loose Move begin=10.584ms
+loose Move preview full frame: mean=16.595 max=21.659ms n=60
+  pick: mean=0.131 max=0.170ms
+  inference/snap: mean=0.197 max=0.290ms
+  tool update: mean=0.003 max=0.008ms
+  kernel edit: mean=11.941 max=15.558ms
+  mesh rebuild: mean=1.295 max=2.029ms
+  GPU upload (CPU): mean=0.420 max=0.719ms
+  shadow pass (CPU): mean=0.018 max=0.035ms
+  UI/outliner: mean=0.400 max=0.655ms
+  bounds/sections: mean=0.025 max=0.074ms
+  render + GPU completion: mean=3.078 max=4.528ms
+loose Move release/commit frame=14.200ms
+CINDRAL_PROFILE UI frame=37.374ms phases=[0.5488240000000001, 0.270602, 0.0007999999999999999, 36.153596, 0.515983, 0.0, 0.0, 0.324822, 0.015021000000000001, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+PushPull begin=41.044ms
+CINDRAL_PROFILE UI frame=35.041ms phases=[0.08317000000000001, 0.109561, 0.00107, 34.580295, 0.362663, 0.0, 0.0, 0.19958199999999998, 0.01602, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.097ms phases=[0.08359100000000001, 0.11016000000000001, 0.0011200000000000001, 32.626991000000004, 0.293082, 0.0, 0.0, 0.210642, 0.016419999999999997, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.384ms phases=[0.09247, 0.109901, 0.00104, 32.911783, 0.299943, 0.0, 0.0, 0.202092, 0.01487, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=35.989ms phases=[0.093371, 0.119771, 0.0012, 35.503841, 0.399013, 0.0, 0.0, 0.20005199999999998, 0.0196, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.288ms phases=[0.083241, 0.110831, 0.0011099999999999999, 32.802311, 0.320322, 0.0, 0.0, 0.20383099999999998, 0.025071, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.672ms phases=[0.083771, 0.11004, 0.00106, 33.204445, 0.272552, 0.0, 0.0, 0.210562, 0.014709999999999999, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.041ms phases=[0.083541, 0.11797099999999999, 0.00108, 33.568296999999994, 0.28039200000000003, 0.0, 0.0, 0.204391, 0.016059999999999998, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.903ms phases=[0.117661, 0.110741, 0.0012, 33.195535, 0.293312, 0.0, 0.0, 0.39987300000000003, 0.016079999999999997, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=35.899ms phases=[0.08344, 0.109911, 0.00109, 35.432581, 0.309892, 0.0, 0.0, 0.203251, 0.01765, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.280ms phases=[0.084151, 0.11184999999999999, 0.00275, 32.801552, 0.280542, 0.0, 0.0, 0.212642, 0.015130000000000001, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.480ms phases=[0.082921, 0.110501, 0.0011200000000000001, 33.010813, 0.27772199999999997, 0.0, 0.0, 0.205941, 0.0183, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.249ms phases=[0.08388000000000001, 0.110501, 0.0012100000000000001, 33.777089000000004, 0.308612, 0.0, 0.0, 0.206312, 0.01719, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.238ms phases=[0.078891, 0.110231, 0.0011200000000000001, 33.762758, 0.296392, 0.0, 0.0, 0.213901, 0.0193, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.530ms phases=[0.09268, 0.13097099999999998, 0.0014399999999999999, 32.952833, 0.28178200000000003, 0.0, 0.0, 0.28363200000000005, 0.01406, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.410ms phases=[0.085281, 0.110741, 0.0015099999999999998, 32.868332, 0.395013, 0.0, 0.0, 0.206151, 0.045930000000000006, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=39.837ms phases=[0.127861, 0.206222, 0.0011, 39.135798, 0.324052, 0.0, 0.0, 0.29821200000000003, 0.014960000000000001, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.872ms phases=[0.07685, 0.10966100000000001, 0.00102, 34.419294, 0.282302, 0.0, 0.0, 0.200112, 0.01535, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=36.555ms phases=[0.097571, 0.117211, 0.00253, 35.875814, 0.320212, 0.0, 0.0, 0.316482, 0.036281, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.075ms phases=[0.08071, 0.12039100000000001, 0.00157, 33.601918000000005, 0.279962, 0.0, 0.0, 0.206172, 0.01487, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.235ms phases=[0.070671, 0.10025099999999999, 0.001, 33.810949, 0.313182, 0.0, 0.0, 0.183201, 0.01859, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.796ms phases=[0.09227099999999999, 0.132821, 0.00191, 33.202853999999995, 0.39619299999999996, 0.0, 0.0, 0.270052, 0.023961, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=37.099ms phases=[0.085631, 0.11134100000000001, 0.00142, 36.614059, 0.28711200000000003, 0.0, 0.0, 0.220042, 0.01585, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=35.406ms phases=[0.0777, 0.110351, 0.00107, 34.950917, 0.276332, 0.0, 0.0, 0.20297199999999999, 0.015170000000000001, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.476ms phases=[0.072541, 0.101121, 0.0011099999999999999, 34.039781, 0.293653, 0.0, 0.0, 0.18977100000000002, 0.01918, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=34.050ms phases=[0.07122, 0.100401, 0.0011, 33.623388, 0.312982, 0.0, 0.0, 0.18670199999999998, 0.018070000000000003, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.493ms phases=[0.071141, 0.100161, 0.0014, 32.952681999999996, 0.453533, 0.0, 0.0, 0.192831, 0.07744000000000001, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+CINDRAL_PROFILE UI frame=33.481ms phases=[0.072211, 0.111721, 0.0011, 33.022903, 0.30289200000000005, 0.0, 0.0, 0.205841, 0.01683, 0.0] names=["pick", "inference/snap", "tool update", "kernel edit", "mesh rebuild", "GPU upload (CPU)", "shadow pass (CPU)", "UI/outliner", "bounds/sections", "render + GPU completion"] (inclusive; render callbacks reported separately)
+PushPull preview full frame: mean=35.634 max=42.744ms n=60
+  pick: mean=0.081 max=0.128ms
+  inference/snap: mean=0.110 max=0.206ms
+  tool update: mean=0.001 max=0.004ms
+  kernel edit: mean=32.363 max=39.136ms
+  mesh rebuild: mean=0.298 max=0.497ms
+  GPU upload (CPU): mean=0.183 max=0.722ms
+  shadow pass (CPU): mean=0.015 max=0.034ms
+  UI/outliner: mean=0.221 max=0.400ms
+  bounds/sections: mean=0.021 max=0.077ms
+  render + GPU completion: mean=2.458 max=5.122ms
+PushPull release/commit frame=2.417ms
+replay_exit=0
