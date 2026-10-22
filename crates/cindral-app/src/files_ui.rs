@@ -12,6 +12,7 @@ use std::{
 struct AutosaveJob {
     generation: u64,
     revision: (u64, u64),
+    superseded: bool,
     receiver: mpsc::Receiver<Result<PathBuf, String>>,
 }
 pub(crate) struct PreparedImport {
@@ -283,6 +284,11 @@ impl DrafterApp {
         self.files.path = Some(path.to_owned());
         self.files.last_revision = Some(self.file_revision());
         self.files.status = format!("Saved {}", path.display());
+        if let Some(job) = &mut self.files.job {
+            if job.generation == self.files.generation {
+                job.superseded = true;
+            }
+        }
         if self.files.job.is_none() && self.files.snapshot.exists() {
             if let Err(e) = std::fs::remove_file(&self.files.snapshot) {
                 tracing::warn!("could not remove superseded recovery snapshot: {e}");
@@ -600,7 +606,16 @@ impl DrafterApp {
         if let Some(job) = self.files.job.take() {
             match job.receiver.try_recv() {
                 Ok(Ok(path)) => {
-                    if job.generation == self.files.generation {
+                    if job.superseded {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            if e.kind() != std::io::ErrorKind::NotFound {
+                                tracing::warn!(
+                                    "could not remove superseded recovery snapshot: {e}"
+                                );
+                            }
+                        }
+                        self.files.candidates.retain(|p| p != &path);
+                    } else if job.generation == self.files.generation {
                         self.files.last_revision = Some(job.revision);
                         self.files.status = format!(
                             "Autosaved recovery snapshot {}",
@@ -648,6 +663,7 @@ impl DrafterApp {
                     self.files.job = Some(AutosaveJob {
                         generation,
                         revision,
+                        superseded: false,
                         receiver,
                     })
                 }
@@ -659,6 +675,24 @@ impl DrafterApp {
         } else {
             Duration::from_secs(1)
         });
+    }
+    /// Preserve committed values before a normal exit. A fresh path isolates any in-flight writer.
+    pub(crate) fn preserve_on_close(&mut self) -> cindral_io::Result<()> {
+        self.cancel_import();
+        self.cancel_section();
+        self.cancel_modify();
+        self.tool.cancel();
+        self.refresh_save_state();
+        if !self.meaningful()
+            || (self.files.saved_values.is_some() && !self.files.modified)
+            || (self.files.last_revision == Some(self.file_revision())
+                && self.files.snapshot.is_file())
+        {
+            return Ok(());
+        }
+        self.backup_current()?;
+        self.files.last_revision = Some(self.file_revision());
+        Ok(())
     }
     pub(crate) fn document_title(&self) -> String {
         self.files
@@ -857,10 +891,7 @@ impl DrafterApp {
                                     self.error = Some(e.to_string());
                                     return;
                                 }
-                                self.files.path = None;
-                                self.files.saved_values = None;
-                                self.files.checked_save_revision = None;
-                                self.files.generation += 1;
+                                self.reset_file_target(None);
                             }
                             if let Err(e) = self.apply_import_result(import_result, &path) {
                                 self.error = Some(format!("Import failed: {e}"));
@@ -1033,6 +1064,7 @@ mod tests {
         editor.files.job = Some(AutosaveJob {
             generation: editor.files.generation,
             revision: editor.file_revision(),
+            superseded: false,
             receiver,
         });
         sender.send(Ok(editor.files.snapshot.clone())).unwrap();
@@ -1168,6 +1200,7 @@ mod tests {
         editor.files.job = Some(AutosaveJob {
             generation: editor.files.generation,
             revision: old_revision,
+            superseded: false,
             receiver,
         });
         editor.set_view_style(cindral_core::ViewStyle {
@@ -1193,6 +1226,7 @@ mod tests {
         editor.files.job = Some(AutosaveJob {
             generation: 0,
             revision: (0, 0),
+            superseded: false,
             receiver,
         });
         editor.backup_current().unwrap();
@@ -1200,6 +1234,138 @@ mod tests {
         assert_eq!(
             cindral_io::load_draft(&editor.files.snapshot).unwrap(),
             editor.file_values()
+        );
+    }
+
+    #[test]
+    fn manual_save_supersedes_pending_autosave_without_regressing_saved_revision() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let old_values = editor.file_values();
+        let old_revision = editor.file_revision();
+        let snapshot = editor.files.snapshot.clone();
+        let (sender, receiver) = mpsc::channel();
+        editor.files.job = Some(AutosaveJob {
+            generation: editor.files.generation,
+            revision: old_revision,
+            superseded: false,
+            receiver,
+        });
+        editor.set_view_style(cindral_core::ViewStyle {
+            mode: cindral_core::StyleMode::XRay,
+            ..Default::default()
+        });
+        let saved_revision = editor.file_revision();
+        let path = directory.path().join("saved.cdraft");
+        editor.save_path(&path).unwrap();
+        let saved_values = editor.file_values();
+        // The old worker publishes only after the manual save completes.
+        cindral_io::save_autosave(&snapshot, &old_values).unwrap();
+        editor.files.candidates.push(snapshot.clone());
+        sender.send(Ok(snapshot.clone())).unwrap();
+        editor.autosave_tick(&egui::Context::default());
+        assert_eq!(editor.files.last_revision, Some(saved_revision));
+        assert!(editor.files.job.is_none());
+        assert!(!snapshot.exists());
+        assert!(editor.files.candidates.is_empty());
+        assert_eq!(cindral_io::load_draft(&path).unwrap(), saved_values);
+
+        // A later edit must still get its own recovery checkpoint.
+        editor.set_view_style(Default::default());
+        editor.preserve_on_close().unwrap();
+        assert_eq!(
+            cindral_io::load_draft(&editor.files.snapshot).unwrap(),
+            editor.file_values()
+        );
+    }
+
+    #[test]
+    fn closing_preserves_latest_committed_values_despite_a_late_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let old_values = editor.file_values();
+        let old_path = editor.files.snapshot.clone();
+        let (_sender, receiver) = mpsc::channel();
+        editor.files.job = Some(AutosaveJob {
+            generation: editor.files.generation,
+            revision: editor.file_revision(),
+            superseded: false,
+            receiver,
+        });
+        editor
+            .history
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::Z,
+            })
+            .unwrap();
+        let expected = editor.file_values();
+        editor
+            .history
+            .preview(Command::AddEdge {
+                start: DVec3::Z,
+                end: DVec3::Z * 2.,
+            })
+            .unwrap();
+        editor.preserve_on_close().unwrap();
+        let final_path = editor.files.snapshot.clone();
+        assert_ne!(final_path, old_path);
+        assert_eq!(cindral_io::load_draft(&final_path).unwrap(), expected);
+        cindral_io::save_autosave(&old_path, &old_values).unwrap();
+        assert_eq!(cindral_io::load_draft(&final_path).unwrap(), expected);
+        // on_exit repeats the close hook; it must not create another backup.
+        editor.preserve_on_close().unwrap();
+        assert_eq!(editor.files.snapshot, final_path);
+    }
+
+    #[test]
+    fn closing_empty_or_explicitly_saved_documents_creates_no_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let path = directory.path().join("saved.cdraft");
+        editor.save_path(&path).unwrap();
+        editor.preserve_on_close().unwrap();
+        assert!(cindral_io::recovery_files(directory.path())
+            .unwrap()
+            .is_empty());
+        editor.do_file_action(Action::New).unwrap();
+        let before = cindral_io::recovery_files(directory.path()).unwrap();
+        editor.preserve_on_close().unwrap();
+        assert_eq!(
+            cindral_io::recovery_files(directory.path()).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn recovery_failure_cancels_native_close_and_keeps_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let blocked = directory.path().join("not-a-directory");
+        std::fs::write(&blocked, b"blocked").unwrap();
+        editor.files.directory = blocked;
+        editor.files.interval = Duration::MAX;
+        let expected = editor.file_values();
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let output = ctx.run(input, |ctx| editor.draw_frame(ctx));
+        assert!(output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose));
+        assert!(editor.error.as_ref().unwrap().contains("before closing"));
+        assert_eq!(editor.file_values(), expected);
+        // Fixing the destination permits a later close attempt to preserve the draft.
+        editor.files.directory = directory.path().to_owned();
+        editor.preserve_on_close().unwrap();
+        assert_eq!(
+            cindral_io::load_draft(&editor.files.snapshot).unwrap(),
+            expected
         );
     }
 
@@ -1329,7 +1495,11 @@ mod tests {
         assert!(editor.history.context().is_empty());
         assert_eq!(editor.model().faces().len(), 1);
         assert_eq!(editor.model().bounds().unwrap().1.z, 0.);
-        let backup = cindral_io::load_draft(&editor.files.snapshot).unwrap();
+        let backups = cindral_io::recovery_files(directory.path()).unwrap();
+        assert_eq!(backups.len(), 1);
+        let backup_path = backups[0].clone();
+        assert_ne!(editor.files.snapshot, backup_path);
+        let backup = cindral_io::load_draft(&backup_path).unwrap();
         assert_eq!(
             backup.document.definitions[&cindral_core::DefinitionId(0)].geometry,
             old
@@ -1341,6 +1511,20 @@ mod tests {
                 distance: 0.2
             })
             .unwrap());
+        let imported = editor.file_values();
+        let ctx = egui::Context::default();
+        editor.autosave_tick(&ctx);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.files.job.is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            editor.autosave_tick(&ctx);
+        }
+        assert!(editor.files.job.is_none(), "autosave worker timed out");
+        assert_eq!(
+            cindral_io::load_draft(&editor.files.snapshot).unwrap(),
+            imported
+        );
+        assert_eq!(cindral_io::load_draft(&backup_path).unwrap(), backup);
     }
 
     #[test]

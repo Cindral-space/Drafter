@@ -651,9 +651,23 @@ impl eframe::App for DrafterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.draw_frame(ctx);
     }
+    fn on_exit(&mut self) {
+        if let Err(error) = self.preserve_on_close() {
+            tracing::error!("could not preserve draft on exit: {error}");
+        }
+    }
 }
 impl DrafterApp {
     fn draw_frame(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            match self.preserve_on_close() {
+                Ok(()) => return,
+                Err(error) => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.error = Some(format!("Could not preserve draft before closing: {error}"));
+                }
+            }
+        }
         let _frame_profile = cindral_core::profile::Frame::new();
         self.transition_tick(ctx);
         let camera_at_tick = (
