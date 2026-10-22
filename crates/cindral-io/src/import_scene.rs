@@ -318,12 +318,17 @@ pub fn convert_scene(
     let definition_count = scene.definitions.len();
     let source_root = scene.root_definition;
     if let Some(index) = source_root {
-        if index >= definition_count || scene.roots.len() != 1
+        if index >= definition_count
+            || scene.roots.len() != 1
             || scene.roots[0].definition != index
             || scene.roots[0].transform != DMat4::IDENTITY
-            || scene.roots[0].tag.is_some() || scene.roots[0].material.is_some()
+            || scene.roots[0].tag.is_some()
+            || scene.roots[0].material.is_some()
             || scene.roots[0].hidden
-            || scene.definitions.iter().any(|d| d.instances.iter().any(|n| n.definition == index))
+            || scene
+                .definitions
+                .iter()
+                .any(|d| d.instances.iter().any(|n| n.definition == index))
         {
             return Err(IoError::Invalid("invalid source root container".into()));
         }
@@ -384,11 +389,18 @@ pub fn convert_scene(
         .ok_or_else(|| IoError::Invalid("missing root".into()))?
         .instances = roots;
     if let Some(index) = source_root {
-        let root = data.definitions.remove(&DefinitionId(index as u64 + 1))
+        let root = data
+            .definitions
+            .remove(&DefinitionId(index as u64 + 1))
             .ok_or_else(|| IoError::Invalid("missing source root".into()))?;
-        data.definitions.insert(DefinitionId(0), DefinitionData {
-            name: "Root".into(), kind: DefinitionKind::Root, ..root
-        });
+        data.definitions.insert(
+            DefinitionId(0),
+            DefinitionData {
+                name: "Root".into(),
+                kind: DefinitionKind::Root,
+                ..root
+            },
+        );
     }
     data.next_id = next;
     // Validate the graph before traversing it (including cycles and expanded occurrence cap).

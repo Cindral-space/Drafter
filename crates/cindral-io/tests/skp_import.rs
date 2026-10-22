@@ -397,3 +397,39 @@ fn face_tags_hidden_geometry_and_instance_paint_are_retained() {
         .faces()
         .is_empty()));
 }
+
+#[test]
+fn authored_skp_opens_hole_face_at_root_and_edits_reversibly() {
+    let scene = import_skp_bytes(&hole_seed(), &ImportControl::default()).unwrap();
+    assert!(scene.root_definition.is_some());
+    let mut history = convert_scene(
+        scene,
+        &ImportOptions {
+            as_component: false,
+            merge_coplanar: false,
+            soften_coplanar: false,
+        },
+        &ImportControl::default(),
+    )
+    .unwrap()
+    .history;
+    assert!(history.context().is_empty());
+    assert_eq!(history.model().faces().len(), 1);
+    let face = *history.model().faces().keys().next().unwrap();
+    assert_eq!(history.model().faces()[&face].holes.len(), 1);
+    let before = history.model().to_data();
+    assert!(history
+        .execute(Command::PushPull {
+            face,
+            distance: 0.1
+        })
+        .unwrap());
+    let after = history.model().to_data();
+    assert!(history.undo().unwrap());
+    assert_eq!(history.model().to_data().faces, before.faces);
+    assert_eq!(history.model().to_data().edges, before.edges);
+    assert_eq!(history.model().to_data().vertices, before.vertices);
+    assert!(history.redo().unwrap());
+    assert_eq!(history.model().to_data().faces, after.faces);
+    history.model().validate().unwrap();
+}

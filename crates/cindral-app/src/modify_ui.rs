@@ -39,7 +39,9 @@ impl DrafterApp {
             Ok(true) => self.error = None,
             Ok(false) => {
                 if self.error.is_none() {
-                    self.error = Some("No change: tool movement is zero or below the geometry tolerance".into());
+                    self.error = Some(
+                        "No change: tool movement is zero or below the geometry tolerance".into(),
+                    );
                 }
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -240,7 +242,10 @@ impl DrafterApp {
         }
         if pressed && !self.modify.active() {
             if point.is_none() {
-                self.error = Some("Cannot start tool: pointer ray does not intersect the editing plane or a face".into());
+                self.error = Some(
+                    "Cannot start tool: pointer ray does not intersect the editing plane or a face"
+                        .into(),
+                );
                 return;
             }
             self.modify_press = Some(cursor);

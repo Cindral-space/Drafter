@@ -1049,8 +1049,15 @@ impl DrafterApp {
                 }
             }
         }
-        if pressed && self.modifying && matches!(self.modify.kind(),
-            ModifyKind::PushPull | ModifyKind::Offset | ModifyKind::FollowMe | ModifyKind::Eraser)
+        if pressed
+            && self.modifying
+            && matches!(
+                self.modify.kind(),
+                ModifyKind::PushPull
+                    | ModifyKind::Offset
+                    | ModifyKind::FollowMe
+                    | ModifyKind::Eraser
+            )
             && hit.as_ref().is_some_and(|h| self.reject_inactive_face(h))
         {
             return true;
@@ -1141,14 +1148,35 @@ mod tests {
     fn inactive_face_reports_context_reason_and_entering_allows_edit() {
         let mut app = DrafterApp::default();
         let path = component(&mut app);
-        let definition = app.history.occurrences().unwrap().into_iter().find(|o| o.path == path).unwrap().definition;
-        let face = *app.history.definition_model(definition).unwrap().faces().keys().next().unwrap();
+        let definition = app
+            .history
+            .occurrences()
+            .unwrap()
+            .into_iter()
+            .find(|o| o.path == path)
+            .unwrap()
+            .definition;
+        let face = *app
+            .history
+            .definition_model(definition)
+            .unwrap()
+            .faces()
+            .keys()
+            .next()
+            .unwrap();
         let hit = cindral_tools::InstanceHit {
-            path: path.clone(), definition, hit: Hit::Face(face),
-            local_position: DVec3::ZERO, world_position: DVec3::ZERO,
+            path: path.clone(),
+            definition,
+            hit: Hit::Face(face),
+            local_position: DVec3::ZERO,
+            world_position: DVec3::ZERO,
         };
         assert!(app.reject_inactive_face(&hit));
-        assert!(app.error.as_ref().unwrap().contains("Double-click to enter"));
+        assert!(app
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Double-click to enter"));
         app.enter_context(path).unwrap();
         assert!(!app.reject_inactive_face(&hit));
     }

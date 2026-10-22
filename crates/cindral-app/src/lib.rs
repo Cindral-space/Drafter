@@ -197,9 +197,12 @@ impl DrafterApp {
         match self.execute(command) {
             Ok(true) => true,
             Ok(false) => {
-                self.error = Some("No change: input is below the geometry tolerance or already matches the model".into());
+                self.error = Some(
+                    "No change: input is below the geometry tolerance or already matches the model"
+                        .into(),
+                );
                 false
-            },
+            }
             Err(error) => {
                 self.error = Some(error.to_string());
                 false

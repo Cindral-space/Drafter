@@ -108,5 +108,7 @@ inch-to-meter conversion through the same scene basis boundary. Tags on loose
 geometry and hidden faces become child containers. Imported placements can now
 carry instance paint and hidden state; explicit edge smooth and hidden fields
 are independent throughout conversion/append/persistence. Open routes `.skp` to
-the asynchronous append worker, with a read-only source note and `.cdraft` save.
+an asynchronous replacement worker, promoting the explicit source model container
+to root while retaining component instances. File > Import appends and may wrap
+the source once. Both retain a read-only source note and `.cdraft` save.
 See [the reader contract and limitations](SKP_IMPORT.md).

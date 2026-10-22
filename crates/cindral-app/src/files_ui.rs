@@ -247,10 +247,14 @@ impl DrafterApp {
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))
         {
-            self.start_import_mode(path.to_owned(), ImportOptions {
-                as_component: false,
-                ..self.files.import_options.clone()
-            }, true);
+            self.start_import_mode(
+                path.to_owned(),
+                ImportOptions {
+                    as_component: false,
+                    ..self.files.import_options.clone()
+                },
+                true,
+            );
             return Ok(());
         }
         let bundle = cindral_io::load_draft(path)?;
@@ -1270,6 +1274,53 @@ mod tests {
     }
 
     #[test]
+    fn skp_open_result_replaces_previous_geometry_and_native_save_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        editor
+            .execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::Z * 10.,
+                    DVec3::Z * 10. + DVec3::X,
+                    DVec3::Z * 10. + DVec3::X + DVec3::Y,
+                    DVec3::Z * 10. + DVec3::Y,
+                ],
+                closed: true,
+            })
+            .unwrap();
+        editor.files.path = Some(directory.path().join("previous.cdraft"));
+        let old = editor.history.model().to_data();
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Ok(test_import_result())).unwrap();
+        editor.files.import_job = Some(ImportJob {
+            replace_document: true,
+            generation: editor.files.generation,
+            revision: editor.history.revision(),
+            path: directory.path().join("source.skp"),
+            control: ImportControl::default(),
+            cancelled: false,
+            receiver,
+        });
+        editor.import_tick(&egui::Context::default());
+        assert!(editor.files.path.is_none());
+        assert!(editor.history.context().is_empty());
+        assert_eq!(editor.model().faces().len(), 1);
+        assert_eq!(editor.model().bounds().unwrap().1.z, 0.);
+        let backup = cindral_io::load_draft(&editor.files.snapshot).unwrap();
+        assert_eq!(
+            backup.document.definitions[&cindral_core::DefinitionId(0)].geometry,
+            old
+        );
+        let face = *editor.model().faces().keys().next().unwrap();
+        assert!(editor
+            .execute(Command::PushPull {
+                face,
+                distance: 0.2
+            })
+            .unwrap());
+    }
+
+    #[test]
     fn skp_open_uses_import_worker_and_never_saves_over_source() {
         let directory = tempfile::tempdir().unwrap();
         let mut editor = app(directory.path());
@@ -1460,6 +1511,80 @@ mod tests {
         let elapsed = start.elapsed();
         eprintln!(
             "SKP connected edit plus dirty CPU mesh {:.3}ms",
+            elapsed.as_secs_f64() * 1000.
+        );
+        assert!(
+            elapsed < Duration::from_millis(16),
+            "interactive budget exceeded: {elapsed:?}"
+        );
+        assert_eq!(editor.history.undo_depth(), 2);
+    }
+
+    #[test]
+    #[ignore = "release-only SKP CPU edit/dirty mesh workload; CINDRAL_SKP_BENCHMARK_SEED supplies authored seed"]
+    #[allow(clippy::assertions_on_constants)]
+    fn imported_skp_pushpull_interactive_mesh_update() {
+        assert!(!cfg!(debug_assertions), "benchmark requires --release");
+        let Some(path) = std::env::var_os("CINDRAL_SKP_BENCHMARK_SEED") else {
+            eprintln!(
+                "SKIP: set CINDRAL_SKP_BENCHMARK_SEED to authored connected benchmark fixture"
+            );
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let control = ImportControl::default();
+        let result = cindral_io::import_file(
+            &path,
+            &ImportOptions {
+                as_component: false,
+                ..Default::default()
+            },
+            &control,
+        )
+        .unwrap();
+        let prepared = prepare_import(result, &control).unwrap();
+        let mut editor = DrafterApp::default();
+        editor.apply_import_result(prepared, &path).unwrap();
+        let occurrence = editor
+            .history
+            .occurrences()
+            .unwrap()
+            .into_iter()
+            .find(|o| {
+                !editor
+                    .history
+                    .definition_model(o.definition)
+                    .unwrap()
+                    .faces()
+                    .is_empty()
+            })
+            .unwrap();
+        editor.history.enter(occurrence.path).unwrap();
+        editor.refresh_mesh();
+        editor.pending = None;
+        assert!(editor.history.context().is_empty());
+        let face = editor
+            .model()
+            .faces()
+            .iter()
+            .filter(|(_, f)| f.plane.normal.z > 0.9)
+            .max_by(|(_, a), (_, b)| a.plane.distance.total_cmp(&b.plane.distance))
+            .map(|(id, _)| *id)
+            .unwrap();
+        let count = editor.model().faces().len();
+        eprintln!(
+            "SKP import and CPU scene preparation complete; starting Push/Pull on {count} faces"
+        );
+        let start = Instant::now();
+        assert!(editor
+            .execute(Command::PushPull {
+                face,
+                distance: 0.0254
+            })
+            .unwrap());
+        let elapsed = start.elapsed();
+        eprintln!(
+            "SKP {count} faces Push/Pull plus dirty CPU mesh {:.3}ms",
             elapsed.as_secs_f64() * 1000.
         );
         assert!(

@@ -4,7 +4,10 @@
 polygons. It is Rust only, forbids unsafe code, has no native dependency or
 SDK, and never invokes Python in the application. `cindral-io` adapts it to
 I1 `ImportedScene`; File > Import and the Open dialog accept `.skp`.
-Opening uses the existing asynchronous append workflow. The source is never a
+Opening asynchronously replaces the draft, with loose source geometry at root and
+shared components retained as instances. Enter a component before editing its faces.
+File > Import still appends; its component option wraps the source once.
+The source is never a
 native save target: the status/report say “imported from .skp” and Save As uses
 `.cdraft`. Importing into an existing draft preserves its native save target.
 There is no `.skp` export. This project is not affiliated with SketchUp or Trimble.

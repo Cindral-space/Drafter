@@ -1005,10 +1005,22 @@ mod tests {
 
     #[test]
     fn face_tools_explain_missing_editable_face() {
-        for kind in [ModifyKind::PushPull, ModifyKind::Offset, ModifyKind::FollowMe] {
+        for kind in [
+            ModifyKind::PushPull,
+            ModifyKind::Offset,
+            ModifyKind::FollowMe,
+        ] {
             let mut session = ModifySession::new(kind);
-            assert_eq!(session.begin(&Model::default(), &Selection::default(), None,
-                DVec3::ZERO, DVec3::Z), Err(ToolError::NoEditableFace));
+            assert_eq!(
+                session.begin(
+                    &Model::default(),
+                    &Selection::default(),
+                    None,
+                    DVec3::ZERO,
+                    DVec3::Z
+                ),
+                Err(ToolError::NoEditableFace)
+            );
             assert!(!session.active());
         }
     }
