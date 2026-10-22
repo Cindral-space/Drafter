@@ -113,11 +113,11 @@ See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid m
 
 ## Files and interchange (M6)
 
-Use **File** to create/open/save `.cdraft`, import OBJ/glTF/GLB/COLLADA, export OBJ/STL/glTF 2, and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup offers retained crash snapshots.
+Use **File** to create/open/save `.cdraft`, import OBJ/glTF/GLB/COLLADA, export OBJ/STL/glTF 2/COLLADA (.dae), and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup offers retained crash snapshots.
 
 Imports append as one undo step, with component/loose geometry and coplanar cleanup options, background progress, cancellation and a summary. See the [import pipeline and limits](docs/IMPORT_PIPELINE.md).
 
-Materials can embed PNG/JPEG images; original bytes survive native round trips, while the viewport uses 256×256 planar previews. OBJ/STL flatten visible instances in metres/Z-up; glTF shares meshes with nested placement nodes and converts to metres/Y-up. See [format, migration, recovery and interchange limits](docs/FILE_FORMAT.md) and [save/load measurements](docs/FILE_BENCHMARK.md).
+Materials can embed PNG/JPEG images; original bytes survive native round trips, while the viewport uses 256×256 planar previews. OBJ/STL flatten visible instances in metres/Z-up; glTF shares meshes with nested placement nodes and converts to metres/Y-up. COLLADA 1.4.1 preserves right-handed Z-up, shared components, nesting, transforms and current face materials/planar textures, with meter or inch units. See [COLLADA export](docs/DAE_EXPORT.md), [format and recovery limits](docs/FILE_FORMAT.md) and [save/load measurements](docs/FILE_BENCHMARK.md).
 
 ```sh
 cargo run --release -p cindral-io --features bench-fixtures --example file_benchmark
@@ -144,3 +144,15 @@ colorization are not reproduced. Boundary-edge tags follow their face container.
 The created, ignored `tests/fixtures/skp-local/` directory had no user files;
 production-file compatibility/performance remains unverified. See the
 [reader, version evidence, safety limits and cross-check workflow](docs/SKP_IMPORT.md).
+
+## Exporting to SketchUp
+
+1. Open your model and choose **File > Export > COLLADA…**.
+2. Choose **Meters** or **Inches**. Keep **Include textures** enabled for textured models. Use **Triangulate all faces** if the receiving tool needs triangles. Hidden geometry is excluded by default. Enable **Selection only** to export selected faces/edges or the Outliner container; an empty selection exports an empty scene.
+3. Click **Choose file and export…**, select a `.dae` destination and confirm any replacement. The background export shows progress and supports cancellation before publication.
+4. Keep the `.dae` and its adjacent `cindral-textures-*` folder together when moving or sharing them.
+5. In SketchUp desktop, choose **File > Import**, choose **COLLADA Files (*.dae)**, select the file and click **Open** (Windows) or **Import** (macOS). See the [official COLLADA import instructions](https://help.sketchup.com/en/sketchup/importing-and-exporting-collada-files).
+
+Geometry, holes (triangulated), groups/components, shared instance transforms, colors, transparency, textures and current planar UVs are kept. Soft/hidden edge flags, tags/layers, scenes, styles, section planes and shadows are lost. Independent back-face materials and original UV seams are unavailable in the native model; only its current face material and planar mapping can be exported. See [export options, CLI and limitations](docs/DAE_EXPORT.md).
+
+This independent exporter follows the public COLLADA specification. Cindral Drafter is not affiliated with Trimble or SketchUp.
