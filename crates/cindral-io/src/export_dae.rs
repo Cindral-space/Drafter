@@ -381,7 +381,7 @@ fn export_inner(path: &Path, bundle: &DraftBundle, options: &DaeOptions, control
     if let Err(error)=published {
         return Err(IoError::Io(error.error));
     }
-    if !textures.is_empty() { staging.keep(); }
+    if !textures.is_empty() { let _ = staging.keep(); }
     state.committed=true; control.set_progress(1.);
     Ok(summary)
 }

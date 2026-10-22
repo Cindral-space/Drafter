@@ -1,0 +1,6 @@
+instances-5000 run1: export_ms 10.177; dae_bytes 573592; occurrences 5000; triangles 60000
+instances-5000 run2: export_ms 10.311; dae_bytes 573592; occurrences 5000; triangles 60000
+instances-5000 run3: export_ms 10.297; dae_bytes 573592; occurrences 5000; triangles 60000
+connected-21600 run1: export_ms 502.781; dae_bytes 4744584; occurrences 1; triangles 43200
+connected-21600 run2: export_ms 488.758; dae_bytes 4744584; occurrences 1; triangles 43200
+connected-21600 run3: export_ms 488.732; dae_bytes 4744584; occurrences 1; triangles 43200

@@ -95,4 +95,14 @@ mod tests {
         let s=job.receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap();assert_eq!(s.instances,0);
         assert!(path.exists());
     }
+    #[test]
+    fn outliner_selection_captures_parent_context_and_current_faces() {
+        let mut app=DrafterApp::default();
+        app.selection.faces.insert(cindral_core::FaceId::from_raw(4));
+        app.organization.selected=Some(vec![cindral_core::InstanceId(7)]);
+        let s=app.dae_selection();assert!(s.context.is_empty());assert!(s.faces.contains(&cindral_core::FaceId::from_raw(4)));assert!(s.instances.contains(&cindral_core::InstanceId(7)));
+        app.organization.selected=Some(vec![cindral_core::InstanceId(7),cindral_core::InstanceId(8)]);
+        let s=app.dae_selection();assert_eq!(s.context,vec![cindral_core::InstanceId(7)]);assert!(s.faces.is_empty());assert!(s.instances.contains(&cindral_core::InstanceId(8)));
+    }
+
 }

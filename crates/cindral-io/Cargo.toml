@@ -28,3 +28,7 @@ bench-fixtures = ["cindral-core/bench-fixtures"]
 [[example]]
 name = "file_benchmark"
 required-features = ["bench-fixtures"]
+
+[[example]]
+name = "dae_benchmark"
+required-features = ["bench-fixtures"]

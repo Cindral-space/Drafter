@@ -144,3 +144,24 @@ fn concurrent_no_clobber_exports_publish_one_complete_texture_set() {
     let results:Vec<_>=jobs.into_iter().map(|j|j.join().unwrap()).collect();assert_eq!(results.iter().filter(|r|r.is_ok()).count(),1);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(),2);assert_eq!(import_dae(&p,&ImportControl::default()).unwrap().textures.len(),1);
 }
+#[test]
+fn xml_references_array_counts_and_tinted_alpha_are_consistent() {
+    let dir=tempfile::tempdir().unwrap();let p=dir.path().join("texture.dae");
+    export_dae(&p,&textured(),&DaeOptions::default(),&DaeControl::default()).unwrap();
+    let text=std::fs::read_to_string(&p).unwrap();let d=roxmltree::Document::parse(&text).unwrap();
+    let mut ids=std::collections::BTreeSet::new();
+    for node in d.descendants().filter(|n|n.is_element()) {if let Some(id)=node.attribute("id"){assert!(ids.insert(id),"duplicate ID {id}");}}
+    for node in d.descendants().filter(|n|n.is_element()) {
+        for attribute in node.attributes() {if let Some(id)=attribute.value().strip_prefix('#'){assert!(ids.contains(id),"unresolved reference {id}");}}
+        if node.has_tag_name("float_array"){assert_eq!(node.attribute("count").unwrap().parse::<usize>().unwrap(),node.text().unwrap().split_whitespace().count());}
+        if node.has_tag_name("polylist") || node.has_tag_name("triangles") {
+            let count=node.attribute("count").unwrap().parse::<usize>().unwrap();
+            let corners=if node.has_tag_name("triangles"){3*count}else{let lengths:Vec<usize>=node.children().find(|n|n.has_tag_name("vcount")).unwrap().text().unwrap().split_whitespace().map(|s|s.parse().unwrap()).collect();assert_eq!(lengths.len(),count);lengths.iter().sum()};
+            let stride=node.children().filter(|n|n.has_tag_name("input")).map(|n|n.attribute("offset").unwrap().parse::<usize>().unwrap()+1).max().unwrap();
+            assert_eq!(node.children().find(|n|n.has_tag_name("p")).unwrap().text().unwrap().split_whitespace().count(),corners*stride);
+        }
+    }
+    let scene=import_dae(&p,&ImportControl::default()).unwrap();let image=decode_texture(scene.textures.values().next().unwrap()).unwrap();
+    assert_eq!(image.rgba[3],128);assert!((123..=125).contains(&image.rgba[0]));assert!((77..=80).contains(&image.rgba[1]));
+    assert!(d.descendants().find(|n|n.has_tag_name("transparent")).unwrap().children().any(|n|n.has_tag_name("texture")));
+}
