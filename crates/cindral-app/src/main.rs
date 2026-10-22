@@ -1,6 +1,13 @@
 //! Cindral Drafter desktop entry point.
 
 fn main() -> eframe::Result {
+    if std::env::args_os().nth(1).as_deref()==Some(std::ffi::OsStr::new("--export-dae")) {
+        match cindral_io::export_dae_cli(std::env::args_os().skip(1)) {
+            Ok(summary)=>println!("Exported {} triangles / {} occurrences",summary.triangles,summary.instances),
+            Err(error)=>{eprintln!("{error}");std::process::exit(1);}
+        }
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

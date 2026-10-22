@@ -192,3 +192,5 @@ pub use import_skp::{import_skp, import_skp_bytes};
 
 mod export_dae;
 pub use export_dae::{export_dae, DaeControl, DaeOptions, DaeSelection, DaeUnits};
+mod dae_cli;
+pub use dae_cli::export_dae_cli;
