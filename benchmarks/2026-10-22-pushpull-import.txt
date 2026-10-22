@@ -1,0 +1,32 @@
+Imported Push/Pull repair — release CPU measurements, 2026-10-22
+AMD Ryzen 5 2400G / Linux x86_64. Authored inputs; no external model copied.
+Build/fixture import excluded from cube timer; no concurrent benchmark builds
+or agents during measured executions. Single sample, no p95/whole-frame claim.
+
+ImportedScene cube -> convert_scene (source root) -> DocumentHistory::execute:
+    cargo test --release -p cindral-io --test pushpull_import \
+      imported_cube_release_timing -- --ignored --nocapture
+    Imported cube Push/Pull: 0.211ms
+    Passes 16 ms kernel-edit target. Includes edit/history, excludes import,
+    picking/inference, CPU mesh preparation, GPU work, UI/vsync.
+
+Existing local authored .agent-out/i2-connected.skp: 19,600 planar quads,
+19,881 shared vertices, 680,689 compressed bytes. Imported with loose root,
+normal app scene prepared/installed; then execute Push/Pull on one face, with
+normal dirty CPU mesh preparation inside the timer. Source seed is unchanged.
+    cargo test --release -p cindral-app --lib --no-run
+    CINDRAL_SKP_BENCHMARK_SEED=<original-checkout>/.agent-out/i2-connected.skp \
+      timeout 20s <release-app-test-binary> \
+      files_ui::tests::imported_skp_pushpull_interactive_mesh_update \
+      --exact --ignored --nocapture
+    running 1 test
+    SKP import and CPU scene preparation complete; starting Push/Pull on 19600 faces
+    exit 124 (20-second external timeout); no operation completion.
+Does NOT meet 16 ms target. Earlier unbounded trial terminated after >100s.
+The sheet has boundary edges with one incident face, so local_extrusion::prepare
+returns None at the closed-boundary proof. General extrusion handles the open
+surface and reconstructs the complete result; no context/plane rejection occurs.
+The pre-existing general-path scalability limit is retained, without adding an
+unproven extrusion shortcut to this import-context bug fix. The ignored benchmark
+asserts the desired 16 ms budget if it completes. Always run this workload with
+an external process timeout; fixture/import overhead is outside the internal timer.
