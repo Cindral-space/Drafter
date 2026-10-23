@@ -536,3 +536,8 @@
 ### Rotate item 12 — copy toggle
 
 - Ctrl (macOS Option) rising presses toggle Rotate copy mode before/between placement clicks; release/repress toggles back. Original geometry/occurrences remain through existing Transform copy and preview_duplicate paths. Cursor displays an independent '+' marker. Shared measurements completion snapshots retain copy mode. Targeted app check passes.
+
+### Rotate item 13 — radial arrays
+
+- Rotate copy completion accepts the existing Nx/*N//N parser and bounded count (1–256). Nx gives N additional copies at multiples of the established angle; /N gives N additional copies dividing that angle, including the original destination. Retyping replaces the same geometry/organization undo slot. Loose arrays reuse Command::Batch; occurrence arrays reuse DuplicateMany, preserving definition semantics.
+- Five targeted Rotate kernel tests pass, including exact array spacing/replacement/one-entry undo/redo. Overlapping loose copies retain the kernel's existing transactional rejection rather than introducing a new overlap repair system. Count semantics remain a concrete user verification question.

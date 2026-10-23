@@ -27,6 +27,10 @@ impl DrafterApp {
     }
     fn rotate_command(&self, command: Command) -> Result<Option<Org>, cindral_core::KernelError> {
         if let Some((path, before, owner)) = &self.rotate.instance {
+            if let Command::Batch(commands) = &command {
+                let transforms = commands.iter().filter_map(|c| match c { Command::Transform {matrix,..} => Some(owner.inverse() * *matrix * *owner * *before), _ => None }).collect();
+                return Ok(Some(Org::DuplicateMany { path: path.clone(), transforms }));
+            }
             if let Command::Transform { matrix, copy, .. } = command {
                 let transform = owner.inverse() * matrix * *owner * *before;
                 return Ok(Some(if copy { Org::Duplicate { path: path.clone(), transform } } else { Org::Transform { path: path.clone(), transform } }));

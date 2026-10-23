@@ -1049,22 +1049,24 @@ impl MeasurementTool for ModifySession {
             || ToolError::InvalidMeasurement("Input is not supported by this modify tool".into());
         let command = match input {
             Measurement::Copies { count, divide }
-                if matches!(candidate.kind, ModifyKind::Move | ModifyKind::Copy) =>
+                if matches!(candidate.kind, ModifyKind::Move | ModifyKind::Copy) || candidate.kind == ModifyKind::Rotate && candidate.rotation_copy =>
             {
                 if !(1..=256).contains(count) {
                     return Err(bad());
                 }
                 let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
                 let delta = candidate.current_pointer.ok_or(ToolError::NotReady)? - anchor;
-                if delta.length() <= TOLERANCE {
+                if delta.length() <= TOLERANCE || candidate.kind == ModifyKind::Rotate && candidate.measurement.is_none_or(|a| a.abs() <= 1e-10) {
                     return Err(bad());
                 }
                 let commands = (1..=*count)
                     .map(|i| Command::Transform {
                         vertices: candidate.target_vertices.clone(),
-                        matrix: DMat4::from_translation(
+                        matrix: if candidate.kind == ModifyKind::Rotate {
+                            crate::rotation::matrix(anchor,candidate.axis,candidate.measurement.unwrap_or(0.).to_radians() * i as f64 / if *divide { *count as f64 } else { 1. })
+                        } else { DMat4::from_translation(
                             delta * (i as f64) / if *divide { *count as f64 } else { 1. },
-                        ),
+                        ) },
                         copy: true,
                     })
                     .collect();

@@ -66,3 +66,21 @@ proptest! {
         for (id,v) in before.vertices() { prop_assert!(h.model().vertices()[id].position.distance(v.position)<1e-8); }
     }
 }
+
+#[test]
+fn radial_arrays_replace_in_one_undo_slot() {
+    let mut h=fixture(); let before=h.model().clone();let depth=h.undo_depth();
+    let center=DVec3::new(-10.,-10.,0.);
+    let mut s=session(&h,center,DVec3::Z);s.set_rotation_copy(true);
+    h.execute(s.measure("60").unwrap().unwrap()).unwrap();s.finish();
+    for (text,angles) in [("3x",vec![60_f64,120.,180.]),("*2",vec![60.,120.]),("/3",vec![20.,40.,60.]),("3x",vec![60.,120.,180.])] {
+        h.replace_last(s.measure(text).unwrap().unwrap()).unwrap();s.finish();
+        assert_eq!(h.undo_depth(),depth+1);assert_eq!(h.model().faces().len(),angles.len()+1);
+        for a in angles { for v in before.vertices().values() {
+            let p=rotation::matrix(center,DVec3::Z,a.to_radians()).transform_point3(v.position);
+            assert!(h.model().vertices().values().any(|v|v.position.distance(p)<1e-8));
+        }}
+        h.model().validate().unwrap();
+    }
+    let copied=h.model().clone();h.undo().unwrap();assert_eq!(h.model(),&before);h.redo().unwrap();assert_eq!(h.model(),&copied);
+}
