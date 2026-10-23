@@ -8,6 +8,10 @@ use cindral_render::{
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
 mod dae_ui;
+pub mod png_export;
+pub mod png_job;
+mod png_ui;
+pub mod png_cli;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
@@ -30,6 +34,7 @@ pub struct DrafterApp {
     #[cfg(feature = "kernel-benchmark")]
     replay_rect: egui::Rect,
     files: files_ui::FileState,
+    png: png_ui::PngUi,
     show_tray: bool,
     show_grid: bool,
     presentation: cindral_core::Presentation,
@@ -70,6 +75,7 @@ impl Default for DrafterApp {
             #[cfg(feature = "kernel-benchmark")]
             replay_rect: egui::Rect::NOTHING,
             files: files_ui::FileState::default(),
+            png: Default::default(),
             show_tray: true,
             show_grid: false,
             presentation: Default::default(),
@@ -127,8 +133,10 @@ impl DrafterApp {
             4,
         ));
         workspace_ui::configure_style(&cc.egui_ctx);
+        let mut png = png_ui::PngUi::default(); png.srgb_surface = render.target_format.is_srgb();
         Ok(Self {
             modifying: true,
+            png,
             ..Self::default()
         })
     }
@@ -324,20 +332,7 @@ impl DrafterApp {
     fn paint_environment(&self, ui: &egui::Ui, rect: egui::Rect) {
         let style = &self.presentation.style;
         // With Z up and no camera roll, the infinite ground horizon is horizontal.
-        let horizon = if self.camera.projection == Projection::Orthographic {
-            if self.camera.pitch >= 0. {
-                rect.top()
-            } else {
-                rect.bottom()
-            }
-        } else {
-            rect.center().y
-                - (self.camera.pitch.sin() / self.camera.pitch.cos().max(1e-6))
-                    / (cindral_render::camera::FOV_Y * 0.5).tan()
-                    * rect.height()
-                    * 0.5
-        }
-        .clamp(rect.top(), rect.bottom());
+        let horizon = rect.top() + png_export::horizon(&self.camera) * rect.height();
         if let Some(rgb) = style.sky {
             ui.painter().rect_filled(
                 egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), horizon)),
@@ -725,6 +720,7 @@ impl DrafterApp {
                     self.replay_rect = rect;
                 }
                 let aspect = rect.width() / rect.height();
+                self.png.viewport = [(rect.width()*ctx.pixels_per_point()).round() as u32, (rect.height()*ctx.pixels_per_point()).round() as u32];
                 if self.files.fit {
                     self.extents(aspect);
                     self.files.fit = false;

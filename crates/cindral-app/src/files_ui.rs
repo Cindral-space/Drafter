@@ -64,7 +64,7 @@ pub(crate) struct ImportJob {
 }
 pub(crate) struct FileState {
     pub(crate) dae: crate::dae_ui::DaeUi,
-    path: Option<PathBuf>,
+    pub(crate) path: Option<PathBuf>,
     saved_values: Option<DraftBundle>,
     checked_save_revision: Option<(u64, u64)>,
     modified: bool,
@@ -209,11 +209,12 @@ enum Action {
     Stl,
     Gltf,
     Dae,
+    Png,
     Recover(PathBuf),
     Discard(PathBuf),
 }
 impl DrafterApp {
-    fn sync_file_textures(&mut self) -> cindral_io::Result<()> {
+    pub(crate) fn sync_file_textures(&mut self) -> cindral_io::Result<()> {
         let mut layers = BTreeMap::new();
         let mut pixels = Vec::new();
         for (key, asset) in &self.files.textures {
@@ -445,6 +446,7 @@ impl DrafterApp {
                     );
                 }
             }
+            Action::Png => { self.png.open = true; },
             Action::Dae => {
                 self.files.dae.open = true;
             }
@@ -510,6 +512,7 @@ impl DrafterApp {
                     ("STL…", Action::Stl),
                     ("glTF 2.0…", Action::Gltf),
                     ("COLLADA…", Action::Dae),
+                    ("Image (PNG)…", Action::Png),
                 ] {
                     if ui.button(text).clicked() {
                         action = Some(a);
@@ -571,6 +574,7 @@ impl DrafterApp {
     }
     pub(crate) fn file_tick(&mut self, ctx: &egui::Context) {
         self.dae_window(ctx);
+        self.png_window(ctx);
         self.import_tick(ctx);
         self.import_window(ctx);
         if !self.files.checked {

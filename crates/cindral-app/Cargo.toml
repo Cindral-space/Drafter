@@ -58,3 +58,16 @@ required-features = ["kernel-benchmark"]
 [[example]]
 name = "real_file_benchmark"
 required-features = ["kernel-benchmark"]
+
+[dependencies.png]
+version = "0.18"
+
+[dependencies.tempfile]
+version = "3"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1"

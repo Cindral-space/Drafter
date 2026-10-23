@@ -100,7 +100,7 @@ impl DrafterApp {
         self.cancel_scene_transition();
         self.presentation_changed();
     }
-    fn restore_scene(&mut self, index: usize, now: f64, animate: bool) {
+    pub(crate) fn restore_scene(&mut self, index: usize, now: f64, animate: bool) {
         let Some(scene) = self.presentation.scenes.get(index).cloned() else {
             return;
         };
