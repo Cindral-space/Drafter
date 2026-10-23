@@ -532,3 +532,7 @@
 ### Rotate item 11 — sign convention
 
 - Consolidated typed and pointer rotation onto shared matrix/signed-angle helpers. Positive is right-handed: X→Y for +90° about +Z, counterclockwise when viewing the plane from the tip of its camera-facing normal. Normal direction freezes at center, avoiding sign changes during sweep. Explicit sign, arbitrary-center/normal and inverse properties cover this convention.
+
+### Rotate item 12 — copy toggle
+
+- Ctrl (macOS Option) rising presses toggle Rotate copy mode before/between placement clicks; release/repress toggles back. Original geometry/occurrences remain through existing Transform copy and preview_duplicate paths. Cursor displays an independent '+' marker. Shared measurements completion snapshots retain copy mode. Targeted app check passes.

@@ -304,6 +304,7 @@ fn resolve_ordered_path_from_edges(model: &Model, edges: &BTreeSet<EdgeId>) -> O
 pub struct ModifySession {
     kind: ModifyKind,
     active: bool,
+    rotation_copy: bool,
     completed: Option<Box<ModifySession>>,
     anchor: Option<DVec3>,
     axis: DVec3,
@@ -334,6 +335,7 @@ impl ModifySession {
         Self {
             kind,
             active: false,
+            rotation_copy: false,
             completed: None,
             anchor: None,
             axis: DVec3::Z,
@@ -388,6 +390,8 @@ impl ModifySession {
         Ok(())
     }
 
+    /// Set copy mode without altering Rotate anchors or targets.
+    pub fn set_rotation_copy(&mut self, copy: bool) { self.rotation_copy = copy; }
     /// Rotation baseline and radius retained for protractor feedback.
     pub fn rotation_reference(&self) -> Option<(DVec3, f64)> {
         self.reference_dir.map(|d| (d, self.reference_radius))
@@ -405,6 +409,7 @@ impl ModifySession {
     pub fn cancel(&mut self) {
         self.completed = None;
         self.active = false;
+        self.rotation_copy = false;
         self.anchor = None;
         self.axis = DVec3::Z;
         self.reference_dir = None;
@@ -709,7 +714,7 @@ impl ModifySession {
                 let cmd = Command::Transform {
                     vertices: self.target_vertices.clone(),
                     matrix,
-                    copy: false,
+                    copy: self.rotation_copy,
                 };
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
@@ -897,7 +902,7 @@ impl ModifySession {
                 let cmd = Command::Transform {
                     vertices: self.target_vertices.clone(),
                     matrix,
-                    copy: false,
+                    copy: self.rotation_copy,
                 };
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))

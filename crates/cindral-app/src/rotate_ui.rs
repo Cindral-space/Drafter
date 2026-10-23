@@ -6,6 +6,8 @@ use glam::{DMat4, DVec2};
 #[derive(Default)]
 pub(crate) struct RotateUi {
     reference_set: bool,
+    pub(crate) copy: bool,
+    copy_key_down: bool,
     point: Option<DVec3>,
     normal: Option<DVec3>,
     inferred: bool,
@@ -82,6 +84,12 @@ impl DrafterApp {
             let redo = ctx.input(|i| i.modifiers.command && (i.key_pressed(Key::Y) || i.modifiers.shift && i.key_pressed(Key::Z)));
             if undo || redo { self.cancel_modify(); self.history_step(redo); return; }
         }
+        let copy_down = ctx.input(|i| if cfg!(target_os="macos") { i.modifiers.alt } else { i.modifiers.ctrl });
+        if !ctx.wants_keyboard_input() && copy_down && !self.rotate.copy_key_down {
+            self.rotate.copy = !self.rotate.copy;
+            self.modify.set_rotation_copy(self.rotate.copy);
+        }
+        self.rotate.copy_key_down = copy_down;
         if !response.hovered() { return; }
         let rect = response.rect;
         let Some(position) = ctx.input(|i| i.pointer.hover_pos()) else { return; };
@@ -151,6 +159,7 @@ impl DrafterApp {
                     self.rotate.reference_set = false;
                     self.measurements.reset();
                     self.error = self.modify.begin_rotation(vertices, p, normal).err().map(|e| e.to_string());
+                    self.modify.set_rotation_copy(self.rotate.copy);
                 }
             }
             return;
