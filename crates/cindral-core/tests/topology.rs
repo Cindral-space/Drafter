@@ -445,3 +445,64 @@ fn nearly_parallel_but_distinct_faces_are_both_created() {
     assert_eq!(h.model().faces().len(), 2);
     h.model().validate().unwrap();
 }
+
+#[test]
+fn erasing_face_preserves_shared_boundaries_neighbors_and_history() {
+    let mut h = History::new();
+    h.execute(square()).unwrap();
+    let base = *h.model().faces().keys().next().unwrap();
+    h.execute(Command::PushPull {
+        face: base,
+        distance: 4.,
+    })
+    .unwrap();
+    let before = h.model().clone();
+    let face = *before.faces().keys().next().unwrap();
+    let depth = h.undo_depth();
+    h.execute(Command::EraseFaces(vec![face])).unwrap();
+    assert_eq!(h.undo_depth(), depth + 1);
+    assert_eq!(h.model().vertices(), before.vertices());
+    assert_eq!(h.model().edges(), before.edges());
+    let mut expected = before.faces().clone();
+    expected.remove(&face);
+    assert_eq!(h.model().faces(), &expected);
+    h.model().validate().unwrap();
+    let after = h.model().clone();
+    h.undo().unwrap();
+    assert_eq!(h.model(), &before);
+    h.redo().unwrap();
+    assert_eq!(h.model(), &after);
+    // A malformed multi-target request must not partially remove a valid face.
+    let remaining = *after.faces().keys().next().unwrap();
+    assert!(h
+        .execute(Command::EraseFaces(vec![remaining, face]))
+        .is_err());
+    assert_eq!(h.model(), &after);
+    assert_eq!(h.undo_depth(), depth + 1);
+}
+
+#[test]
+fn erasing_annulus_leaves_inner_face_and_all_edges() {
+    let mut h = History::new();
+    h.execute(square()).unwrap();
+    h.execute(polygon(&[
+        [1., 1., 0.],
+        [2., 1., 0.],
+        [2., 2., 0.],
+        [1., 2., 0.],
+    ]))
+    .unwrap();
+    let before = h.model().clone();
+    let outer = *before
+        .faces()
+        .iter()
+        .find(|(_, f)| !f.holes.is_empty())
+        .unwrap()
+        .0;
+    h.execute(Command::EraseFaces(vec![outer])).unwrap();
+    assert_eq!(h.model().edges(), before.edges());
+    assert_eq!(h.model().vertices(), before.vertices());
+    assert_eq!(h.model().faces().len(), 1);
+    near(area(&h), 1.);
+    h.model().validate().unwrap();
+}

@@ -8,7 +8,7 @@ mod modify;
 mod selection;
 pub use modify::{Guide, ModifyKind, ModifySession};
 mod session;
-pub use selection::{pick, pick_section, Hit, Selection};
+pub use selection::{pick, pick_eraser_section, pick_section, Hit, Selection};
 pub mod measurements;
 mod units;
 

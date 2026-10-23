@@ -34,7 +34,7 @@ pub enum ModifyKind {
     Offset,
     /// Sweep a face profile along an ordered path.
     FollowMe,
-    /// Erase edges and heal incident topology.
+    /// Erase the clicked face or edge.
     Eraser,
     /// Measure distances and place infinite construction guide lines without mutating model geometry.
     TapeMeasure,
@@ -182,37 +182,6 @@ fn resolve_vertices_for_transform(
     }
 
     vertices.into_iter().collect()
-}
-
-/// Resolve edge IDs for the Eraser tool from selection and hit.
-fn resolve_edges_for_eraser(model: &Model, selection: &Selection, hit: Option<Hit>) -> Vec<EdgeId> {
-    let mut edges = BTreeSet::new();
-    edges.extend(&selection.edges);
-
-    match hit {
-        Some(Hit::Edge(eid)) => {
-            if model.edges().contains_key(&eid) {
-                edges.insert(eid);
-            }
-        }
-        Some(Hit::Vertex(vid)) => {
-            for (eid, _) in model.incident_edges(vid) {
-                edges.insert(eid);
-            }
-        }
-        Some(Hit::Face(fid)) => {
-            if let Some(face) = model.faces().get(&fid) {
-                for (eid, edge) in model.edges() {
-                    if face_contains_edge(face, edge) {
-                        edges.insert(*eid);
-                    }
-                }
-            }
-        }
-        None => {}
-    }
-
-    edges.into_iter().collect()
 }
 
 /// Resolve face IDs for the PaintBucket tool from selection and hit.
@@ -563,11 +532,16 @@ impl ModifySession {
                 axis.try_normalize().unwrap_or(DVec3::Z)
             }
             ModifyKind::Eraser => {
-                let edges = resolve_edges_for_eraser(model, selection, hit);
-                if edges.is_empty() {
-                    return Err(ToolError::NotReady);
+                // Eraser is a pointer action: selection must never broaden the target.
+                match hit {
+                    Some(Hit::Edge(id)) if model.edges().contains_key(&id) => {
+                        target_edges.push(id);
+                    }
+                    Some(Hit::Face(id)) if model.faces().contains_key(&id) => {
+                        target_faces.push(id);
+                    }
+                    _ => return Err(ToolError::NotReady),
                 }
-                target_edges = edges;
                 axis.try_normalize().unwrap_or(DVec3::Z)
             }
             ModifyKind::PaintBucket => {
@@ -778,10 +752,13 @@ impl ModifySession {
             }
             ModifyKind::Eraser => {
                 self.current_pointer = Some(point);
-                if self.target_edges.is_empty() {
+                let cmd = if !self.target_faces.is_empty() {
+                    Command::EraseFaces(self.target_faces.clone())
+                } else if !self.target_edges.is_empty() {
+                    Command::EraseEdges(self.target_edges.clone())
+                } else {
                     return Ok(None);
-                }
-                let cmd = Command::EraseEdges(self.target_edges.clone());
+                };
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
             }
@@ -1627,6 +1604,37 @@ mod tests {
     }
 
     #[test]
+    fn eraser_targets_only_hit_and_never_falls_back_to_selection() {
+        let (history, face, vertices, edges) = make_test_square();
+        let mut selection = Selection::default();
+        selection.edges.extend(&edges);
+        selection.faces.insert(face);
+        let mut eraser = ModifySession::new(ModifyKind::Eraser);
+        for (hit, expected) in [
+            (Hit::Edge(edges[0]), Command::EraseEdges(vec![edges[0]])),
+            (Hit::Face(face), Command::EraseFaces(vec![face])),
+        ] {
+            eraser
+                .begin(
+                    history.model(),
+                    &selection,
+                    Some(hit),
+                    DVec3::ZERO,
+                    DVec3::Z,
+                )
+                .unwrap();
+            assert_eq!(eraser.update(DVec3::ZERO).unwrap(), Some(expected));
+            eraser.finish();
+        }
+        for hit in [None, Some(Hit::Vertex(vertices[0]))] {
+            assert!(eraser
+                .begin(history.model(), &selection, hit, DVec3::ZERO, DVec3::Z)
+                .is_err());
+            assert!(!eraser.active());
+        }
+    }
+
+    #[test]
     fn test_eraser_and_paint_bucket_commands() {
         let (history, face_id, _, edges) = make_test_square();
 
@@ -1636,7 +1644,13 @@ mod tests {
         sel_edge.edges.insert(edges[0]);
 
         eraser
-            .begin(history.model(), &sel_edge, None, DVec3::ZERO, DVec3::Z)
+            .begin(
+                history.model(),
+                &sel_edge,
+                Some(Hit::Edge(edges[0])),
+                DVec3::ZERO,
+                DVec3::Z,
+            )
             .expect("begin Eraser");
         let erase_cmd = eraser
             .update(DVec3::new(1.0, 0.0, 0.0))

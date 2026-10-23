@@ -386,7 +386,18 @@ pub fn pick_section(
     section: Option<&cindral_core::SectionPlane>,
 ) -> Option<Hit> {
     let _phase = cindral_core::profile::Scope::new(0);
-    pick_section_impl(model, ray, view, cursor, radius, section, true)
+    pick_section_impl(model, ray, view, cursor, radius, section, true, true)
+}
+/// Pick a single face or edge for erasing, including at shared endpoints.
+pub fn pick_eraser_section(
+    model: &Model,
+    ray: Ray,
+    view: View,
+    cursor: DVec2,
+    radius: f64,
+    section: Option<&cindral_core::SectionPlane>,
+) -> Option<Hit> {
+    pick_section_impl(model, ray, view, cursor, radius, section, true, false)
 }
 // Keep an exhaustive reference for differential tests; production always uses the index.
 fn ray_candidates(
@@ -411,6 +422,7 @@ fn pick_section_impl(
     radius: f64,
     section: Option<&cindral_core::SectionPlane>,
     indexed: bool,
+    pick_vertices: bool,
 ) -> Option<Hit> {
     if !cursor.is_finite()
         || !radius.is_finite()
@@ -459,6 +471,9 @@ fn pick_section_impl(
     // 2. Vertex candidates within screen radius
     let mut best_vertex: Option<(VertexId, f64, f64)> = None;
     for (&vertex_id, vertex) in model.vertices() {
+        if !pick_vertices {
+            break;
+        }
         let pos = vertex.position;
         if section.is_some_and(|p| !p.retains(pos)) {
             continue;
@@ -1546,6 +1561,7 @@ mod indexed_pick_equivalence {
                                 radius,
                                 section.as_ref(),
                                 true,
+                                true,
                             );
                             let reference = pick_section_impl(
                                 model,
@@ -1555,6 +1571,7 @@ mod indexed_pick_equivalence {
                                 radius,
                                 section.as_ref(),
                                 false,
+                                true,
                             );
                             assert_eq!(
                                 indexed, reference,

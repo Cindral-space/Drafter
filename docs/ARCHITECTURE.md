@@ -215,3 +215,7 @@ bypasses coplanar cleanup for SKP polygons. The existing async append worker,
 progress/cancellation, stale-result guards and import summary are reused. Open
 routes SKP to import and native saves require `.cdraft`. Details, version evidence,
 recovery boundaries and limits: [SKP_IMPORT.md](SKP_IMPORT.md).
+
+### Eraser targeting
+
+Eraser pointer actions ignore the current selection and pick one visible edge or face. Endpoint proximity resolves to one edge using the existing screen-distance/depth ordering. `EraseFaces` removes only face records, preserving boundary edges, vertices and adjacent faces through the explicit surface transaction path. `EraseEdges` retains topology healing: removing a boundary can open its incident faces, while removing a coplanar seam merges its regions. Blank-space clicks do nothing.

@@ -87,7 +87,8 @@ impl Selection {
             return Err(KernelError::BatchDepth);
         }
         match command {
-            Command::PushPull { .. }
+            Command::EraseFaces(..)
+            | Command::PushPull { .. }
             | Command::Transform { .. }
             | Command::Offset { .. }
             | Command::FollowMe { .. }
@@ -265,7 +266,8 @@ impl Delta {
         }
         if matches!(
             command,
-            Command::PushPull { .. }
+            Command::EraseFaces(..)
+                | Command::PushPull { .. }
                 | Command::Transform { .. }
                 | Command::FollowMe { .. }
                 | Command::PaintFace { .. }

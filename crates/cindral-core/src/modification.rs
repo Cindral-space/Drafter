@@ -16,7 +16,9 @@ pub(crate) fn prepare(
     let mut edges = BTreeSet::new();
     let mut expand = false;
     match command {
-        Command::PaintFace { faces: ids, .. } | Command::SetFaceMaterial { faces: ids, .. } => {
+        Command::EraseFaces(ids)
+        | Command::PaintFace { faces: ids, .. }
+        | Command::SetFaceMaterial { faces: ids, .. } => {
             faces.extend(ids);
         }
         Command::PushPull { face, distance } => {
@@ -144,6 +146,11 @@ pub(crate) fn prepare(
             matrix,
             copy,
         } => transform(&mut after, vertices, *matrix, *copy)?,
+        Command::EraseFaces(ids) => {
+            for id in ids {
+                after.faces.remove(id).ok_or(KernelError::MissingEntity)?;
+            }
+        }
         Command::SetFaceMaterial { faces, material } => {
             for id in faces {
                 after

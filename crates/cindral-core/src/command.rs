@@ -21,6 +21,8 @@ pub enum Command {
     },
     /// Erase edges and rebuild/heal the remaining topology.
     EraseEdges(Vec<EdgeId>),
+    /// Erase only the specified faces, preserving their boundary edges.
+    EraseFaces(Vec<FaceId>),
     /// Set independent soft and smooth attributes on existing edges.
     SetEdgeStyle {
         /// Target edges.
@@ -84,7 +86,8 @@ impl Command {
             return Err(KernelError::BatchDepth);
         }
         match self {
-            Self::PushPull { .. }
+            Self::EraseFaces(..)
+            | Self::PushPull { .. }
             | Self::Transform { .. }
             | Self::Offset { .. }
             | Self::FollowMe { .. }

@@ -184,7 +184,12 @@ impl DrafterApp {
                 .inverse()
                 .transform_vector3(direction.as_dvec3()),
         };
-        let hit = cindral_tools::pick_section(
+        let pick = if self.modify.kind() == ModifyKind::Eraser {
+            cindral_tools::pick_eraser_section
+        } else {
+            cindral_tools::pick_section
+        };
+        let hit = pick(
             self.history.model(),
             ray,
             view,
@@ -254,6 +259,9 @@ impl DrafterApp {
                     }
                 }
             }
+            return;
+        }
+        if pressed && self.modify.kind() == ModifyKind::Eraser && hit.is_none() {
             return;
         }
         if pressed && !self.modify.active() {
@@ -1860,6 +1868,63 @@ mod utility_parity_tests {
             assert!(!app.modify.active());
         }
     }
+    #[test]
+    fn eraser_click_is_local_even_with_unrelated_selection() {
+        for point in [DVec3::new(5., 5., 0.), DVec3::new(5., 0., 0.), DVec3::ZERO] {
+            let (mut app, ctx) = setup(ModifyKind::Eraser);
+            // A second face shares an edge with the first.
+            app.execute(Command::AddPolyline {
+                points: vec![
+                    DVec3::ZERO,
+                    DVec3::X * 10.,
+                    DVec3::new(10., 0., 10.),
+                    DVec3::Z * 10.,
+                ],
+                closed: true,
+            })
+            .unwrap();
+            let before = app.model().clone();
+            app.selection.edges = before.edges().keys().copied().collect();
+            app.selection.faces = before.faces().keys().copied().collect();
+            let depth = app.history.undo_depth();
+            click(&mut app, &ctx, point);
+            assert!(app.error.is_none(), "{:?}", app.error);
+            assert_eq!(app.history.undo_depth(), depth + 1);
+            if point.y > 0. {
+                assert_eq!(app.model().edges(), before.edges());
+                assert_eq!(app.model().vertices(), before.vertices());
+                assert_eq!(app.model().faces().len(), before.faces().len() - 1);
+                for (id, face) in app.model().faces() {
+                    assert_eq!(before.faces().get(id), Some(face));
+                }
+            } else {
+                // Including a shared endpoint, one edge is erased, never all incident edges.
+                assert_eq!(
+                    before
+                        .edges()
+                        .keys()
+                        .filter(|id| !app.model().edges().contains_key(id))
+                        .count(),
+                    1
+                );
+            }
+            let after = app.model().clone();
+            app.model().validate().unwrap();
+            app.history.undo().unwrap();
+            assert_eq!(app.model(), &before);
+            app.history.redo().unwrap();
+            assert_eq!(app.model(), &after);
+        }
+        let (mut app, ctx) = setup(ModifyKind::Eraser);
+        app.selection.edges = app.model().edges().keys().copied().collect();
+        let before = app.model().clone();
+        let depth = app.history.undo_depth();
+        click(&mut app, &ctx, DVec3::new(15., 15., 0.));
+        assert!(app.error.is_none());
+        assert_eq!(app.model(), &before);
+        assert_eq!(app.history.undo_depth(), depth);
+    }
+
     #[test]
     fn utility_parity_click_history_and_undo_reset() {
         for kind in [ModifyKind::Eraser, ModifyKind::PaintBucket] {
