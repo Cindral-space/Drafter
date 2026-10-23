@@ -1303,7 +1303,10 @@ impl DrafterApp {
                                         rect.min + egui::vec2(a.x as f32, a.y as f32),
                                         rect.min + egui::vec2(b.x as f32, b.y as f32),
                                     ],
-                                    egui::Stroke::new(2_f32, Color32::from_rgb(255, 184, 68)),
+                                    egui::Stroke::new(
+                                        2_f32,
+                                        self.viewport_overlay(Color32::from_rgb(255, 184, 68)),
+                                    ),
                                 );
                             }
                         }

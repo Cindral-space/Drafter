@@ -24,6 +24,7 @@ mod real_file_gpu;
 mod scene_cache;
 mod section_ui;
 mod shadow_ui;
+pub mod theme;
 mod workspace_ui;
 use eframe::egui::{self, Color32, Key, PointerButton};
 use glam::Vec2;
@@ -35,6 +36,8 @@ pub struct DrafterApp {
     replay_rect: egui::Rect,
     files: files_ui::FileState,
     png: png_ui::PngUi,
+    #[cfg(target_os = "linux")]
+    system_theme: theme::SystemTheme,
     show_tray: bool,
     show_grid: bool,
     presentation: cindral_core::Presentation,
@@ -76,6 +79,8 @@ impl Default for DrafterApp {
             replay_rect: egui::Rect::NOTHING,
             files: files_ui::FileState::default(),
             png: Default::default(),
+            #[cfg(target_os = "linux")]
+            system_theme: Default::default(),
             show_tray: true,
             show_grid: false,
             presentation: Default::default(),
@@ -134,8 +139,11 @@ impl DrafterApp {
         ));
         workspace_ui::configure_style(&cc.egui_ctx);
         let png = png_ui::PngUi::with_surface(render.target_format.is_srgb());
+        png.theme().apply(&cc.egui_ctx);
         Ok(Self {
             modifying: true,
+            #[cfg(target_os = "linux")]
+            system_theme: theme::SystemTheme::start(cc.egui_ctx.clone()),
             png,
             ..Self::default()
         })
@@ -321,6 +329,10 @@ impl DrafterApp {
         }
     }
 
+    fn viewport_overlay(&self, color: Color32) -> Color32 {
+        theme::overlay_color(self.presentation.style.background, color)
+    }
+
     fn viewport_ink(&self) -> Color32 {
         let [r, g, b] = self.presentation.style.background;
         if u32::from(r) * 2126 + u32::from(g) * 7152 + u32::from(b) * 722 > 128 * 10000 {
@@ -378,14 +390,20 @@ impl DrafterApp {
             if let (Some(a), Some(b)) = (screen(guide[0]), screen(guide[1])) {
                 painter.line_segment(
                     [a, b],
-                    egui::Stroke::new(1.0_f32, Color32::from_rgb(100, 164, 190)),
+                    egui::Stroke::new(
+                        1.0_f32,
+                        self.viewport_overlay(Color32::from_rgb(100, 164, 190)),
+                    ),
                 );
             }
         }
         painter.circle_stroke(
             p,
             5.,
-            egui::Stroke::new(2.0_f32, Color32::from_rgb(250, 202, 114)),
+            egui::Stroke::new(
+                2.0_f32,
+                self.viewport_overlay(Color32::from_rgb(250, 202, 114)),
+            ),
         );
         painter.text(
             p + egui::vec2(10., -10.),
@@ -670,6 +688,11 @@ fn snap_label(kind: SnapKind) -> &'static str {
     }
 }
 impl eframe::App for DrafterApp {
+    #[cfg(target_os = "linux")]
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+        self.system_theme.update(input);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.draw_frame(ctx);
     }
@@ -791,7 +814,10 @@ impl DrafterApp {
                     if let (Some(a), Some(b)) = (screen(segment[0]), screen(segment[1])) {
                         ui.painter().line_segment(
                             [a, b],
-                            egui::Stroke::new(2.0_f32, Color32::from_rgb(113, 226, 203)),
+                            egui::Stroke::new(
+                                2.0_f32,
+                                self.viewport_overlay(Color32::from_rgb(113, 226, 203)),
+                            ),
                         );
                     }
                 }

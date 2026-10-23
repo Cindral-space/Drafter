@@ -385,7 +385,10 @@ impl DrafterApp {
             view.project(p)
                 .map(|p| rect.min + egui::vec2(p.x as f32, p.y as f32))
         };
-        let stroke = egui::Stroke::new(3_f32, Color32::from_rgb(255, 184, 68));
+        let stroke = egui::Stroke::new(
+            3_f32,
+            self.viewport_overlay(Color32::from_rgb(255, 184, 68)),
+        );
         let model = self.history.model();
         let draw_edge = |a, b| {
             if let (Some(a), Some(b)) = (screen(a), screen(b)) {
@@ -426,9 +429,9 @@ impl DrafterApp {
                     egui::Stroke::new(
                         1_f32,
                         if cursor.x >= origin.x {
-                            Color32::LIGHT_BLUE
+                            self.viewport_overlay(Color32::LIGHT_BLUE)
                         } else {
-                            Color32::LIGHT_GREEN
+                            self.viewport_overlay(Color32::LIGHT_GREEN)
                         },
                     ),
                     egui::StrokeKind::Inside,
@@ -441,7 +444,10 @@ impl DrafterApp {
                 let b = rect.min + egui::vec2(b.x as f32, b.y as f32);
                 ui.painter().line_segment(
                     [a, b],
-                    egui::Stroke::new(1_f32, Color32::from_rgb(85, 185, 210)),
+                    egui::Stroke::new(
+                        1_f32,
+                        self.viewport_overlay(Color32::from_rgb(85, 185, 210)),
+                    ),
                 );
             }
         }

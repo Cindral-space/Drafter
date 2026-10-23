@@ -40,6 +40,8 @@ impl Aa {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Options {
+    /// Application chrome only; never used by an exporter.
+    pub theme: crate::theme::Preference,
     /// Output width.
     pub width: u32,
     /// Output height.
@@ -59,6 +61,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            theme: Default::default(),
             width: 1920,
             height: 1080,
             aa: Aa::Medium,

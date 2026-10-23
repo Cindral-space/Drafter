@@ -303,9 +303,9 @@ impl DrafterApp {
                 .collect();
             if let Some(points) = points {
                 let color = if self.presentation.sections.active == Some(i) {
-                    Color32::from_rgb(255, 175, 55)
+                    self.viewport_overlay(Color32::from_rgb(255, 175, 55))
                 } else {
-                    Color32::GRAY
+                    self.viewport_overlay(Color32::GRAY)
                 };
                 ui.painter().add(egui::Shape::convex_polygon(
                     points.clone(),

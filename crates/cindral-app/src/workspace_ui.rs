@@ -2,44 +2,82 @@
 use super::*;
 use egui::{Align, Layout, RichText, Stroke};
 
-const ACCENT: Color32 = Color32::from_rgb(88, 82, 214);
-const INK: Color32 = Color32::from_rgb(39, 46, 61);
-const RAIL: Color32 = Color32::from_rgb(247, 248, 251);
-
 pub(crate) fn configure_style(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    style.visuals = egui::Visuals::light();
-    style.visuals.panel_fill = Color32::from_rgb(250, 251, 253);
-    style.visuals.selection.bg_fill = Color32::from_rgb(235, 233, 253);
-    style.visuals.selection.stroke = Stroke::new(1.0f32, ACCENT);
-    style.visuals.override_text_color = Some(INK);
-    style.visuals.widgets.noninteractive.bg_stroke =
-        Stroke::new(1.0f32, Color32::from_rgb(231, 234, 240));
-    style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(241, 243, 248);
-    style.visuals.widgets.inactive.bg_fill = Color32::WHITE;
-    style.visuals.widgets.inactive.bg_stroke =
-        Stroke::new(1.0f32, Color32::from_rgb(228, 231, 239));
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(233, 232, 249);
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(235, 233, 253);
-    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0f32, ACCENT);
-    for widget in [
-        &mut style.visuals.widgets.inactive,
-        &mut style.visuals.widgets.hovered,
-        &mut style.visuals.widgets.active,
-    ] {
-        widget.corner_radius = egui::CornerRadius::same(7);
-    }
-    style.spacing.item_spacing = egui::vec2(8., 9.);
-    style.spacing.button_padding = egui::vec2(10., 7.);
-    style.spacing.interact_size.y = 30.;
-    style
-        .text_styles
-        .insert(egui::TextStyle::Body, egui::FontId::proportional(13.));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Button, egui::FontId::proportional(13.));
-    ctx.set_style(style);
+    ctx.options_mut(|o| o.fallback_theme = egui::Theme::Dark);
+    ctx.all_styles_mut(|style| {
+        let dark = style.visuals.dark_mode;
+        let v = &mut style.visuals;
+        let (ink, muted, accent, surface, panel, field, selected, border, error) = if dark {
+            (
+                rgb(235, 237, 245),
+                rgb(188, 194, 210),
+                rgb(188, 180, 255),
+                rgb(31, 34, 43),
+                rgb(37, 40, 50),
+                rgb(44, 48, 60),
+                rgb(65, 57, 100),
+                rgb(135, 142, 160),
+                rgb(255, 165, 156),
+            )
+        } else {
+            (
+                rgb(39, 46, 61),
+                rgb(82, 91, 110),
+                rgb(88, 65, 184),
+                Color32::WHITE,
+                rgb(250, 251, 253),
+                rgb(241, 243, 248),
+                rgb(231, 228, 252),
+                rgb(124, 132, 149),
+                rgb(157, 35, 29),
+            )
+        };
+        v.override_text_color = Some(ink);
+        v.weak_text_color = Some(muted);
+        v.panel_fill = panel;
+        v.window_fill = surface;
+        v.extreme_bg_color = field;
+        v.faint_bg_color = field;
+        v.code_bg_color = field;
+        v.selection.bg_fill = selected;
+        v.selection.stroke = Stroke::new(1_f32, accent);
+        v.hyperlink_color = accent;
+        v.error_fg_color = error;
+        v.warn_fg_color = if dark {
+            rgb(255, 210, 125)
+        } else {
+            rgb(120, 72, 0)
+        };
+        v.disabled_alpha = 0.85;
+        for widget in [
+            &mut v.widgets.noninteractive,
+            &mut v.widgets.inactive,
+            &mut v.widgets.hovered,
+            &mut v.widgets.active,
+            &mut v.widgets.open,
+        ] {
+            widget.bg_fill = surface;
+            widget.weak_bg_fill = field;
+            widget.fg_stroke = Stroke::new(1_f32, ink);
+            widget.bg_stroke = Stroke::new(1_f32, border);
+            widget.corner_radius = egui::CornerRadius::same(7);
+        }
+        v.widgets.hovered.weak_bg_fill = selected;
+        v.widgets.active.weak_bg_fill = selected;
+        v.widgets.active.bg_fill = selected;
+        style.spacing.item_spacing = egui::vec2(8., 9.);
+        style.spacing.button_padding = egui::vec2(10., 7.);
+        style.spacing.interact_size.y = 30.;
+        style
+            .text_styles
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(13.));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(13.));
+    });
+}
+fn rgb(r: u8, g: u8, b: u8) -> Color32 {
+    Color32::from_rgb(r, g, b)
 }
 
 // Shared by root dropdowns and nested menus, without changing the menu bar.
@@ -49,16 +87,14 @@ fn dropdown_style(style: &mut egui::Style) {
     style.spacing.interact_size.y = 30.;
     style.spacing.item_spacing = egui::vec2(8., 2.);
     style.spacing.menu_width = 280.;
-    style.visuals.window_fill = Color32::WHITE;
     style.visuals.window_corner_radius = egui::CornerRadius::same(8);
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(241, 240, 252);
 }
 
 pub(crate) fn menu_section(ui: &mut egui::Ui, title: &str) {
     ui.label(
         RichText::new(title)
             .size(11.)
-            .color(Color32::from_rgb(105, 115, 134)),
+            .color(ui.visuals().weak_text_color()),
     );
 }
 
@@ -89,7 +125,7 @@ impl DrafterApp {
         egui::TopBottomPanel::top("workspace_header")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::WHITE)
+                    .fill(ctx.style().visuals.window_fill)
                     .inner_margin(egui::Margin::symmetric(12, 6)),
             )
             .show(ctx, |ui| {
@@ -209,6 +245,25 @@ impl DrafterApp {
                                 }
                             }
                         });
+                        ui.menu_button("View", |ui| {
+                            ui.menu_button("Preferences", |ui| {
+                                let mut theme = self.png.theme();
+                                for (value, label) in [
+                                    (theme::Preference::Light, "Light"),
+                                    (theme::Preference::Dark, "Dark"),
+                                    (theme::Preference::System, "System"),
+                                ] {
+                                    if ui.selectable_value(&mut theme, value, label).changed() {
+                                        theme.apply(ctx);
+                                        if let Err(error) = self.png.save_theme(theme) {
+                                            self.error = Some(format!(
+                                                "Theme preference could not be saved: {error}"
+                                            ));
+                                        }
+                                    }
+                                }
+                            });
+                        });
                         ui.menu_button("Window", |ui| {
                             ui.set_min_width(224.);
                             ui.checkbox(&mut self.show_tray, "Model inspector");
@@ -229,9 +284,9 @@ impl DrafterApp {
                             let state = self.document_save_label();
                             ui.label(RichText::new(state).size(11.).color(
                                 if state == "Modified" {
-                                    ACCENT
+                                    ui.visuals().selection.stroke.color
                                 } else {
-                                    Color32::from_rgb(105, 115, 134)
+                                    ui.visuals().weak_text_color()
                                 },
                             ))
                             .on_hover_text(self.file_status());
@@ -240,7 +295,9 @@ impl DrafterApp {
                             ui.add_sized(
                                 [title_width, 26.],
                                 egui::Label::new(
-                                    RichText::new(self.document_title()).strong().color(INK),
+                                    RichText::new(self.document_title())
+                                        .strong()
+                                        .color(ui.visuals().text_color()),
                                 )
                                 .halign(Align::RIGHT)
                                 .truncate(),
@@ -254,7 +311,7 @@ impl DrafterApp {
                     ui.spacing_mut().item_spacing.x = 6.;
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
-                            .add(egui::Button::new("Save").fill(Color32::from_rgb(235, 233, 253)))
+                            .add(egui::Button::new("Save").fill(ui.visuals().selection.bg_fill))
                             .on_hover_text("Save document · Ctrl+S")
                             .clicked()
                         {
@@ -305,7 +362,7 @@ impl DrafterApp {
                                 ui.label(
                                     RichText::new(self.active_tool_label())
                                         .strong()
-                                        .color(ACCENT),
+                                        .color(ui.visuals().selection.stroke.color),
                                 );
                                 if !compact {
                                     self.header_tool_options(ui);
@@ -326,10 +383,10 @@ impl DrafterApp {
             ui.label(
                 RichText::new("Work plane")
                     .size(11.)
-                    .color(Color32::from_rgb(112, 120, 138)),
+                    .color(ui.visuals().weak_text_color()),
             );
             egui::Frame::new()
-                .fill(Color32::from_rgb(245, 245, 250))
+                .fill(ui.visuals().faint_bg_color)
                 .corner_radius(6)
                 .inner_margin(egui::Margin::symmetric(3, 0))
                 .show(ui, |ui| {
@@ -445,7 +502,12 @@ impl DrafterApp {
             label,
             Stroke::new(4.5_f32, Color32::WHITE),
         );
-        paint_tool_icon(&painter, center, label, Stroke::new(1.7_f32, INK));
+        paint_tool_icon(
+            &painter,
+            center,
+            label,
+            Stroke::new(1.7_f32, rgb(39, 46, 61)),
+        );
     }
 
     pub(crate) fn tool_palette(&mut self, ctx: &egui::Context) {
@@ -454,7 +516,7 @@ impl DrafterApp {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(RAIL)
+                    .fill(ctx.style().visuals.panel_fill)
                     .inner_margin(egui::Margin::symmetric(6, 10)),
             )
             .show(ctx, |ui| {
@@ -531,7 +593,7 @@ impl DrafterApp {
             .width_range(250. ..=420.)
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(250, 251, 253))
+                    .fill(ctx.style().visuals.panel_fill)
                     .inner_margin(20),
             )
             .show(ctx, |ui| {
@@ -565,7 +627,12 @@ impl DrafterApp {
                         if appearance {
                             self.presentation_panel(ui);
                         } else {
-                            ui.label(RichText::new("Document").size(14.).strong().color(INK));
+                            ui.label(
+                                RichText::new("Document")
+                                    .size(14.)
+                                    .strong()
+                                    .color(ui.visuals().text_color()),
+                            );
                             ui.weak(format!(
                                 "{} edges · {} faces",
                                 self.history.model().edges().len(),
@@ -631,16 +698,16 @@ impl DrafterApp {
             let v = matrix.transform_vector3(axis);
             let delta = egui::vec2(v.x * aspect, -v.y) / scale * 23.;
             p.line_segment([center, center + delta], Stroke::new(1.5f32, color));
-            p.circle_filled(center + delta, 8., Color32::from_rgb(250, 251, 253));
+            p.circle_filled(center + delta, 8., ui.visuals().panel_fill);
             p.text(
                 center + delta,
                 egui::Align2::CENTER_CENTER,
                 label,
                 egui::FontId::proportional(11.),
-                color,
+                ui.visuals().text_color(),
             );
         }
-        p.circle_filled(center, 2.5, Color32::from_rgb(119, 129, 147));
+        p.circle_filled(center, 2.5, ui.visuals().weak_text_color());
     }
 
     pub(crate) fn workspace_status(&mut self, ctx: &egui::Context) {
@@ -648,14 +715,14 @@ impl DrafterApp {
         self.measurements
             .update(readout, self.presentation.measurements);
         egui::TopBottomPanel::bottom("workspace_status")
-            .frame(egui::Frame::new().fill(Color32::WHITE).inner_margin(egui::Margin::symmetric(16, 8)))
+            .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill).inner_margin(egui::Margin::symmetric(16, 8)))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Allocate dimensions first so contextual instructions cannot hide the input.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let field = ui.add(egui::TextEdit::singleline(&mut self.measurements.text)
                         .desired_width(if ctx.content_rect().width() < 900. { 105. } else { 150. })
-                        .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { Color32::from_rgb(255, 220, 217) } else { Color32::from_rgb(244, 245, 249) }))
+                        .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { theme::error_background(ui.visuals()) } else { ui.visuals().extreme_bg_color }))
                         .on_hover_text("Type a precise dimension during an operation, then press Enter. Accepts m, cm, mm, ft and in.");
                     if field.changed() { self.measurements.phase = cindral_tools::measurements::BoxPhase::Typing; self.measurements.invalid = false; }
                     if (field.has_focus() || field.lost_focus()) && ctx.input(|i| i.key_pressed(Key::Escape)) { self.measurements.escape(); self.error = None; }
@@ -688,7 +755,7 @@ impl DrafterApp {
                                 ToolKind::Polygon => "Click center, then vertex",
                             }
                         };
-                        ui.label(RichText::new(self.active_tool_label()).color(ACCENT));
+                        ui.label(RichText::new(self.active_tool_label()).color(ui.visuals().selection.stroke.color));
                         ui.add(egui::Label::new(prompt).truncate()).on_hover_text(prompt);
                     });
                 });
@@ -697,12 +764,12 @@ impl DrafterApp {
             ui.horizontal(|ui| {
                 if let Some(error) = self.error.clone() {
                     if ui.small_button("Dismiss").clicked() { self.error = None; }
-                    ui.add(egui::Label::new(RichText::new(&error).color(Color32::from_rgb(174, 43, 35))).truncate()).on_hover_text(error);
+                    ui.add(egui::Label::new(RichText::new(&error).color(ui.visuals().error_fg_color)).truncate()).on_hover_text(error);
                 } else {
                     ui.add(egui::Label::new(RichText::new(self.file_status()).small()).truncate()).on_hover_text(self.file_status());
                     if let Some(axis) = self.axis_lock {
                         ui.separator();
-                        ui.colored_label(ACCENT, format!("{axis:?} axis locked"));
+                        ui.colored_label(ui.visuals().selection.stroke.color, format!("{axis:?} axis locked"));
                     }
                 }
             });
@@ -723,9 +790,9 @@ fn tool_button(ui: &mut egui::Ui, label: &str, shortcut: &str, selected: bool) -
         )
     });
     let fill = if selected {
-        Color32::from_rgb(231, 228, 252)
+        ui.visuals().selection.bg_fill
     } else if response.hovered() {
-        Color32::from_rgb(235, 237, 245)
+        ui.visuals().widgets.hovered.weak_bg_fill
     } else {
         Color32::TRANSPARENT
     };
@@ -735,12 +802,16 @@ fn tool_button(ui: &mut egui::Ui, label: &str, shortcut: &str, selected: bool) -
         p.rect_stroke(
             rect.shrink(0.5),
             4.,
-            Stroke::new(1.0f32, ACCENT),
+            Stroke::new(1.0f32, ui.visuals().selection.stroke.color),
             egui::StrokeKind::Inside,
         );
     }
     let c = rect.center_top() + egui::vec2(0., 14.);
-    let icon_color = if selected { ACCENT } else { INK };
+    let icon_color = if selected {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().text_color()
+    };
     paint_tool_icon(p, c, label, Stroke::new(1.7f32, icon_color));
     p.text(
         rect.center_bottom() - egui::vec2(0., 7.),
@@ -853,7 +924,13 @@ fn paint_tool_icon(p: &egui::Painter, c: egui::Pos2, label: &str, stroke: Stroke
         "Eraser" => {
             p.add(egui::Shape::convex_polygon(
                 vec![pos(-10., 3.), pos(1., -9.), pos(10., -1.), pos(-1., 11.)],
-                Color32::from_rgb(172, 181, 201),
+                p.ctx()
+                    .style()
+                    .visuals
+                    .widgets
+                    .noninteractive
+                    .bg_stroke
+                    .color,
                 stroke,
             ));
         }
@@ -861,7 +938,13 @@ fn paint_tool_icon(p: &egui::Painter, c: egui::Pos2, label: &str, stroke: Stroke
             p.rect_filled(
                 egui::Rect::from_center_size(c, egui::vec2(21., 13.)),
                 3.,
-                Color32::from_rgb(172, 181, 201),
+                p.ctx()
+                    .style()
+                    .visuals
+                    .widgets
+                    .noninteractive
+                    .bg_stroke
+                    .color,
             );
             for x in [-6., 0., 6.] {
                 p.line_segment([pos(x, -6.), pos(x, 0.)], stroke);
@@ -870,7 +953,13 @@ fn paint_tool_icon(p: &egui::Painter, c: egui::Pos2, label: &str, stroke: Stroke
         "Paint" => {
             p.add(egui::Shape::convex_polygon(
                 vec![pos(-9., -2.), pos(0., -10.), pos(10., 0.), pos(1., 9.)],
-                Color32::from_rgb(172, 181, 201),
+                p.ctx()
+                    .style()
+                    .visuals
+                    .widgets
+                    .noninteractive
+                    .bg_stroke
+                    .color,
                 stroke,
             ));
             p.line_segment(
@@ -964,6 +1053,7 @@ mod header_tests {
         ] {
             let ctx = egui::Context::default();
             configure_style(&ctx);
+            ctx.set_theme(egui::Theme::Light);
             let mut app = DrafterApp::default();
             frame(&mut app, &ctx, vec![]);
             let output = frame(&mut app, &ctx, vec![]);
@@ -1020,6 +1110,7 @@ mod header_tests {
             for drawing in [false, true] {
                 let ctx = egui::Context::default();
                 configure_style(&ctx);
+                ctx.set_theme(egui::Theme::Light);
                 let mut app = DrafterApp::default();
                 if drawing {
                     app.set_tool(ToolKind::Circle);

@@ -28,9 +28,25 @@ See [architecture](docs/ARCHITECTURE.md) and [agent log](docs/AGENT_LOG.md).
 
 ## Modeling workspace
 
-The editor uses a neutral modeling canvas, a light two-column tool palette, and a flat, resizable **Inspector**. All 16 drawing and modification tools have visible icons and captions; hover for keyboard shortcuts. The **Model** inspector tab contains Outliner, Tags and Materials; **Appearance** contains styles, scenes, sections and shadows. Selection details appear when geometry is selected, and the Outliner opens when a group or component is selected. Close the inspector with **×** beside its tabs; reopen it from the **Inspector** toolbar button or **Window → Model inspector**. The visible **File, Edit, Camera, Draw, Tools, Window and Help** menus retain the familiar desktop layout. The toolbar provides Undo/Redo, Fit model, segmented work-plane controls, Inspector and Save; segment counts and paint color appear for their respective tools. **Camera** includes standard views, projection and a construction-grid toggle. The grid starts hidden, with muted world axes and a small orientation indicator. The header shows the document name and Unsaved, Modified or Saved state; recovery autosaves do not mark a draft as saved. Dimensions stay at the bottom right. The native editor starts with Select; **Space** returns to Select.
+The editor uses a neutral modeling canvas, a theme-aware two-column tool palette, and a flat, resizable **Inspector**. All 16 drawing and modification tools have visible icons and captions; hover for keyboard shortcuts. The **Model** inspector tab contains Outliner, Tags and Materials; **Appearance** contains styles, scenes, sections and shadows. Selection details appear when geometry is selected, and the Outliner opens when a group or component is selected. Close the inspector with **×** beside its tabs; reopen it from the **Inspector** toolbar button or **Window → Model inspector**. The visible **File, Edit, Camera, Draw, Tools, View, Window and Help** menus retain the familiar desktop layout. The toolbar provides Undo/Redo, Fit model, segmented work-plane controls, Inspector and Save; segment counts and paint color appear for their respective tools. **Camera** includes standard views, projection and a construction-grid toggle. The grid starts hidden, with muted world axes and a small orientation indicator. The header shows the document name and Unsaved, Modified or Saved state; recovery autosaves do not mark a draft as saved. Dimensions stay at the bottom right. The native editor starts with Select; **Space** returns to Select.
 
 See the [UI/UX review](docs/UI_UX_REVIEW.md) for findings, changes and validation.
+
+## Preferences
+
+Use **View → Preferences → Light / Dark / System** to change the UI live. System is the default. The existing per-user `cindral-drafter/png-export.json` settings file stores the choice with atomic replacement; missing, corrupt or invalid settings fall back to System. Save failures appear in the status bar and the live choice remains usable.
+
+System follows eframe/winit theme events where available. On Linux, including Wayland, the desktop appearance portal (`org.freedesktop.appearance`, `color-scheme`) is checked off the UI thread every two seconds; native theme events remain the fallback. If neither reports a preference, System uses **Dark**. A portal value of “no preference” also uses the native setting or Dark. Desktop portal availability depends on the installed desktop environment.
+
+UI themes never alter document/scene viewport backgrounds, sky, ground, materials, axis meanings, embedded PNG/JPEG assets or PNG/COLLADA/glTF export colors. Viewport overlay hues retain their meaning and adjust brightness against the document background when necessary. As with other viewport ink, arbitrary geometry or a contrasting sky/ground behind a marker can affect its local contrast.
+
+Hardcoded UI colors replaced (five groups):
+
+- Status bar and measurements: white, gray input fill, pink error fill and red error text.
+- Tool hints and toolbar: fixed ink, muted labels, purple accent/selection and pale hover fills.
+- Outliner/Tags/Materials inspector: pale panel backgrounds and fixed headings; swatch colors remain document data.
+- Dialogs, menus, progress and tooltips: white surfaces, fixed borders, muted/error/warning text; PNG action/quality foregrounds.
+- Scene tabs and orientation chrome: inherited selection/hover/text palette and indicator discs; axis hues remain unchanged.
 
 ## Run the viewport
 

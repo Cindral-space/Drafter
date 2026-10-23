@@ -63,6 +63,17 @@ fn preferences_path() -> PathBuf {
     root.join("cindral-drafter/png-export.json")
 }
 impl PngUi {
+    pub(crate) fn theme(&self) -> theme::Preference {
+        self.options.theme
+    }
+    pub(crate) fn save_theme(&mut self, theme: theme::Preference) -> Result<(), String> {
+        self.options.theme = theme;
+        // A theme change must not persist unfinished (possibly invalid) PNG edits.
+        let mut saved = Options::load(&self.prefs);
+        saved.theme = theme;
+        saved.save(&self.prefs)
+    }
+
     pub(crate) fn with_surface(srgb_surface: bool) -> Self {
         Self {
             srgb_surface,
@@ -214,9 +225,9 @@ impl DrafterApp {
                                     let validity = candidate.estimate(0);
                                     let selected = state.options.aa == aa;
                                     let label = egui::RichText::new(format!("{aa:?}"));
-                                    let mut button = egui::Button::new(if selected { label.color(egui::Color32::WHITE) } else { label }).selected(selected);
+                                    let mut button = egui::Button::new(if selected { label.color(ui.visuals().selection.stroke.color) } else { label }).selected(selected);
                                     if selected {
-                                        button = button.fill(ui.visuals().selection.stroke.color);
+                                        button = button.fill(ui.visuals().selection.bg_fill);
                                     }
                                     let response = ui.add_enabled(validity.is_ok(), button);
                                     if response.clicked() {
@@ -262,8 +273,8 @@ impl DrafterApp {
                 ui.separator();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let ready = state.job.is_none() && state.options.estimate(0).is_ok();
-                    let button = egui::Button::new(egui::RichText::new("Export…").color(egui::Color32::WHITE))
-                        .fill(ui.visuals().selection.stroke.color)
+                    let button = egui::Button::new(egui::RichText::new("Export…").color(ui.visuals().selection.stroke.color))
+                        .fill(ui.visuals().selection.bg_fill)
                         .min_size(egui::vec2(96., 34.));
                     if ui.add_enabled(ready, button).clicked() {
                         export = true;
@@ -424,5 +435,34 @@ mod tests {
         options.height = 8192;
         lock_dimensions(&mut options, [640, 360], false, true);
         assert_eq!([options.width, options.height], [8192, 4608]);
+    }
+}
+
+#[cfg(test)]
+mod theme_preferences_test {
+    use super::*;
+    #[test]
+    fn saving_theme_preserves_export_settings_and_ignores_unfinished_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prefs.json");
+        let original = Options {
+            width: 640,
+            height: 480,
+            ..Default::default()
+        };
+        original.save(&path).unwrap();
+        let mut ui = PngUi {
+            prefs: path.clone(),
+            options: original.clone(),
+            ..Default::default()
+        };
+        ui.options.width = 0;
+        ui.save_theme(theme::Preference::Dark).unwrap();
+        let saved = Options::load(&path);
+        assert_eq!(saved.width, original.width);
+        assert_eq!(saved.height, original.height);
+        assert_eq!(saved.theme, theme::Preference::Dark);
+        assert_eq!(ui.options.width, 0);
+        assert_eq!(ui.theme(), theme::Preference::Dark);
     }
 }

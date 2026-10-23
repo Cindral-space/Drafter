@@ -255,6 +255,18 @@ mod tests {
             }
             Err(e) => panic!("{e}"),
         };
+        // The complete GPU/export path must ignore the persisted chrome preference.
+        let ctx = egui::Context::default();
+        crate::workspace_ui::configure_style(&ctx);
+        for theme in [
+            crate::theme::Preference::Light,
+            crate::theme::Preference::Dark,
+        ] {
+            theme.apply(&ctx);
+            let mut themed = o.clone();
+            themed.theme = theme;
+            assert_eq!(image(bundle.clone(), &themed, None).rgba, baseline.rgba);
+        }
         assert_eq!(baseline.rgba.len(), 64 * 64 * 4);
         assert_eq!(&baseline.rgba[..4], &[237, 240, 245, 255]);
         let center = (32 * 64 + 32) * 4;
