@@ -507,3 +507,7 @@
 ### Rotate item 5 — protractor
 
 - Added original projected ring/ticks, center and baseline feedback; axis hue or neutral inferred-plane ink, with bounded 72-segment overlay. Radius aims at 55 logical pixels. Targeted app check passed; resolved float-literal warnings. Camera-side normal selection follows with orientation tracking in item 6.
+
+### Rotate item 6 — hover orientation
+
+- Idle protractor now follows active-definition face normals and cursor points, with world-horizontal Z default for edges/endpoints/empty space. Normal points toward the camera-visible side before placement and freezes at the center. Context normals use inverse transpose. Exact reference edge/endpoint behavior remains a user trial. cargo check -p cindral-app passes.

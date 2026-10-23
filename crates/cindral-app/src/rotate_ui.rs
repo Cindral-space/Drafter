@@ -93,10 +93,12 @@ impl DrafterApp {
         let world_ray = Ray { origin: origin.as_dvec3(), direction: direction.as_dvec3() };
         let ray = Ray { origin: inverse.transform_point3(world_ray.origin), direction: inverse.transform_vector3(world_ray.direction) };
         let hit = cindral_tools::pick_section(self.history.model(), ray, view, cursor, 10., self.local_section().as_ref());
-        let normal = self.rotate.normal.unwrap_or_else(|| match hit {
+        let normal = if self.modify.active() { self.modify.axis() } else { match hit {
             Some(cindral_tools::Hit::Face(id)) => inverse.transpose().transform_vector3(self.history.model().faces()[&id].plane.normal).normalize(),
             _ => DVec3::Z,
-        });
+        } };
+        let normal = if !self.modify.active() && normal.dot(world_ray.direction)>0. { -normal } else { normal };
+        if !self.modify.active() { self.rotate.inferred = matches!(hit, Some(cindral_tools::Hit::Face(_))); }
         let center = self.modify.anchor().unwrap_or(DVec3::ZERO);
         let local_normal = context.transpose().transform_vector3(normal).normalize();
         let mut query = Query::new(cursor, ray, view);
