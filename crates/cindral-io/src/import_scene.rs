@@ -41,6 +41,10 @@ pub struct ImportedScene {
     pub meters_per_unit: f64,
     /// Source up direction.
     pub up_axis: UpAxis,
+    /// Informational import notes.
+    pub notes: Vec<String>,
+    /// Unsupported source features, shown separately from problems.
+    pub not_imported: Vec<String>,
     /// Unsupported/skipped feature diagnostics.
     pub warnings: Vec<String>,
     /// Number of skipped source primitives or degenerate polygons.
@@ -58,6 +62,8 @@ impl Default for ImportedScene {
             meters_per_unit: 1.,
             up_axis: UpAxis::Z,
             warnings: Vec::new(),
+            notes: Vec::new(),
+            not_imported: Vec::new(),
             skipped: 0,
         }
     }
@@ -165,6 +171,10 @@ pub struct ImportReport {
     pub instances: usize,
     /// Explicitly skipped source items.
     pub skipped: usize,
+    /// Informational import notes.
+    pub notes: Vec<String>,
+    /// Source features excluded by the importer.
+    pub not_imported: Vec<String>,
     /// Format/conversion diagnostics.
     pub warnings: Vec<String>,
 }
@@ -269,15 +279,6 @@ pub fn convert_scene(
     if bytes > 64 * 1024 * 1024 {
         return Err(IoError::Invalid("texture bytes limit exceeded".into()));
     }
-    if !scene.textures.is_empty() {
-        scene.warnings.push("Texture images are preserved; Cindral uses planar texture mapping rather than source UV sets".into());
-    }
-    if scene.warnings.len() > 1000 {
-        scene.warnings.truncate(999);
-        scene
-            .warnings
-            .push("Additional import diagnostics omitted (1000-warning limit)".into());
-    }
     for material in &mut scene.materials {
         if material
             .texture
@@ -290,7 +291,9 @@ pub fn convert_scene(
                 .push("Missing texture reference removed from material".into());
         }
     }
-    scene.warnings.truncate(1000);
+    if scene.materials.iter().any(|m| m.texture.is_some()) {
+        scene.notes.push("Texture images are preserved; Cindral uses planar texture mapping rather than source UV sets".into());
+    }
     for asset in scene.textures.values() {
         control.check()?;
         crate::decode_texture(asset)?;
@@ -502,6 +505,8 @@ pub fn convert_scene(
     let data = history.to_data();
     let mut report = ImportReport {
         warnings: scene.warnings,
+        notes: scene.notes,
+        not_imported: scene.not_imported,
         skipped: scene.skipped,
         ..Default::default()
     };

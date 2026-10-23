@@ -383,7 +383,7 @@ impl DrafterApp {
                 self.cancel_import();
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Cindral drafts / SketchUp import", &["cdraft", "skp"])
-                    .add_filter("SketchUp (*.skp, read-only)", &["skp"])
+                    .add_filter("SketchUp (*.skp)", &["skp"])
                     .pick_file()
                 {
                     self.open_path(&path)?;
@@ -412,7 +412,7 @@ impl DrafterApp {
                         "Supported 3D Models (*.skp, *.gltf, *.glb, *.dae, *.obj)",
                         &["skp", "gltf", "glb", "dae", "obj"],
                     )
-                    .add_filter("SketchUp (*.skp, read-only)", &["skp"])
+                    .add_filter("SketchUp (*.skp)", &["skp"])
                     .add_filter("glTF 2.0 (*.gltf, *.glb)", &["gltf", "glb"])
                     .add_filter("COLLADA (*.dae)", &["dae"])
                     .add_filter("Wavefront OBJ (*.obj)", &["obj"])
@@ -1158,9 +1158,11 @@ impl DrafterApp {
                                 ui.end_row();
                             }
                         });
+                    ui.small("Geometry counted once per stored definition; instances include import wrappers.");
+                    for note in &summary.notes { ui.label(note); }
                     if !summary.warnings.is_empty() {
                         ui.add_space(6.0);
-                        ui.label(format!("Warnings ({}):", summary.warnings.len()));
+                        ui.label(format!("Repairs and warnings ({}):", summary.warnings.len()));
                         egui::ScrollArea::vertical()
                             .max_height(100.0)
                             .show(ui, |ui| {
@@ -1168,6 +1170,11 @@ impl DrafterApp {
                                     ui.label(format!("• {w}"));
                                 }
                             });
+                    }
+                    if !summary.not_imported.is_empty() {
+                        ui.add_space(6.0);
+                        ui.label("Not imported");
+                        for feature in &summary.not_imported { ui.label(feature); }
                     }
                     ui.add_space(8.0);
                     if ui.button("OK").clicked() {
@@ -1753,6 +1760,7 @@ mod tests {
                     instances: 0,
                     skipped: 0,
                     warnings: vec!["test warning".into()],
+                    ..Default::default()
                 },
             },
             &ImportControl::default(),

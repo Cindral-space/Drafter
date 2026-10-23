@@ -21,7 +21,8 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
         skipped: source.skipped,
         ..Default::default()
     };
-    scene.warnings.push(format!("Imported from .skp {} (read-only); Save As .cdraft. Coordinates converted from inches to meters. Scenes/cameras, styles, dynamic behavior, section planes, text/dimensions and source UV pins are not imported.", source.version));
+    scene.notes.push(format!("Imported from .skp {}. This model is editable; use Save As to keep it as .cdraft. Coordinates converted from inches to meters.", source.version));
+    scene.not_imported = vec!["Scenes/cameras, styles, dynamic behavior, section planes, text/dimensions, UV pins".into()];
     let mut texture_keys = BTreeMap::new();
     let mut decoded_texture_bytes = 0usize;
     for (source_key, bytes) in source.textures {
