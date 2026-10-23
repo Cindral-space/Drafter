@@ -46,6 +46,8 @@ pub struct MeasurementSettings {
     pub precision: u8,
     /// Use comma decimal mark and semicolon list separator.
     pub decimal_comma: bool,
+    /// Rotate ring snap increment in degrees (1–90, default 15).
+    pub angle_snap_degrees: u16,
 }
 impl Default for MeasurementSettings {
     fn default() -> Self {
@@ -53,6 +55,7 @@ impl Default for MeasurementSettings {
             unit: LengthUnit::Meter,
             precision: 3,
             decimal_comma: false,
+            angle_snap_degrees: 15,
         }
     }
 }

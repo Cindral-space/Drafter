@@ -621,6 +621,16 @@ impl ModifySession {
         self.reference_radius = radius;
         Ok(())
     }
+    /// Sweep Rotate with the document increment and a world-space protractor radius.
+    pub fn update_rotation(&mut self, point: DVec3, radius: f64, increment: u16) -> Result<Option<Command>, ToolError> {
+        let center = self.anchor.ok_or(ToolError::NotReady)?;
+        let reference = self.reference_dir.ok_or(ToolError::NotReady)?;
+        let offset = point-center;
+        let planar = offset-self.axis*offset.dot(self.axis);
+        let angle = crate::rotation::snap(crate::rotation::angle(self.axis,reference,planar),planar.length(),radius,increment);
+        let point = center + (reference*angle.cos()+self.axis.cross(reference)*angle.sin())*planar.length();
+        self.update(point)
+    }
     /// Produce an absolute preview mutation command from the initial anchor to the prospective point.
     #[tracing::instrument(level = "info", skip_all, name = "tool.update")]
     pub fn update(&mut self, point: DVec3) -> Result<Option<Command>, ToolError> {

@@ -735,6 +735,7 @@ impl DrafterApp {
                             ui.radio_value(&mut self.presentation.measurements.unit, unit, unit.suffix());
                         }
                         ui.add(egui::Slider::new(&mut self.presentation.measurements.precision, 0..=9).text("Decimals"));
+                        ui.add(egui::Slider::new(&mut self.presentation.measurements.angle_snap_degrees, 1..=90).text("Angle snap (degrees)"));
                         ui.checkbox(&mut self.presentation.measurements.decimal_comma, "Decimal comma (; separates values)");
                         if before != self.presentation.measurements { self.presentation_changed(); }
                     });

@@ -164,7 +164,7 @@ impl DrafterApp {
             return;
         }
         if let Some(p) = point {
-            match self.modify.update(p) { Ok(Some(c)) => self.rotate_preview(c), Err(e) => self.error = Some(e.to_string()), _ => {} }
+            match self.modify.update_rotation(p, self.rotate.radius, self.presentation.measurements.angle_snap_degrees) { Ok(Some(c)) => self.rotate_preview(c), Err(e) => self.error = Some(e.to_string()), _ => {} }
         }
         if clicked && self.error.is_none() {
             match self.history.commit_preview() {
@@ -191,6 +191,18 @@ impl DrafterApp {
             if let (Some(a), Some(b)) = (screen(at(a,radius)),screen(at(b,radius))) { painter.line_segment([a,b],egui::Stroke::new(1.5_f32,color)); }
             if i%3 == 0 {
                 if let (Some(a),Some(b)) = (screen(at(a,radius)),screen(at(a,radius*if i%18==0 {0.8} else {0.9}))) { painter.line_segment([a,b],egui::Stroke::new(1_f32,color)); }
+            }
+        }
+        if self.modify.active() && self.rotate.reference_set {
+            if let (Some(c),Some((reference,_)),Some(degrees)) = (screen(center), self.modify.rotation_reference(), self.modify.measurement()) {
+                let angle = degrees.to_radians();
+                for i in 0..48 {
+                    let a = angle*i as f64/48.; let b = angle*(i+1) as f64/48.;
+                    let at = |a:f64| center+(reference*a.cos()+normal.cross(reference)*a.sin())*radius;
+                    if let (Some(a),Some(b)) = (screen(at(a)),screen(at(b))) {
+                        painter.add(egui::Shape::convex_polygon(vec![c,a,b],color.gamma_multiply(0.18),egui::Stroke::NONE));
+                    }
+                }
             }
         }
         if let Some(c) = screen(center) {

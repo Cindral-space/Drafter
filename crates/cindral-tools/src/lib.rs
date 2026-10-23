@@ -5,6 +5,7 @@
 
 mod error;
 mod modify;
+pub mod rotation;
 mod selection;
 pub use modify::{Guide, ModifyKind, ModifySession};
 mod session;

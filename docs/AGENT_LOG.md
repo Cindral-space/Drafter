@@ -519,3 +519,8 @@
 ### Rotate item 8 — shared inference feedback
 
 - Enabled the existing inference marker/tooltip overlay in Rotate. Both center and baseline already query the shared engine with context transforms, section filtering and anchor inference; baseline projection uses the fixed plane. Preview-owned entities are excluded from accepted points. No second inference system introduced.
+
+### Rotate item 9 — angle snapping
+
+- Added persisted document angle snap increment (15° default; units/precision context menu exposes 1–90°). Shared sweep math snaps in the explicit radial annulus [0.75, 1.25] × protractor radius and stays free outside, including farther-pointer fine control. Added filled angle wedge and retained shared live Angle readout. Targeted app check passes; threshold tests follow.
+- The single bulk-test Antigravity request used gemini-3.8-flash-high/high effort, 20s internal/25s external deadline. It timed out without a file; no retry or delegated output accepted. Remaining tests will be written locally.
