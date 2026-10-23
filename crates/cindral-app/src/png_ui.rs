@@ -147,6 +147,9 @@ impl DrafterApp {
             .collapsible(false)
             .resizable(false)
             .default_width(420.)
+            .default_height(700.)
+            .max_height((ctx.content_rect().height() - 90.).max(100.))
+            .vscroll(true)
             .show(ctx, |ui| {
                 let state = &mut self.png;
                 ui.add_enabled_ui(state.job.is_none(), |ui| {
@@ -212,7 +215,7 @@ impl DrafterApp {
                     ui.small("UI, selection, tools, axes, guides and grid are excluded.");
                     let validity = state.options.estimate(0);
                     if let Err(error) = &validity {
-                        ui.colored_label(Color32::LIGHT_RED, error);
+                        ui.colored_label(ui.visuals().error_fg_color, error);
                         if let Some(aa) = compatible_quality(&state.options) {
                             if ui.button(format!("Use {aa:?} antialiasing for this size")).clicked() {
                                 state.options.aa = aa;
@@ -242,7 +245,7 @@ impl DrafterApp {
                     ui.label(&state.status);
                 }
                 if let Some(warning) = &state.preference_warning {
-                    ui.colored_label(Color32::YELLOW, warning);
+                    ui.colored_label(ui.visuals().warn_fg_color, warning);
                 }
             });
         if export {
