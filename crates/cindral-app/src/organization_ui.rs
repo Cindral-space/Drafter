@@ -34,6 +34,7 @@ pub(crate) struct InstanceDrag {
 }
 pub(crate) struct OrganizationUi {
     pub(crate) selected: Option<InstancePath>,
+    pub(crate) multiple: BTreeSet<InstancePath>,
     pub(crate) drag: Option<InstanceDrag>,
     pub(crate) completed: Option<InstanceDrag>,
     expanded: BTreeSet<InstancePath>,
@@ -52,6 +53,7 @@ impl Default for OrganizationUi {
     fn default() -> Self {
         Self {
             selected: None,
+            multiple: BTreeSet::new(),
             drag: None,
             completed: None,
             expanded: BTreeSet::new(),
@@ -113,6 +115,7 @@ impl DrafterApp {
                 .is_some_and(|p| self.history.instance(p).is_none())
             {
                 self.organization.selected = None;
+        self.organization.multiple.clear();
             }
         }
         Ok(changed)
@@ -187,6 +190,7 @@ impl DrafterApp {
             self.organization.rename = node.name.clone();
             self.organization.tag = node.tag;
             self.organization.selected = Some(path);
+            self.organization.multiple.clear();
             self.selection.clear();
         }
     }
@@ -735,13 +739,9 @@ impl DrafterApp {
                 let offset = point - drag.pivot;
                 let planar = offset - normal * offset.dot(normal);
                 let angle = typed.map(f64::to_radians).unwrap_or_else(|| {
-                    planar
-                        .dot(normal.cross(drag.reference))
-                        .atan2(planar.dot(drag.reference))
+                    cindral_tools::rotation::angle(normal,drag.reference,planar)
                 });
-                DMat4::from_translation(drag.pivot)
-                    * DMat4::from_axis_angle(normal, angle)
-                    * DMat4::from_translation(-drag.pivot)
+                cindral_tools::rotation::matrix(drag.pivot,normal,angle)
             }
             ModifyKind::Scale => {
                 let offset = point - drag.pivot;
@@ -1196,12 +1196,15 @@ impl DrafterApp {
         if self.modifying && self.modify.kind() == ModifyKind::Select && clicked {
             if let Some(path) = child {
                 let loose = self.selection.clone();
+                let mut multiple = self.organization.multiple.clone();
+                if let Some(previous)=self.organization.selected.clone() {multiple.insert(previous);}
+                multiple.insert(path.clone());
                 self.select_instance(path);
-                if ctx.input(|i| i.modifiers.shift) { self.selection = loose; }
+                if ctx.input(|i| i.modifiers.shift) { self.selection = loose; self.organization.multiple=multiple; }
                 self.selection_start = None;
                 return true;
             }
-            if !ctx.input(|i| i.modifiers.shift) { self.organization.selected = None; }
+            if !ctx.input(|i| i.modifiers.shift) { self.organization.selected = None; self.organization.multiple.clear(); }
         }
         if self.modifying && self.modify.kind() == ModifyKind::PaintBucket && pressed {
             if let Some(path) = child {

@@ -1405,7 +1405,6 @@ mod transform_parity_tests {
         shortcut(Key::M, ModifyKind::Move);
     }
     #[test]
-    #[ignore = "gap: Q shortcut is not routed to Rotate"]
     fn transform_parity_q_shortcut() {
         shortcut(Key::Q, ModifyKind::Rotate);
     }
@@ -1445,7 +1444,6 @@ mod transform_parity_tests {
         assert_eq!(app.model().faces().len(), 2);
     }
     #[test]
-    #[ignore = "gap: Rotate first click uses selection centroid instead of chosen pivot"]
     fn transform_parity_rotate_clicked_pivot() {
         let (mut app, ctx) = fixture(ModifyKind::Rotate);
         let p = position(&app, DVec3::ZERO);
@@ -1455,6 +1453,7 @@ mod transform_parity_tests {
             vec![egui::Event::PointerMoved(p), button(p, true)],
             egui::Modifiers::NONE,
         );
+        frame(&mut app,&ctx,vec![button(p,false)],egui::Modifiers::NONE);
         assert!(app.modify.anchor().unwrap().distance(DVec3::ZERO) < 1e-6);
     }
     #[test]

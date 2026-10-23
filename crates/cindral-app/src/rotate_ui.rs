@@ -15,6 +15,7 @@ pub(crate) struct RotateUi {
     lock: Option<DVec3>,
     held: Option<DVec3>,
     radius: f64,
+    others: Vec<(InstancePath,DMat4,DMat4)>,
     instance: Option<(InstancePath, DMat4, DMat4)>,
 }
 impl DrafterApp {
@@ -27,6 +28,18 @@ impl DrafterApp {
         else { "Move to rotate, click to finish, or type an angle" }
     }
     fn rotate_command(&self, command: Command) -> Result<Option<Org>, cindral_core::KernelError> {
+        if !self.rotate.others.is_empty() {
+            let mut sources=self.rotate.others.clone();
+            if let Some(source)=self.rotate.instance.clone() {sources.push(source);}
+            sources.sort_by(|a,b|a.0.cmp(&b.0));
+            let (matrices,copy)=match &command {
+                Command::Transform {matrix,copy,..}=>(vec![*matrix],*copy),
+                Command::Batch(commands)=>(commands.iter().filter_map(|c|match c {Command::Transform {matrix,..}=>Some(*matrix),_=>None}).collect(),true),
+                _=>return Ok(None),
+            };
+            let placements=sources.into_iter().map(|(path,before,owner)| (path,matrices.iter().map(|m|owner.inverse() * *m * owner * before).collect())).collect();
+            return Ok(Some(Org::TransformSet {placements,copy}));
+        }
         if let Some((path, before, owner)) = &self.rotate.instance {
             if let Command::Batch(commands) = &command {
                 let transforms = commands.iter().filter_map(|c| match c { Command::Transform {matrix,..} => Some(owner.inverse() * *matrix * *owner * *before), _ => None }).collect();
@@ -50,6 +63,7 @@ impl DrafterApp {
     fn rotate_preview(&mut self, command: Command) {
         let result = match self.rotate_command(command.clone()) {
             Ok(Some(placement)) if self.rotate.has_loose => self.history.preview_selection_transform(self.rotate_local_command(command),placement),
+            Ok(Some(command @ Org::TransformSet {..})) => self.history.preview_placement_set(command),
             Ok(Some(Org::Transform { path, transform })) => self.history.preview_instance_transform(&path, transform),
             Ok(Some(Org::Duplicate { path, transform })) => self.history.preview_duplicate(&path, transform),
             Ok(None) => self.history.preview(self.rotate_local_command(command)),
@@ -115,7 +129,14 @@ impl DrafterApp {
         let world_ray = Ray { origin: origin.as_dvec3(), direction: direction.as_dvec3() };
         let ray = Ray { origin: inverse.transform_point3(world_ray.origin), direction: inverse.transform_vector3(world_ray.direction) };
         let hit = cindral_tools::pick_section(self.history.model(), ray, view, cursor, 10., self.local_section().as_ref());
-        let normal = if self.modify.active() { self.modify.axis() } else { match hit {
+        let scene_hit=if !self.modify.active() || !self.rotate.reference_set {self.scene_hit(world_ray,view_world,cursor).filter(|h|h.path.starts_with(self.history.context()))} else {None};
+        let surface_normal=scene_hit.as_ref().and_then(|h| {
+            let cindral_tools::Hit::Face(id)=h.hit else {return None};
+            let occurrence=self.scene.occurrences().iter().find(|o|o.path==h.path)?;
+            let face=self.history.definition_model(h.definition)?.faces().get(&id)?;
+            Some(occurrence.world.inverse().transpose().transform_vector3(face.plane.normal).normalize())
+        });
+        let normal = if self.modify.active() { self.modify.axis() } else if let Some(n)=surface_normal {n} else { match hit {
             Some(cindral_tools::Hit::Face(id)) => inverse.transpose().transform_vector3(self.history.model().faces()[&id].plane.normal).normalize(),
             _ => DVec3::Z,
         } };
@@ -131,7 +152,7 @@ impl DrafterApp {
         }
         let normal = self.rotate.lock.or(self.rotate.held).filter(|_| !self.modify.active()).unwrap_or(normal);
         let normal = if !self.modify.active() && normal.dot(world_ray.direction)>0. { -normal } else { normal };
-        if !self.modify.active() { self.rotate.inferred = self.rotate.lock.is_none() && matches!(hit, Some(cindral_tools::Hit::Face(_))); }
+        if !self.modify.active() { self.rotate.inferred = self.rotate.lock.is_none() && (surface_normal.is_some() || matches!(hit, Some(cindral_tools::Hit::Face(_)))); }
         let center = self.modify.anchor().unwrap_or(DVec3::ZERO);
         let local_normal = context.transpose().transform_vector3(normal).normalize();
         let mut query = Query::new(cursor, ray, view);
@@ -139,6 +160,23 @@ impl DrafterApp {
         query.anchor = self.modify.anchor().map(|p| inverse.transform_point3(p));
         query.section = self.local_section();
         self.snap = self.engine.infer(self.history.model(), &query);
+        if let Some(hit)=scene_hit.as_ref().filter(|h|h.path!=self.history.context()) {
+            if let Some(occurrence)=self.scene.occurrences().iter().find(|o|o.path==hit.path) {
+                let world=occurrence.world;let inv=world.inverse();
+                let mut child=Query::new(cursor, Ray {origin:inv.transform_point3(world_ray.origin),direction:inv.transform_vector3(world_ray.direction)}, View {matrix:view_world.matrix*world,size:view_world.size});
+                child.plane=DrawingPlane {origin:inv.transform_point3(center),normal:world.transpose().transform_vector3(normal).normalize()};
+                child.anchor=self.modify.anchor().map(|p|inv.transform_point3(p));
+                child.section=self.presentation.sections.cut().and_then(|p|p.in_frame(world));
+                if let Some(model)=self.history.definition_model(hit.definition) {
+                    if let Some(mut snap)=self.engine.infer(model,&child) {
+                        snap.position=inverse.transform_point3(world.transform_point3(snap.position));
+                        snap.guide=snap.guide.map(|g|g.map(|p|inverse.transform_point3(world.transform_point3(p))));
+                        snap.entity=None;
+                        self.snap=Some(snap);
+                    }
+                }
+            }
+        }
         let point = self.snap.as_ref().and_then(|s| {
             let own = self.modify.active() && match s.entity {
                 Some(SnapEntity::Vertex(id)) => self.history.changes().vertices.contains(&id),
@@ -167,6 +205,7 @@ impl DrafterApp {
                 });
                 if vertices.is_empty() && instance.is_none() { self.error = Some("Select objects to rotate".into()); return; }
                 if let Some(p) = point {
+                    self.rotate.others=self.organization.multiple.iter().filter(|path| Some(*path)!=instance.as_ref().map(|i|&i.0) && path.starts_with(self.history.context()) && path.len()==self.history.context().len()+1).filter_map(|path|self.history.instance(path).map(|i|(path.clone(),i.transform,context))).collect();
                     self.rotate.has_loose = !vertices.is_empty();
                     self.rotate.instance = instance;
                     self.rotate.reference_set = false;
@@ -304,10 +343,14 @@ mod tests {
         let path=app.create_container(DefinitionKind::Component).unwrap();let definition=app.history.instance(&path).unwrap().definition;
         let mirror=DMat4::from_scale(DVec3::new(-2.,3.,1.));app.history.organization(Org::Transform {path:path.clone(),transform:mirror}).unwrap();
         app.execute(Command::AddPolyline {points:vec![DVec3::X*5.,DVec3::X*6.,DVec3::X*6.+DVec3::Y,DVec3::X*5.+DVec3::Y],closed:true}).unwrap();
+        let second=DMat4::from_translation(DVec3::X*10.);
+        app.history.organization(Org::AddInstance {definition,name:"second".into(),transform:second}).unwrap();
+        let second_path=vec![*app.history.instances(DefinitionId(0)).unwrap().keys().next_back().unwrap()];
         let before=app.history.to_data();let def=app.history.definition_model(definition).unwrap().clone();let depth=app.history.undo_depth();
-        app.choose_modify(ModifyKind::Rotate);app.rotate.instance=Some((path.clone(),mirror,DMat4::IDENTITY));app.rotate.has_loose=true;
+        app.choose_modify(ModifyKind::Rotate);app.rotate.instance=Some((path.clone(),mirror,DMat4::IDENTITY));app.rotate.others=vec![(second_path.clone(),second,DMat4::IDENTITY)];app.rotate.has_loose=true;
         app.modify.begin_rotation(app.model().vertices().keys().copied().collect(),DVec3::ZERO,DVec3::Z).unwrap();
         typed(&mut app,"30");typed(&mut app,"60");assert_eq!(app.history.undo_depth(),depth+1);
+        assert!(app.history.instance(&second_path).unwrap().transform.abs_diff_eq(cindral_tools::rotation::matrix(DVec3::ZERO,DVec3::Z,60_f64.to_radians())*second,1e-10));
         assert_eq!(app.history.definition_model(definition).unwrap(),&def);
         let expected=cindral_tools::rotation::matrix(DVec3::ZERO,DVec3::Z,60_f64.to_radians())*mirror;
         assert!(app.history.instance(&path).unwrap().transform.abs_diff_eq(expected,1e-10));

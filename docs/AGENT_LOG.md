@@ -558,3 +558,8 @@
 ### Rotate item 17 — stage guidance
 
 - Shared status routing displays the requested center/start/sweep hints verbatim from the user's supplied requirements, with selection-required idle guidance and the Angle measurements caption. Both loose and occurrence placement use the same stage flags. No vendor documentation text or assets were obtained/copied.
+
+### Rotate item 14 completion — multiple selected occurrences
+
+- Extended shared document placement commands with a transform set. Move's existing single transform/duplicate/array commands now use the same internal placement helper. Rotate Shift selection retains multiple direct children and loose geometry; absolute pointer updates cache destination instance IDs, avoiding repeated group-definition cloning. Mixed selections combine the local geometry delta and the graph delta into one undo slot; invalid mixed application restores graph and local preview.
+- Added mixed-two-component world placement assertions. Four targeted app interaction/context tests pass (before the final multi-target fixture expansion); app test-target check passes. Enabled Q and clicked-pivot regressions, updating the latter to the requested click-release placement semantics. Child-surface center/reference inference now uses the same engine in the picked occurrence frame and converts feedback to the active context.
