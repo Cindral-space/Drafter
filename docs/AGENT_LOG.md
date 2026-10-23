@@ -515,3 +515,7 @@
 ### Rotate item 7 — plane locks
 
 - Up/Right/Left toggle world Z/X/Y orientation before center; Down toggles inferred orientation, Shift holds the preceding orientation until release. Placement freezes the plane. Locks reset with cancel/tool activation. Targeted app check passes. Tests will cover synthetic key frames.
+
+### Rotate item 8 — shared inference feedback
+
+- Enabled the existing inference marker/tooltip overlay in Rotate. Both center and baseline already query the shared engine with context transforms, section filtering and anchor inference; baseline projection uses the fixed plane. Preview-owned entities are excluded from accepted points. No second inference system introduced.

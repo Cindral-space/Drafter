@@ -374,7 +374,7 @@ impl DrafterApp {
             i.pointer.button_down(PointerButton::Middle)
                 || i.smooth_scroll_delta != egui::Vec2::ZERO
         });
-        if self.modifying || !response.hovered() || navigating {
+        if (self.modifying && self.modify.kind() != ModifyKind::Rotate) || !response.hovered() || navigating {
             return;
         }
         let Some(snap) = &self.snap else {
