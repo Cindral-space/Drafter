@@ -140,3 +140,21 @@ planar mapping; colorized/hue-shift materials are approximated by ordinary
 material tint rather than the source colorization algorithm. Unsupported image
 codecs are skipped. Unknown legacy record classes/dialects may yield partial
 geometry as described above. No `.skp` writing or export is provided.
+
+### Import summary counts
+
+Vertices are welded positions, edges are unique topological boundary/loose edges,
+and faces are kernel polygons after cleanup. Each stored definition (including
+root geometry and hidden/unplaced definitions) contributes once, regardless of
+how many instances reference it. Instances count stored placement records across
+all definitions, including an optional `Imported scene` wrapper and containers
+created to preserve per-primitive tags. They are not expanded visible occurrence
+counts. Native SKP root promotion preserves components/groups as shared definitions;
+`as_component: false` opens the native root directly without flattening it.
+The synthetic reader root is removed during promotion. The generic non-SKP
+flatten option intentionally expands occurrences.
+
+For the private mybedroom model, raw reader counts are 1760 vertices, 2021 edges,
+305 faces and one authored component placement. Before repair, 304 faces survived;
+Open produces one instance, while Import as Component produces two (one wrapper).
+SketchUp Model Info Statistics were not supplied, so that comparison is unknown.
