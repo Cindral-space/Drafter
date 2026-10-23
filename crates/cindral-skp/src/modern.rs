@@ -417,7 +417,10 @@ impl Reader {
             self.scene.warn("face without entity id skipped");
             return;
         }
-        let mut face = RawFace { id: entity_id(el).unwrap_or_default(), ..Default::default() };
+        let mut face = RawFace {
+            id: entity_id(el).unwrap_or_default(),
+            ..Default::default()
+        };
         if let Some(loops) = find(&el.children, T_FACE_LOOPS) {
             let mut loop_nodes = Vec::new();
             find_all(&loops.children, T_LOOP, &mut loop_nodes);
@@ -830,13 +833,16 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             for &(edge, forward) in coedges {
                 let Some(&(a, c)) = edge_ends.get(&edge) else {
                     scene.warn(format!(
-                        "face loop references unknown edge {edge}; face skipped"
+                        "entity {}, definition {name}: face loop references unknown edge {edge}; face skipped", face.id
                     ));
                     continue 'faces;
                 };
                 let start = if forward { a } else { c };
                 if expected.is_some_and(|end| end != start) {
-                    scene.warn("disconnected coedge loop; face skipped");
+                    scene.warn(format!(
+                        "entity {}, definition {name}: disconnected coedge loop; face skipped",
+                        face.id
+                    ));
                     continue 'faces;
                 }
                 expected = Some(if forward { c } else { a });
@@ -845,7 +851,10 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
                 }
             }
             if expected != ring.first().copied() {
-                scene.warn("unclosed coedge loop; face skipped");
+                scene.warn(format!(
+                    "entity {}, definition {name}: unclosed coedge loop; face skipped",
+                    face.id
+                ));
                 continue 'faces;
             }
             if ring.len() > 1 && ring.first() == ring.last() {
@@ -854,12 +863,18 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
             if ring.len() >= 3 {
                 rings.push(ring);
             } else {
-                scene.warn("degenerate face loop; entire face skipped");
+                scene.warn(format!(
+                    "entity {}, definition {name}: degenerate face loop; entire face skipped",
+                    face.id
+                ));
                 continue 'faces;
             }
         }
         if rings.is_empty() {
-            scene.warn("face without valid loops skipped");
+            scene.warn(format!(
+                "entity {}, definition {name}: face without valid loops skipped",
+                face.id
+            ));
             continue;
         }
         let outer = rings

@@ -433,3 +433,46 @@ fn authored_skp_opens_hole_face_at_root_and_edits_reversibly() {
     assert_eq!(history.model().to_data().faces, after.faces);
     history.model().validate().unwrap();
 }
+
+#[test]
+fn skp_summary_separates_editable_notes_and_unsupported_features() {
+    let scene = import_skp_bytes(&hole_seed(), &ImportControl::default()).unwrap();
+    let result =
+        convert_scene(scene, &ImportOptions::default(), &ImportControl::default()).unwrap();
+    assert_eq!(result.report.warnings.len(), 1);
+    assert!(result.report.warnings[0].contains("entity 51"));
+    assert!(result.report.warnings[0].contains("unknown edge"));
+    assert!(result
+        .report
+        .notes
+        .iter()
+        .any(|s| s.contains("editable") && s.contains("Save As")));
+    assert!(result
+        .report
+        .notes
+        .iter()
+        .all(|s| !s.contains("Texture") && !s.contains("read-only")));
+    assert_eq!(result.report.not_imported.len(), 1);
+    for feature in [
+        "Scenes/cameras",
+        "styles",
+        "dynamic behavior",
+        "section planes",
+        "text/dimensions",
+        "UV pins",
+    ] {
+        assert!(result.report.not_imported[0].contains(feature));
+    }
+}
+#[test]
+fn individual_geometry_diagnostics_survive_conversion_without_truncation() {
+    let mut scene = import_skp_bytes(&hole_seed(), &ImportControl::default()).unwrap();
+    scene.warnings = (0..1005)
+        .map(|i| format!("entity {i}: degenerate face skipped at Test/Root"))
+        .collect();
+    scene.skipped = 1005;
+    let result =
+        convert_scene(scene, &ImportOptions::default(), &ImportControl::default()).unwrap();
+    assert_eq!(result.report.warnings.len(), 1005);
+    assert!(result.report.warnings[1004].contains("entity 1004"));
+}

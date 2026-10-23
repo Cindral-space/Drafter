@@ -22,7 +22,9 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
         ..Default::default()
     };
     scene.notes.push(format!("Imported from .skp {}. This model is editable; use Save As to keep it as .cdraft. Coordinates converted from inches to meters.", source.version));
-    scene.not_imported = vec!["Scenes/cameras, styles, dynamic behavior, section planes, text/dimensions, UV pins".into()];
+    scene.not_imported = vec![
+        "Scenes/cameras, styles, dynamic behavior, section planes, text/dimensions, UV pins".into(),
+    ];
     let mut texture_keys = BTreeMap::new();
     let mut decoded_texture_bytes = 0usize;
     for (source_key, bytes) in source.textures {
@@ -79,17 +81,64 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
         }
     }
     let mut assignments = Vec::new();
-    let parents: Vec<Vec<String>> = (0..source.definitions.len()).map(|index| {
-        source.definitions.iter().enumerate().flat_map(|(parent, d)| d.instances.iter().filter(move |i| i.definition == index).map(move |i| format!("{}[{}]/{}", d.name, parent, i.name))).collect()
-    }).collect();
+    let mut parents = vec![Vec::new(); source.definitions.len()];
+    let mut parent_counts = vec![0usize; source.definitions.len()];
+    for (parent, definition) in source.definitions.iter().enumerate() {
+        for instance in &definition.instances {
+            if let Some(paths) = parents.get_mut(instance.definition) {
+                parent_counts[instance.definition] += 1;
+                if paths.len() < 3 {
+                    paths.push(format!(
+                        "{}[{}]/{}",
+                        source_label(&definition.name),
+                        parent,
+                        source_label(&instance.name)
+                    ));
+                }
+            }
+        }
+    }
+    for (index, paths) in parents.iter_mut().enumerate() {
+        if parent_counts[index] > paths.len() {
+            paths.push(format!(
+                "and {} other placements",
+                parent_counts[index] - paths.len()
+            ));
+        }
+    }
     for (index, mut def) in source.definitions.into_iter().enumerate() {
-        let labels: Vec<_> = (0..def.geometry.faces.len()).map(|face| {
-            let tag = def.face_assignments.get(&face).and_then(|v| v.0).and_then(|i| scene.tags.get(i)).map_or("Untagged", |t| t.name.as_str());
-            format!("entity {}, definition {}[{}], parent instances {:?}, tag {}", def.face_ids.get(&face).map_or_else(|| format!("unavailable (face {face})"), ToString::to_string), def.name, index, parents[index], tag)
-        }).collect();
-        if scaled(def.geometry.clone()).build_cancellable(false, false, || control.is_cancelled()).is_err() {
+        let labels: Vec<_> = (0..def.geometry.faces.len())
+            .map(|face| {
+                let tag = def
+                    .face_assignments
+                    .get(&face)
+                    .and_then(|v| v.0)
+                    .and_then(|i| scene.tags.get(i))
+                    .map_or("Untagged", |t| t.name.as_str());
+                format!(
+                    "entity {}, definition {}[{}], parent instances {:?}, tag {}",
+                    def.face_ids
+                        .get(&face)
+                        .map_or_else(|| format!("unavailable (face {face})"), ToString::to_string),
+                    def.name,
+                    index,
+                    parents[index],
+                    tag
+                )
+            })
+            .collect();
+        if scaled(def.geometry.clone())
+            .build_cancellable(false, false, || control.is_cancelled())
+            .is_err()
+        {
             control.check()?;
-            def.geometry = crate::skp_repair::recover(def.geometry, &labels, &mut def.face_assignments, &mut scene, control)?;
+            def.geometry = crate::skp_repair::recover(
+                def.geometry,
+                &labels,
+                &mut def.face_assignments,
+                &mut scene,
+                control,
+            )?;
         }
         assignments.push((def.face_assignments, def.edge_tags));
         control.check()?;
@@ -136,9 +185,7 @@ fn placement(source: cindral_skp::Instance) -> ImportedInstance {
 }
 fn warn(scene: &mut ImportedScene, message: &str) {
     scene.skipped = scene.skipped.saturating_add(1);
-    if scene.warnings.len() < 256 {
-        scene.warnings.push(message.chars().take(1024).collect());
-    }
+    scene.warnings.push(message.chars().take(1024).collect());
 }
 fn scaled(mut geometry: BulkGeometry) -> BulkGeometry {
     for point in &mut geometry.vertices {
@@ -366,23 +413,94 @@ mod diagnostics {
     #[test]
     fn private_face_diagnosis() {
         let path = Path::new("/home/earl/Desktop/Cindral/Drafter/SKP/mybedroom.skp");
-        if !path.exists() { eprintln!("SKIP: private model absent"); return; }
+        if !path.exists() {
+            eprintln!("SKIP: private model absent");
+            return;
+        }
         let source = cindral_skp::read(&std::fs::read(path).unwrap()).unwrap();
-        eprintln!("SOURCE defs={} roots={} vertices={} edges={} faces={} placements={}", source.definitions.len(), source.roots.len(), source.definitions.iter().map(|d| d.geometry.vertices.len()).sum::<usize>(), source.definitions.iter().map(|d| d.geometry.edges.len()).sum::<usize>(), source.definitions.iter().map(|d| d.geometry.faces.len()).sum::<usize>(), source.definitions.iter().map(|d| d.instances.len()).sum::<usize>());
+        eprintln!(
+            "SOURCE defs={} roots={} vertices={} edges={} faces={} placements={}",
+            source.definitions.len(),
+            source.roots.len(),
+            source
+                .definitions
+                .iter()
+                .map(|d| d.geometry.vertices.len())
+                .sum::<usize>(),
+            source
+                .definitions
+                .iter()
+                .map(|d| d.geometry.edges.len())
+                .sum::<usize>(),
+            source
+                .definitions
+                .iter()
+                .map(|d| d.geometry.faces.len())
+                .sum::<usize>(),
+            source
+                .definitions
+                .iter()
+                .map(|d| d.instances.len())
+                .sum::<usize>()
+        );
         for (di, def) in source.definitions.iter().enumerate() {
             for (fi, face) in def.geometry.faces.iter().enumerate() {
-                let local = BulkGeometry { vertices: def.geometry.vertices.clone(), faces: vec![face.clone()], edges: vec![] };
+                let local = BulkGeometry {
+                    vertices: def.geometry.vertices.clone(),
+                    faces: vec![face.clone()],
+                    edges: vec![],
+                };
                 if let Err(error) = scaled(local).build(false, false) {
-                    let points: Vec<_> = std::iter::once(&face.outer).chain(&face.holes).flatten().map(|&v| def.geometry.vertices[v]*0.0254).collect();
+                    let points: Vec<_> = std::iter::once(&face.outer)
+                        .chain(&face.holes)
+                        .flatten()
+                        .map(|&v| def.geometry.vertices[v] * 0.0254)
+                        .collect();
                     let (center, normal, deviation, size) = crate::skp_plane::fit(&points);
-                    for a in 0..face.outer.len() { for b in a+1..face.outer.len() { let distance = (def.geometry.vertices[face.outer[a]]-def.geometry.vertices[face.outer[b]]).length()*0.0254; if distance <= cindral_core::TOLERANCE { eprintln!("WELD ring {a}/{b} indices {}/{} distance={distance:e}", face.outer[a], face.outer[b]); } }}
-                    let area = |ring: &[usize]| { let p = def.geometry.vertices[ring[0]]*0.0254; ring[1..].windows(2).map(|w| (def.geometry.vertices[w[0]]*0.0254-p).cross(def.geometry.vertices[w[1]]*0.0254-p).dot(normal)*0.5).sum::<f64>().abs() };
+                    for a in 0..face.outer.len() {
+                        for b in a + 1..face.outer.len() {
+                            let distance = (def.geometry.vertices[face.outer[a]]
+                                - def.geometry.vertices[face.outer[b]])
+                                .length()
+                                * 0.0254;
+                            if distance <= cindral_core::TOLERANCE {
+                                eprintln!(
+                                    "WELD ring {a}/{b} indices {}/{} distance={distance:e}",
+                                    face.outer[a], face.outer[b]
+                                );
+                            }
+                        }
+                    }
+                    let area = |ring: &[usize]| {
+                        let p = def.geometry.vertices[ring[0]] * 0.0254;
+                        ring[1..]
+                            .windows(2)
+                            .map(|w| {
+                                (def.geometry.vertices[w[0]] * 0.0254 - p)
+                                    .cross(def.geometry.vertices[w[1]] * 0.0254 - p)
+                                    .dot(normal)
+                                    * 0.5
+                            })
+                            .sum::<f64>()
+                            .abs()
+                    };
                     eprintln!("FACE id={:?} def={di} name={:?} tag={:?} index={fi} center={center:?} area={} vertices={} holes={} deviation={deviation:e} fraction={:e} rejection={error}", def.face_ids.get(&fi), def.name, def.face_assignments.get(&fi), area(&face.outer)-face.holes.iter().map(|h| area(h)).sum::<f64>(), points.len(), face.holes.len(), deviation/size);
-                    for (parent, d) in source.definitions.iter().enumerate() { for i in &d.instances { if i.definition==di {eprintln!("PARENT {parent} {:?} {:?}", i.name, i.transform);}}}
+                    for (parent, d) in source.definitions.iter().enumerate() {
+                        for i in &d.instances {
+                            if i.definition == di {
+                                eprintln!("PARENT {parent} {:?} {:?}", i.name, i.transform);
+                            }
+                        }
+                    }
                 }
             }
         }
-        let imported = crate::import_file(path, &crate::ImportOptions::default(), &ImportControl::default()).unwrap();
+        let imported = crate::import_file(
+            path,
+            &crate::ImportOptions::default(),
+            &ImportControl::default(),
+        )
+        .unwrap();
         eprintln!("SUMMARY {:?}", imported.report);
     }
 }
