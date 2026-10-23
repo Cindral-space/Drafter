@@ -1025,15 +1025,6 @@ impl DrafterApp {
         }
         if let Some(mut drag) = self.organization.drag.clone() {
             if keyboard {
-                let redo = ctx.input(|i| {
-                    shortcuts::pressed(i, shortcuts::Action::Redo)
-                });
-                let undo = ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
-                if undo || redo {
-                    self.organization.drag = None;
-                    self.history_step(redo);
-                    return true;
-                }
                 ctx.input(|i| {
                     for (key, axis) in [
                         (shortcuts::Action::AxisX, Axis::X),

@@ -151,7 +151,10 @@ impl DrafterApp {
         if !(ui.placing || ui.moving) {
             return false;
         }
-        if response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
+        if response
+            .ctx
+            .input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel))
+        {
             if let Some((original, _)) = ui.drag.take() {
                 if let Some(p) = self
                     .presentation

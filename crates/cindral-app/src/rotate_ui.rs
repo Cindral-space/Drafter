@@ -213,15 +213,6 @@ impl DrafterApp {
                 self.error = None;
                 return;
             }
-            let undo = ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
-            let redo = ctx.input(|i| {
-                shortcuts::pressed(i, shortcuts::Action::Redo)
-            });
-            if undo || redo {
-                self.cancel_modify();
-                self.history_step(redo);
-                return;
-            }
         }
         let copy_down = ctx.input(|i| {
             if cfg!(target_os = "macos") {
@@ -230,7 +221,11 @@ impl DrafterApp {
                 i.modifiers.ctrl
             }
         });
-        if !ctx.wants_keyboard_input() && copy_down && !self.rotate.copy_key_down {
+        if !ctx.wants_keyboard_input()
+            && self.measurements.text.is_empty()
+            && copy_down
+            && !self.rotate.copy_key_down
+        {
             self.rotate.copy = !self.rotate.copy;
             self.modify.set_rotation_copy(self.rotate.copy);
         }
@@ -318,7 +313,8 @@ impl DrafterApp {
                 _ => DVec3::Z,
             }
         };
-        if !ctx.wants_keyboard_input() && self.measurements.text.is_empty() && !self.modify.active() {
+        if !ctx.wants_keyboard_input() && self.measurements.text.is_empty() && !self.modify.active()
+        {
             ctx.input(|i| {
                 for (key, axis) in [
                     (shortcuts::Action::AxisZ, DVec3::Z),

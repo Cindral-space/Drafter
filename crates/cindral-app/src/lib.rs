@@ -148,7 +148,10 @@ impl DrafterApp {
         png.theme().apply(&cc.egui_ctx);
         let notice = shortcuts::first_launch_notice();
         Ok(Self {
-            shortcuts: shortcuts::Ui {notice, ..Default::default()},
+            shortcuts: shortcuts::Ui {
+                notice,
+                ..Default::default()
+            },
             modifying: true,
             #[cfg(target_os = "linux")]
             system_theme: theme::SystemTheme::start(cc.egui_ctx.clone()),
@@ -433,7 +436,7 @@ impl DrafterApp {
     }
 
     fn viewport_input(&mut self, response: &egui::Response) {
-        if self.tape_resize.is_some() {
+        if self.shortcuts.open || self.tape_resize.is_some() {
             return;
         }
         let rect = response.rect;
@@ -453,20 +456,35 @@ impl DrafterApp {
         if self.capture_measurement_keys(response) {
             return;
         }
-        self.route_shortcuts(response);
-        if self.shortcuts.open {return;}
-        if let Some(mode)=self.shortcuts.navigation {
+        if self.route_shortcuts(response) {
+            return;
+        }
+        if self.shortcuts.open {
+            return;
+        }
+        if let Some(mode) = self.shortcuts.navigation {
             if response.hovered() {
                 response.clone().on_hover_cursor(egui::CursorIcon::Grab);
-                let (delta,scroll)=response.ctx.input(|i|(i.pointer.delta(),i.smooth_scroll_delta.y));
-                if response.dragged_by(PointerButton::Primary) {match mode {
-                    shortcuts::Action::Orbit=>self.camera.orbit(Vec2::new(delta.x,delta.y)),
-                    shortcuts::Action::Pan=>self.camera.pan(Vec2::new(delta.x,delta.y),rect.height()),
-                    _=>self.camera.zoom(-delta.y,Vec2::ZERO,aspect),
-                }}
-                self.camera.zoom(scroll,Vec2::ZERO,aspect);
+                let (delta, scroll) = response
+                    .ctx
+                    .input(|i| (i.pointer.delta(), i.smooth_scroll_delta.y));
+                if response.dragged_by(PointerButton::Primary) {
+                    match mode {
+                        shortcuts::Action::Orbit => self.camera.orbit(Vec2::new(delta.x, delta.y)),
+                        shortcuts::Action::Pan => {
+                            self.camera.pan(Vec2::new(delta.x, delta.y), rect.height())
+                        }
+                        _ => self.camera.zoom(-delta.y, Vec2::ZERO, aspect),
+                    }
+                }
+                self.camera.zoom(scroll, Vec2::ZERO, aspect);
             }
-            if response.ctx.input(|i|shortcuts::pressed(i,shortcuts::Action::Cancel)) {self.shortcuts.navigation=None;}
+            if response
+                .ctx
+                .input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel))
+            {
+                self.shortcuts.navigation = None;
+            }
             return;
         }
         if self.section_input(response) {
@@ -508,7 +526,8 @@ impl DrafterApp {
             }
             return;
         }
-        let keyboard_free = !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
+        let keyboard_free =
+            !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
         response.ctx.input(|i| {
             if keyboard_free {
                 if shortcuts::pressed(i, shortcuts::Action::Cancel) {
@@ -542,14 +561,6 @@ impl DrafterApp {
                 }
                 if shortcuts::pressed(i, shortcuts::Action::AxisClear) {
                     self.axis_lock = None;
-                }
-                if shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo) {
-                    self.history_step(shortcuts::pressed(i, shortcuts::Action::Redo));
-                    return;
-                }
-                if shortcuts::pressed(i, shortcuts::Action::Redo) {
-                    self.history_step(true);
-                    return;
                 }
             }
             if let Some(position) = i.pointer.hover_pos() {
@@ -1190,3 +1201,6 @@ pub mod import_pushpull_benchmark;
 
 #[cfg(test)]
 mod draw_parity_tests;
+
+#[cfg(test)]
+mod shortcut_tests;

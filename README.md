@@ -64,17 +64,58 @@ The native window uses eframe/winit and wgpu. Linux requires a working Vulkan or
 WGPU_BACKEND=opengl cargo run -p cindral-app
 ```
 
-| Action | Input |
-| --- | --- |
-| Orbit | Middle mouse drag |
-| Pan | Shift + middle mouse drag |
-| Zoom around cursor | Scroll over viewport |
-| Fit model / construction area | F or Zoom extents |
-| Isometric / front / right / top | 0 / 1 / 3 / 7 |
-| Toggle projection | 5 |
-| All standard views | Camera |
+<!-- shortcuts:start -->
+| Category | Action | Binding | During operation |
+| --- | --- | --- | --- |
+| Tools | Select | Space | Yes |
+| Tools | Line | L | Yes |
+| Tools | Rectangle | R | Yes |
+| Tools | Circle | C | Yes |
+| Tools | Arc | A | Yes |
+| Tools | Polygon | N | Yes |
+| Tools | Push/Pull | P | Yes |
+| Tools | Move | M | Yes |
+| Tools | Rotate | Q | Yes |
+| Tools | Scale | S | Yes |
+| Tools | Offset | F | Yes |
+| Tools | Eraser | E | Yes |
+| Tools | Tape Measure | T | Yes |
+| Tools | Paint Bucket | B | Yes |
+| Navigation | Orbit | O | Yes |
+| Navigation | Pan | H | Yes |
+| Navigation | Zoom | Z | Yes |
+| Navigation | Fit model | Shift+Z | Yes |
+| Navigation | Iso | 0 | Idle only |
+| Navigation | Front | 1 | Idle only |
+| Navigation | Right | 3 | Idle only |
+| Navigation | Top | 7 | Idle only |
+| Navigation | Toggle projection | 5 | Idle only |
+| Actions | Undo | Ctrl+Z | Yes |
+| Actions | Redo | Ctrl+Y / Ctrl+Shift+Z | Yes |
+| Actions | Select all | Ctrl+A | Idle only |
+| Actions | Erase selection | Delete | Idle only |
+| Actions | Make Group | G | Idle only |
+| Files | Save | Ctrl+S | Yes |
+| Files | Open | Ctrl+O | Yes |
+| Files | Save As… | Ctrl+Shift+S | Yes |
+| Actions | Cancel | Escape | Yes |
+| Help | Shortcut help | F1 | Yes |
+| Constraints | Lock X | ArrowRight | Yes |
+| Constraints | Lock Y | ArrowLeft | Yes |
+| Constraints | Lock Z | ArrowUp | Yes |
+| Constraints | Clear axis lock | ArrowDown | Yes |
+| Tools | Copy | Unbound: Use the existing Copy button; M activates Move | Yes |
+| Tools | Follow Me | Unbound: No conventional default | Yes |
+| Tools | Section Plane | Unbound: Use the existing section panel; no conventional default | Idle only |
+| Measurements | Apply measurement | Enter | Yes |
+| Measurements | Edit measurement | Backspace | Yes |
+<!-- shortcuts:end -->
 
-Keyboard shortcuts apply while the pointer is over the viewport. Grid spacing is one meter. Extents fits model bounds, or the central 20 × 20 meter area when empty.
+Bindings are generated/checked against the central action registry. F1 opens searchable
+help; focused text editors and nonempty measurement entries keep their keys.
+See [shortcut behavior and verification questions](docs/SHORTCUTS.md).
+Mouse navigation is unchanged: middle drag orbits, Shift+middle drag pans, scroll zooms.
+Grid spacing is one meter; Fit uses model bounds or a central 20 × 20 meter area.
 
 For reproducible native GPU validation, run:
 

@@ -14,7 +14,10 @@ impl DrafterApp {
         if !accepts && self.measurements.text.is_empty() {
             return false;
         }
-        if response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) && !self.measurements.text.is_empty()
+        if response
+            .ctx
+            .input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel))
+            && !self.measurements.text.is_empty()
         {
             self.measurements.escape();
             self.error = None;
@@ -35,7 +38,11 @@ impl DrafterApp {
                 self.measurements.backspace();
             }
         });
-        if response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Apply)) && !self.measurements.text.is_empty() {
+        if response
+            .ctx
+            .input(|i| shortcuts::pressed(i, shortcuts::Action::Apply))
+            && !self.measurements.text.is_empty()
+        {
             self.apply_measurement();
             self.measurements.invalid = self.error.is_some();
             return true;
@@ -232,6 +239,29 @@ mod tests {
             vec![egui::Event::PointerMoved(egui::pos2(300., 200.))],
             egui::Modifiers::NONE,
         );
+        let releases = events
+            .iter()
+            .filter_map(|e| {
+                if let egui::Event::Key {
+                    key,
+                    physical_key,
+                    modifiers,
+                    ..
+                } = e
+                {
+                    Some(egui::Event::Key {
+                        key: *key,
+                        physical_key: *physical_key,
+                        pressed: false,
+                        repeat: false,
+                        modifiers: *modifiers,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        crate::input_tests::frame(app, ctx, releases, egui::Modifiers::NONE);
         crate::input_tests::frame(app, ctx, events, egui::Modifiers::NONE);
     }
     fn square() -> DrafterApp {

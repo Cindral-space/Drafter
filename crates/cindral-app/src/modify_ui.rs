@@ -129,8 +129,11 @@ impl DrafterApp {
                 * self.history.world_transform(),
             size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
         };
-        let keyboard_free = !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
-        let escape = response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel));
+        let keyboard_free =
+            !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
+        let escape = response
+            .ctx
+            .input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel));
         if keyboard_free && escape {
             self.cancel_modify();
             self.measurements.reset();
@@ -138,17 +141,6 @@ impl DrafterApp {
             return;
         }
         if keyboard_free {
-            let undo = response
-                .ctx
-                .input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
-            let redo = response.ctx.input(|i| {
-                shortcuts::pressed(i, shortcuts::Action::Redo)
-            });
-            if undo || redo {
-                self.cancel_modify();
-                self.history_step(redo);
-                return;
-            }
             response.ctx.input(|i| {
                 for (key, axis) in [
                     (shortcuts::Action::AxisX, Axis::X),
