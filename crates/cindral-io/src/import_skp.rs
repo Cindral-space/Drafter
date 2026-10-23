@@ -436,3 +436,30 @@ fn partition_tagged_geometry(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod diagnostics {
+    use super::*;
+    #[test]
+    fn private_face_diagnosis() {
+        let path = Path::new("/home/earl/Desktop/Cindral/Drafter/SKP/mybedroom.skp");
+        if !path.exists() { eprintln!("SKIP: private model absent"); return; }
+        let source = cindral_skp::read(&std::fs::read(path).unwrap()).unwrap();
+        eprintln!("SOURCE defs={} roots={} vertices={} edges={} faces={} placements={}", source.definitions.len(), source.roots.len(), source.definitions.iter().map(|d| d.geometry.vertices.len()).sum::<usize>(), source.definitions.iter().map(|d| d.geometry.edges.len()).sum::<usize>(), source.definitions.iter().map(|d| d.geometry.faces.len()).sum::<usize>(), source.definitions.iter().map(|d| d.instances.len()).sum::<usize>());
+        for (di, def) in source.definitions.iter().enumerate() {
+            for (fi, face) in def.geometry.faces.iter().enumerate() {
+                let local = BulkGeometry { vertices: def.geometry.vertices.clone(), faces: vec![face.clone()], edges: vec![] };
+                if let Err(error) = scaled(local).build(false, false) {
+                    let points: Vec<_> = std::iter::once(&face.outer).chain(&face.holes).flatten().map(|&v| def.geometry.vertices[v]*0.0254).collect();
+                    let (center, normal, deviation, size) = crate::skp_plane::fit(&points);
+                    for a in 0..face.outer.len() { for b in a+1..face.outer.len() { let distance = (def.geometry.vertices[face.outer[a]]-def.geometry.vertices[face.outer[b]]).length()*0.0254; if distance <= cindral_core::TOLERANCE { eprintln!("WELD ring {a}/{b} indices {}/{} distance={distance:e}", face.outer[a], face.outer[b]); } }}
+                    let area = |ring: &[usize]| { let p = def.geometry.vertices[ring[0]]*0.0254; ring[1..].windows(2).map(|w| (def.geometry.vertices[w[0]]*0.0254-p).cross(def.geometry.vertices[w[1]]*0.0254-p).dot(normal)*0.5).sum::<f64>().abs() };
+                    eprintln!("FACE id={:?} def={di} name={:?} tag={:?} index={fi} center={center:?} area={} vertices={} holes={} deviation={deviation:e} fraction={:e} rejection={error}", def.face_ids.get(&fi), def.name, def.face_assignments.get(&fi), area(&face.outer)-face.holes.iter().map(|h| area(h)).sum::<f64>(), points.len(), face.holes.len(), deviation/size);
+                    for (parent, d) in source.definitions.iter().enumerate() { for i in &d.instances { if i.definition==di {eprintln!("PARENT {parent} {:?} {:?}", i.name, i.transform);}}}
+                }
+            }
+        }
+        let imported = crate::import_file(path, &crate::ImportOptions::default(), &ImportControl::default()).unwrap();
+        eprintln!("SUMMARY {:?}", imported.report);
+    }
+}

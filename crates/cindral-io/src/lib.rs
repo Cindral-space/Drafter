@@ -188,6 +188,7 @@ mod import_dae;
 pub use import_dae::{import_dae, import_dae_bytes};
 
 mod import_skp;
+mod skp_plane;
 pub use import_skp::{import_skp, import_skp_bytes};
 
 mod export_dae;

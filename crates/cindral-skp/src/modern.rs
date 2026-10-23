@@ -203,6 +203,7 @@ fn text(bytes: &[u8]) -> String {
 
 #[derive(Default)]
 struct RawFace {
+    id: u64,
     loops: Vec<Vec<(u64, bool)>>,
     material: Option<u64>,
     layer: Option<u64>,
@@ -416,7 +417,7 @@ impl Reader {
             self.scene.warn("face without entity id skipped");
             return;
         }
-        let mut face = RawFace::default();
+        let mut face = RawFace { id: entity_id(el).unwrap_or_default(), ..Default::default() };
         if let Some(loops) = find(&el.children, T_FACE_LOOPS) {
             let mut loop_nodes = Vec::new();
             find_all(&loops.children, T_LOOP, &mut loop_nodes);
@@ -793,6 +794,7 @@ struct Resolver<'r> {
 fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definition {
     let mut geometry = BulkGeometry::default();
     let mut face_assignments = BTreeMap::new();
+    let mut face_ids = BTreeMap::new();
     let mut edge_tags = BTreeMap::new();
     let mut vertex_index = HashMap::with_capacity(b.vertices.len());
     for (id, p) in b.vertices {
@@ -884,6 +886,7 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
                 face.hidden,
             ),
         );
+        face_ids.insert(geometry.faces.len(), face.id);
         geometry.faces.push(BulkFace {
             outer,
             holes: rings,
@@ -928,6 +931,7 @@ fn build(b: Builder, name: String, r: &Resolver, scene: &mut Scene) -> Definitio
         geometry,
         instances,
         face_assignments,
+        face_ids,
         edge_tags,
     }
 }

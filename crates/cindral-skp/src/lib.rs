@@ -30,6 +30,8 @@ pub struct Definition {
     pub instances: Vec<Instance>,
     /// Face index to explicit tag/hidden state; absent means inherited and visible.
     pub face_assignments: BTreeMap<usize, (Option<usize>, bool)>,
+    /// Source entity IDs keyed by authored face index (when available).
+    pub face_ids: BTreeMap<usize, u64>,
     /// Explicit loose-edge tag assignments, indexed in geometry.edges.
     pub edge_tags: BTreeMap<usize, usize>,
 }
