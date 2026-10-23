@@ -181,7 +181,7 @@ See [component measurements](docs/COMPONENT_BENCHMARK.md) and [connected-solid m
 
 ## Files and interchange (M6)
 
-Use **File** to create/open/save `.cdraft`, import OBJ/glTF/GLB/COLLADA, export OBJ/STL/glTF 2/COLLADA (.dae), and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup opens the Inspector’s Recovery tab when retained crash snapshots exist. File → Recovery snapshots opens the same tab; closing it keeps the snapshots. The newest snapshots appear first, with saved-age details, Recover and Delete permanently actions.
+Use **File** to create/open/save `.cdraft`, import OBJ/glTF/GLB/COLLADA, export OBJ/STL/glTF 2/COLLADA (.dae), and recover autosaves. Ctrl+O opens, Ctrl+S saves and Ctrl+Shift+S uses Save As. Opening fits visible geometry and starts fresh undo/redo history at root. Manual saves and recovery snapshots use atomic ZIP writes; changed committed values autosave every 30 seconds in the background. Startup opens the Inspector’s Recovery tab when retained crash snapshots exist. File → Recovery snapshots opens the same tab; closing it keeps the snapshots. The newest snapshots appear first, with saved-age details, Recover and compact × delete actions (hover for the permanent-deletion tooltip).
 
 Imports append as one undo step, with component/loose geometry and coplanar cleanup options, background progress, cancellation and a summary. See the [import pipeline and limits](docs/IMPORT_PIPELINE.md).
 

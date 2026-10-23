@@ -704,7 +704,11 @@ impl DrafterApp {
                     action = Some(Action::Recover(path.clone()));
                 }
                 if ui
-                    .small_button("Delete permanently")
+                    .add(
+                        egui::Button::new("×")
+                            .frame(false)
+                            .min_size(egui::vec2(28., 28.)),
+                    )
                     .on_hover_text("Permanently delete this recovery snapshot")
                     .clicked()
                 {

@@ -88,3 +88,8 @@ Validation: native compact captures of File and Tools (`.agent-out/ui-review/dro
 ## Recovery Inspector — 2026-10-23
 
 Recovery now shares the right Inspector with Model and Appearance. Startup selects Recovery once when retained snapshots exist; File → Recovery snapshots refreshes and opens that tab. Its count is visible in the tab label, and entries sort by modification time newest first. Generated files have readable numbered labels, manually named snapshots use their filename stem, saved-age text identifies recency, and hover exposes the full path. The list scrolls with the Inspector. Closing the Inspector preserves files; permanent deletion uses an explicit secondary button. Successful recovery returns to Model, opens unsaved values with fresh history, and retains the source snapshot. The Inspector width accommodates all three tabs. Close-time recovery-write failures retain their decision dialog. Original draft titles and exact calendar timestamps are not available in this UI.
+
+
+### Compact recovery delete action — 2026-10-24
+
+Per user preference, snapshot deletion now uses a frameless × with a 28 px minimum target beside Recover. Its tooltip states “Permanently delete this recovery snapshot.” The Inspector’s header × still closes the panel and preserves snapshots.
