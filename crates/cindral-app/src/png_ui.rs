@@ -229,7 +229,7 @@ impl DrafterApp {
                         ui.label("512 MiB export budget. Maximum render dimension: 8192 pixels, including antialiasing. Scene data is checked before rendering.");
                     });
                     ui.separator();
-                    if ui.add_enabled(state.options.estimate(0).is_ok(), egui::Button::new("Choose file and export…")).clicked() {
+                    if ui.add_enabled(state.options.estimate(0).is_ok(), egui::Button::new("Export…")).clicked() {
                         export = true;
                     }
                 });

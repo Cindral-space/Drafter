@@ -476,3 +476,7 @@
 - Exercised the production desktop worker entry point: success, refusal to overwrite without permission, replacement with permission, cancellation immediately after start, and continuation after a forced settings-save failure. Verified successful PNG signatures and 640×720 dimensions, unchanged sentinel destination on refusal, no output on cancellation and no remaining temporary files. Settings-failure instrumentation repeats the UI save-warning expression then calls the production worker; the native file chooser and replacement confirmation prompt themselves were not exercised.
 - Fixed two issues identified during native visual verification: use theme error/warning colors for light-theme legibility, and provide vertical scrolling with a viewport-bounded default height so the lower controls remain reachable on small screens. Re-captured normal and compact windows after these changes. Source fixtures were synthetic; no private model was used.
 - Final validation: formatting and strict workspace/all-target/all-feature Clippy pass; full workspace/all-feature suite passes: **476 passed, 0 failed, 45 ignored workloads**.
+
+## 2026-10-23 — PNG export action label
+
+- Renamed the PNG dialog action to “Export…” as requested; the ellipsis indicates that destination selection follows. Behavior is unchanged. Formatting, strict workspace/all-target/all-feature Clippy and full workspace/all-feature tests pass.
