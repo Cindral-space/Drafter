@@ -231,6 +231,7 @@ struct DefinitionState {
 }
 
 struct OffscreenTarget {
+    color: wgpu::Texture,
     size: [u32; 2],
     color_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -367,6 +368,7 @@ fn create_materials_texture_array(
 }
 
 impl SceneRenderer {
+    pub(crate) fn capture_texture(&self) -> &wgpu::Texture { &self.offscreen.color }
     /// Creates pipelines, shared shaders, and initial offscreen targets for the
     /// viewport's color `format` and MSAA `samples`.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
@@ -1449,6 +1451,7 @@ fn create_offscreen_target(
         ],
     });
     OffscreenTarget {
+        color,
         size,
         color_view,
         depth_view,

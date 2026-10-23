@@ -438,3 +438,9 @@
 - One bounded read-only Antigravity review (`agy`, gemini-3.8-flash-high, high effort, 60-second print/80-second external timeout) timed out without findings; implemented and verified locally without retry or accepted delegated output. OpenCode remained disabled. Pre-existing `.gitignore` edit preserved/excluded. No importer changes, SDK/assets, dependencies, benchmarks, remote push or native app restart. Native window interaction and the user's exact scene remain unverified; no new performance claim.
 - Completion validation: focused core/tool/app eraser regressions pass. Formatting, strict workspace/all-target/all-feature Clippy and whitespace checks pass. One full `cargo test --workspace --all-features --quiet` run passed: **450 passed, 0 failed, 45 ignored across 52 targets**.
 - `cargo build -p cindral-app --quiet` passed and rebuilt `target/debug/cindral-app`; the running app was not restarted.
+
+## 2026-10-23 — PNG current-view export
+
+- Step 0: read rules, requested Top 10/roadmap, architecture and recent log. Isolated `agent/png-export` worktree from main; original `.gitignore` preserved, OpenCode disabled. Existing scene target/capture/file dialogs and vertical-FOV fit inspected only.
+- Item 1: production SceneRenderer target readback, bounded dimensions, 256-byte row removal and top-left orientation test. No duplicate draw pipelines. `cargo check -p cindral-render` passes. App export integration/validation follows.
+- One bounded Antigravity docs task (`gemini-3.8-flash-high`, high effort, 120-second print/140-second process deadline) timed out without deliverable; documentation completed locally, no retry or further delegation.
