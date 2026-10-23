@@ -524,3 +524,7 @@
 
 - Added persisted document angle snap increment (15° default; units/precision context menu exposes 1–90°). Shared sweep math snaps in the explicit radial annulus [0.75, 1.25] × protractor radius and stays free outside, including farther-pointer fine control. Added filled angle wedge and retained shared live Angle readout. Targeted app check passes; threshold tests follow.
 - The single bulk-test Antigravity request used gemini-3.8-flash-high/high effort, 20s internal/25s external deadline. It timed out without a file; no retry or delegated output accepted. Remaining tests will be written locally.
+
+### Rotate item 10 — typed angles and slopes
+
+- Retained shared degrees/radians parsing, center-only application, invalid-input state and absolute completed replacement. Slope now uses atan(rise/run), including negative denominators, and rejects zero run. Added actual-kernel tests for all requested signed/slope forms, repeated replacement, invalid preservation, exact undo/redo and cancellation at each session stage; arbitrary-plane inverse rotation proptest and ring threshold checks. Targeted tools test-target check passes; execution follows targeted test runs.

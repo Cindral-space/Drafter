@@ -201,7 +201,7 @@ pub fn parse(input: &str, settings: MeasurementSettings) -> Result<Measurement, 
         if b == 0. {
             return Err(invalid(s));
         }
-        return Ok(Measurement::Slope(a.atan2(b).to_degrees()));
+        return Ok(Measurement::Slope((a / b).atan().to_degrees()));
     }
     let coordinates = s.starts_with('[') || s.starts_with('<');
     let body = if coordinates {
