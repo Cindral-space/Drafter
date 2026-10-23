@@ -716,6 +716,7 @@ impl ModifySession {
                     matrix,
                     copy: self.rotation_copy,
                 };
+                if self.last_command.as_ref() == Some(&cmd) { return Ok(None); }
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
             }

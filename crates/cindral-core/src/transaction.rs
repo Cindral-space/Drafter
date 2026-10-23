@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct ChangeSet {
     /// Monotonic document revision of this change.
     pub revision: u64,
-    /// Only a topology-preserving whole-definition translation changed positions.
+    /// Only a topology-preserving whole-definition transform changed positions.
+    /// Historical field name; includes context-conjugated rigid rotations.
     pub rigid_translation: bool,
     /// Added, changed or removed vertices.
     pub vertices: BTreeSet<VertexId>,
@@ -532,7 +533,7 @@ impl Delta {
     pub fn is_empty(&self) -> bool {
         self.translation
             .as_ref()
-            .is_none_or(|t| t.offset == DVec3::ZERO)
+            .is_none_or(|t| t.matrix == glam::DMat4::IDENTITY)
             && self.vertices.is_empty()
             && self.edges.is_empty()
             && self.faces.is_empty()

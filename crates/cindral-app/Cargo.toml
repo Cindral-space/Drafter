@@ -78,3 +78,7 @@ required-features = ["kernel-benchmark"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+
+[[example]]
+name = "rotate_benchmark"
+required-features = ["kernel-benchmark"]

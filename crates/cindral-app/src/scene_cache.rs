@@ -14,8 +14,8 @@ pub(crate) struct SceneCache {
     meshes: BTreeMap<DefinitionId, MeshCache>,
     occurrences: Vec<Occurrence>,
     initialized: bool,
-    baselines: BTreeMap<DefinitionId, cindral_core::DVec3>,
-    placements: BTreeMap<DefinitionId, cindral_core::DVec3>,
+    baselines: BTreeMap<DefinitionId, glam::DMat4>,
+    placements: BTreeMap<DefinitionId, glam::DMat4>,
     revision: Option<u64>,
     texture_layers: BTreeMap<String, u32>,
     textures: Option<Arc<Vec<cindral_render::texture::TexturePixels>>>,
@@ -113,17 +113,17 @@ impl SceneCache {
                     style(doc, face_id, face, &self.texture_layers)
                 })?;
                 entry.insert(cache);
-                self.baselines.insert(*id, model.translation_offset());
-                self.placements.insert(*id, cindral_core::DVec3::ZERO);
+                self.baselines.insert(*id, model.geometry_frame());
+                self.placements.insert(*id, glam::DMat4::IDENTITY);
                 update.geometry.push(DefinitionUpdate {
                     definition: *id,
                     mesh: Arc::new(mesh),
                 });
                 continue;
             }
-            let offset =
-                model.translation_offset() - self.baselines.get(id).copied().unwrap_or_default();
-            translated |= self.placements.insert(*id, offset) != Some(offset);
+            let placement = model.geometry_frame() * self.baselines.get(id).copied().unwrap_or(glam::DMat4::IDENTITY).inverse();
+            translated |= self.placements.insert(*id, placement) != Some(placement);
+            let offset = placement.w_axis.truncate();
             let dirty = changes.geometry.get(id);
             if dirty.is_some_and(|d| d.rigid_translation)
                 && !changes.appearance
@@ -132,6 +132,15 @@ impl SceneCache {
                 continue;
             }
             if dirty.is_some() || changes.appearance || textures_changed {
+                if placement.x_axis != glam::DVec4::X || placement.y_axis != glam::DVec4::Y || placement.z_axis != glam::DVec4::Z {
+                    let (cache,mesh)=MeshCache::rebuild_styled(model,&|face_id,face| style(doc,face_id,face,&self.texture_layers))?;
+                    self.meshes.insert(*id,cache);
+                    self.baselines.insert(*id,model.geometry_frame());
+                    self.placements.insert(*id,glam::DMat4::IDENTITY);
+                    translated=true;
+                    update.geometry.push(DefinitionUpdate {definition:*id,mesh:Arc::new(mesh)});
+                    continue;
+                }
                 let mut faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
                 let edges = dirty
                     .map(|d| d.edges.iter().copied().collect::<Vec<_>>())
@@ -165,12 +174,7 @@ impl SceneCache {
             let mut batches: BTreeMap<DefinitionId, Vec<InstanceData>> = BTreeMap::new();
             for item in &self.occurrences {
                 let world = (item.world
-                    * glam::DMat4::from_translation(
-                        self.placements
-                            .get(&item.definition)
-                            .copied()
-                            .unwrap_or_default(),
-                    ))
+                    * self.placements.get(&item.definition).copied().unwrap_or(glam::DMat4::IDENTITY))
                 .as_mat4();
                 if !world.is_finite() {
                     return Err(KernelError::InvalidPosition);

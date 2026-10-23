@@ -103,9 +103,13 @@ impl Default for Model {
 }
 
 impl Model {
+    /// Runtime affine spatial/geometry cache frame, never serialized.
+    pub fn geometry_frame(&self) -> glam::DMat4 {
+        self.spatial.as_ref().map_or(glam::DMat4::IDENTITY, |s| glam::DMat4::from_translation(s.offset)*s.basis)
+    }
     /// Runtime translation of the spatial coordinate frame (never serialized).
     pub fn translation_offset(&self) -> DVec3 {
-        self.spatial.as_ref().map_or(DVec3::ZERO, |s| s.offset)
+        self.geometry_frame().w_axis.truncate()
     }
     /// All vertices; no mutable map is exposed.
     pub fn vertices(&self) -> &BTreeMap<VertexId, Vertex> {

@@ -1,0 +1,16 @@
+2026-10-23, Ryzen 5 2400G / AMD Vega 11 / OpenGL / Mesa 26.2.3.
+Private file loaded headlessly through production SKP importer; no private content included.
+Initial real-file selected occurrence sweep, 60 frames, CPU inference/scene/UI/tessellation:
+mean=0.661 ms p95=0.906 ms max=1.075 ms, GPU=false.
+Initial GPU-completed run (same selected occurrence, 60 frames):
+mean=6.433 ms p95=8.868 ms max=9.619 ms, GPU=true.
+Rerun with explicit established-reference and actual-placement-change assertions:
+mean=2.948 ms p95=4.343 ms max=5.108 ms, GPU=true.
+Both GPU runs obtained AMD Radeon Vega 11 Graphics, GL backend.
+Maximum across these real-file runs: 9.619 ms. No vsync/native presentation included.
+Synthetic whole-definition 19,600 faces / 39,200 selected vertices / 40 previews:
+kernel mean=1.867 ms max=8.114 ms commit=0.005 ms.
+Synthetic excludes inference, UI, meshing, upload and GPU. Validity, subsequent indexed edit,
+exact geometry cancel/undo/redo and single history entry assertions passed.
+External hard timeouts: 90 seconds real-file runs; 60 seconds synthetic execution.
+Build time excluded; first-placement setup/loading excluded from sweep samples.

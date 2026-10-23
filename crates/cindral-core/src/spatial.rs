@@ -18,6 +18,7 @@ impl<I: Copy + PartialEq> RTreeObject for Item<I> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Spatial {
     pub offset: DVec3,
+    pub basis: glam::DMat4,
     vertices: RTree<Item<VertexId>>,
     edges: RTree<Item<EdgeId>>,
     faces: RTree<Item<FaceId>>,
@@ -105,10 +106,10 @@ pub(crate) fn expanded(bounds: AABB<[f64; 3]>) -> AABB<[f64; 3]> {
 }
 impl Spatial {
     fn local_bounds(&self, bounds: AABB<[f64; 3]>) -> AABB<[f64; 3]> {
-        AABB::from_corners(
-            (DVec3::from_array(bounds.lower()) - self.offset).to_array(),
-            (DVec3::from_array(bounds.upper()) - self.offset).to_array(),
-        )
+        let inverse = self.basis.inverse();
+        let low=DVec3::from_array(bounds.lower())-self.offset;
+        let high=DVec3::from_array(bounds.upper())-self.offset;
+        envelope([low.x,high.x].into_iter().flat_map(|x| [low.y,high.y].into_iter().flat_map(move |y| [low.z,high.z].into_iter().map(move |z| inverse.transform_point3(DVec3::new(x,y,z)))))).expect("eight bounds corners")
     }
     #[tracing::instrument(level = "info", skip_all, name = "spatial.build")]
     pub fn build(model: &Model) -> Result<Self, KernelError> {
@@ -137,8 +138,8 @@ impl Spatial {
         let mut ids = self
             .faces
             .locate_with_selection_function(RaySelection {
-                origin: origin - self.offset,
-                direction,
+                origin: self.basis.inverse().transform_point3(origin - self.offset),
+                direction: self.basis.inverse().transform_vector3(direction),
                 max_distance,
             })
             .map(|item| item.id)
@@ -162,47 +163,38 @@ impl Spatial {
         self.pairs.contains_key(&pair)
     }
     pub fn vertices_near(&self, p: DVec3) -> Vec<VertexId> {
-        let local = p - self.offset;
-        let bounds = expanded(expanded(AABB::from_point(local.to_array())));
+        let bounds = expanded(self.local_bounds(expanded(AABB::from_point(p.to_array()))));
         self.vertices
             .locate_in_envelope_intersecting(&bounds)
             .map(|item| item.id)
             .collect()
     }
+    fn local_point(&self,p:DVec3)->DVec3 { self.basis.inverse().transform_point3(p-self.offset) }
+    fn indexed_edge_bounds(&self,edge:&Edge,model:&Model)->Result<AABB<[f64;3]>,KernelError> {
+        envelope(edge.vertices.iter().map(|id| model.position(*id).map(|p| self.local_point(p))).collect::<Result<Vec<_>,_>>()?).ok_or(KernelError::MissingEntity)
+    }
+    fn indexed_face_bounds(&self,face:&Face,model:&Model)->Result<AABB<[f64;3]>,KernelError> {
+        envelope(face.outer.iter().map(|id| model.position(*id).map(|p| self.local_point(p))).collect::<Result<Vec<_>,_>>()?).ok_or(KernelError::MissingEntity)
+    }
     pub fn add_vertex(&mut self, id: VertexId, p: DVec3) {
         self.vertices.insert(Item {
             id,
-            bounds: AABB::from_point((p - self.offset).to_array()),
+            bounds: AABB::from_point(self.local_point(p).to_array()),
         });
     }
     pub fn remove_vertex(&mut self, id: VertexId, p: DVec3) {
+        let point = self.local_point(p);
         remove_item(
             &mut self.vertices,
             id,
-            AABB::from_point((p - self.offset).to_array()),
+            AABB::from_point(point.to_array()),
         );
         self.adjacency.remove(&id);
-    }
-    pub fn edge_bounds(edge: &Edge, model: &Model) -> Result<AABB<[f64; 3]>, KernelError> {
-        envelope([
-            model.position(edge.vertices[0])?,
-            model.position(edge.vertices[1])?,
-        ])
-        .ok_or(KernelError::MissingEntity)
-    }
-    pub fn face_bounds(face: &Face, model: &Model) -> Result<AABB<[f64; 3]>, KernelError> {
-        envelope(
-            face.outer
-                .iter()
-                .map(|id| model.position(*id))
-                .collect::<Result<Vec<_>, _>>()?,
-        )
-        .ok_or(KernelError::MissingEntity)
     }
     pub fn add_edge(&mut self, id: EdgeId, edge: &Edge, model: &Model) -> Result<(), KernelError> {
         self.edges.insert(Item {
             id,
-            bounds: self.local_bounds(Self::edge_bounds(edge, model)?),
+            bounds: self.indexed_edge_bounds(edge, model)?,
         });
         self.pairs.insert(edge.vertices, id);
         for vertex in edge.vertices {
@@ -216,7 +208,7 @@ impl Spatial {
         edge: &Edge,
         model: &Model,
     ) -> Result<(), KernelError> {
-        let bounds = self.local_bounds(Self::edge_bounds(edge, model)?);
+        let bounds = self.indexed_edge_bounds(edge, model)?;
         remove_item(&mut self.edges, id, bounds);
         self.pairs.remove(&edge.vertices);
         for vertex in edge.vertices {
@@ -230,7 +222,7 @@ impl Spatial {
     pub fn add_face(&mut self, id: FaceId, face: &Face, model: &Model) -> Result<(), KernelError> {
         self.faces.insert(Item {
             id,
-            bounds: self.local_bounds(Self::face_bounds(face, model)?),
+            bounds: self.indexed_face_bounds(face, model)?,
         });
         self.face_keys.insert(face_key(face), id);
         let mut edges = BTreeSet::new();
@@ -252,7 +244,7 @@ impl Spatial {
         face: &Face,
         model: &Model,
     ) -> Result<(), KernelError> {
-        let bounds = self.local_bounds(Self::face_bounds(face, model)?);
+        let bounds = self.indexed_face_bounds(face, model)?;
         remove_item(&mut self.faces, id, bounds);
         self.face_keys.remove(&face_key(face));
         if let Some(edges) = self.face_edges.remove(&id) {
@@ -268,7 +260,14 @@ impl Spatial {
 
 impl Spatial {
     pub fn validate(&self, model: &Model) -> Result<(), KernelError> {
-        let expected = Self::build(model)?;
+        let mut local;
+        let expected = if self.basis != glam::DMat4::IDENTITY {
+            local = model.clone();
+            local.spatial = None;
+            let inverse = self.basis.inverse();
+            for v in local.vertices.values_mut() { v.position = inverse.transform_point3(v.position-self.offset); }
+            Self::build(&local)?
+        } else { Self::build(model)? };
         let vertices = |tree: &RTree<Item<VertexId>>| {
             tree.iter()
                 .map(|i| (i.id, i.bounds))
@@ -299,7 +298,7 @@ impl Spatial {
         let mut expected = expected;
         expected.offset = self.offset;
         // Compare index envelopes in their shared local frame, not world space.
-        if self.offset != DVec3::ZERO {
+        if self.offset != DVec3::ZERO && self.basis == glam::DMat4::IDENTITY {
             let shift = |b: AABB<[f64; 3]>| self.local_bounds(b);
             expected.vertices = RTree::bulk_load(
                 expected
