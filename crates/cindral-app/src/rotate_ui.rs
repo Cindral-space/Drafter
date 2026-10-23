@@ -11,6 +11,7 @@ pub(crate) struct RotateUi {
     point: Option<DVec3>,
     normal: Option<DVec3>,
     inferred: bool,
+    has_loose: bool,
     lock: Option<DVec3>,
     held: Option<DVec3>,
     radius: f64,
@@ -48,6 +49,7 @@ impl DrafterApp {
     }
     fn rotate_preview(&mut self, command: Command) {
         let result = match self.rotate_command(command.clone()) {
+            Ok(Some(placement)) if self.rotate.has_loose => self.history.preview_selection_transform(self.rotate_local_command(command),placement),
             Ok(Some(Org::Transform { path, transform })) => self.history.preview_instance_transform(&path, transform),
             Ok(Some(Org::Duplicate { path, transform })) => self.history.preview_duplicate(&path, transform),
             Ok(None) => self.history.preview(self.rotate_local_command(command)),
@@ -64,6 +66,8 @@ impl DrafterApp {
         match result {
             Ok(Some(command)) => {
                 let result = match self.rotate_command(command.clone()) {
+                    Ok(Some(placement)) if self.rotate.has_loose && replacing => self.history.replace_selection_transform(self.rotate_local_command(command),placement),
+                    Ok(Some(placement)) if self.rotate.has_loose => self.history.preview_selection_transform(self.rotate_local_command(command),placement).and_then(|_| self.history.commit_preview()),
                     Ok(Some(command)) if replacing => self.history.replace_organization(command),
                     Ok(Some(command)) => self.history.organization(command),
                     Ok(None) if replacing => self.history.replace_last(self.rotate_local_command(command)),
@@ -159,6 +163,7 @@ impl DrafterApp {
                 });
                 if vertices.is_empty() && instance.is_none() { self.error = Some("Select objects to rotate".into()); return; }
                 if let Some(p) = point {
+                    self.rotate.has_loose = !vertices.is_empty();
                     self.rotate.instance = instance;
                     self.rotate.reference_set = false;
                     self.measurements.reset();
@@ -231,4 +236,101 @@ impl DrafterApp {
 fn rotate_basis(normal: DVec3) -> (DVec3,DVec3) {
     let u = normal.cross(if normal.z.abs()<0.9 { DVec3::Z } else { DVec3::Y }).normalize();
     (u,normal.cross(u))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cindral_core::{DefinitionKind, DefinitionId};
+    fn fixture() -> (DrafterApp,egui::Context) {
+        let mut app=DrafterApp::default();
+        app.execute(Command::AddPolyline {points:vec![DVec3::ZERO,DVec3::X,DVec3::X+DVec3::Y,DVec3::Y],closed:true}).unwrap();
+        app.selection.vertices=app.model().vertices().keys().copied().collect();
+        app.camera.set_view(StandardView::Top);
+        app.choose_modify(ModifyKind::Rotate);
+        (app,egui::Context::default())
+    }
+    fn frame(app:&mut DrafterApp,ctx:&egui::Context,events:Vec<egui::Event>,modifiers:egui::Modifiers) { crate::input_tests::frame(app,ctx,events,modifiers); }
+    fn position(app:&DrafterApp,p:DVec3)->egui::Pos2 {
+        let p=View {matrix:app.camera.view_projection(1.5).as_dmat4(),size:DVec2::new(600.,400.)}.project(p).unwrap();
+        egui::pos2(p.x as f32+8.,p.y as f32+8.)
+    }
+    fn click(app:&mut DrafterApp,ctx:&egui::Context,p:DVec3) {
+        let pos=position(app,p);frame(app,ctx,vec![egui::Event::PointerMoved(pos)],egui::Modifiers::NONE);
+        for pressed in [true,false] {frame(app,ctx,vec![egui::Event::PointerButton {pos,pressed,button:PointerButton::Primary,modifiers:egui::Modifiers::NONE}],egui::Modifiers::NONE);}
+    }
+    fn key(app:&mut DrafterApp,ctx:&egui::Context,key:Key) {
+        for pressed in [true,false] {frame(app,ctx,vec![egui::Event::Key {key,physical_key:None,pressed,repeat:false,modifiers:egui::Modifiers::NONE}],egui::Modifiers::NONE);}
+    }
+    fn typed(app:&mut DrafterApp,text:&str) {app.measurements.text=text.into();app.apply_measurement();assert!(app.error.is_none(),"{text}: {:?}",app.error);}
+    #[test]
+    fn three_clicks_center_only_typing_reentry_and_escape() {
+        let (mut app,ctx)=fixture();let before=app.model().clone();let depth=app.history.undo_depth();
+        click(&mut app,&ctx,DVec3::ZERO);assert!(app.modify.active());assert!(!app.rotate.reference_set);assert_eq!(app.model(),&before);
+        click(&mut app,&ctx,DVec3::X);assert!(app.rotate.reference_set);assert_eq!(app.model(),&before);
+        let p=position(&app,DVec3::Y*3.);frame(&mut app,&ctx,vec![egui::Event::PointerMoved(p)],egui::Modifiers::NONE);
+        assert_ne!(app.model(),&before);assert_eq!(app.history.undo_depth(),depth);
+        click(&mut app,&ctx,DVec3::Y*3.);assert!(!app.modify.active());assert_eq!(app.history.undo_depth(),depth+1);
+        typed(&mut app,"45");let result=app.model().clone();typed(&mut app,"45");assert_eq!(app.model(),&result);
+        app.history_step(false);assert_eq!(app.model(),&before);app.history_step(true);assert_eq!(app.model(),&result);
+        app.selection.vertices=app.model().vertices().keys().copied().collect();
+        app.choose_modify(ModifyKind::Rotate);click(&mut app,&ctx,DVec3::ZERO);typed(&mut app,"-22.5");assert_eq!(app.history.undo_depth(),depth+2);
+        for stage in 0..3 {
+            app.choose_modify(ModifyKind::Rotate);let before=app.model().clone();let depth=app.history.undo_depth();
+            if stage>0 {click(&mut app,&ctx,DVec3::ZERO);}
+            if stage>1 {click(&mut app,&ctx,DVec3::X*3.);let p=position(&app,DVec3::Y*3.);frame(&mut app,&ctx,vec![egui::Event::PointerMoved(p)],egui::Modifiers::NONE);}
+            app.measurements.text="garbage".into();key(&mut app,&ctx,Key::Escape);assert!(app.measurements.text.is_empty());
+            key(&mut app,&ctx,Key::Escape);assert_eq!(app.model(),&before);assert_eq!(app.history.undo_depth(),depth);assert!(!app.modify.active());
+        }
+    }
+    #[test]
+    fn locks_copy_toggle_and_no_hover_target() {
+        let (mut app,ctx)=fixture();let pos=position(&app,DVec3::ZERO);frame(&mut app,&ctx,vec![egui::Event::PointerMoved(pos)],egui::Modifiers::NONE);
+        for (k,n) in [(Key::ArrowUp,DVec3::Z),(Key::ArrowRight,DVec3::X),(Key::ArrowLeft,DVec3::Y)] {
+            key(&mut app,&ctx,k);assert!(app.rotate.lock.unwrap().abs_diff_eq(n,1e-9));key(&mut app,&ctx,k);assert!(app.rotate.lock.is_none());
+        }
+        key(&mut app,&ctx,Key::ArrowDown);assert!(app.rotate.lock.is_some());key(&mut app,&ctx,Key::ArrowDown);assert!(app.rotate.lock.is_none());
+        let copy=if cfg!(target_os="macos") {egui::Modifiers {alt:true,..Default::default()}} else {egui::Modifiers {ctrl:true,..Default::default()}};
+        frame(&mut app,&ctx,vec![],copy);assert!(app.rotate.copy);frame(&mut app,&ctx,vec![],egui::Modifiers::NONE);frame(&mut app,&ctx,vec![],copy);assert!(!app.rotate.copy);
+        app.selection.clear();click(&mut app,&ctx,DVec3::ZERO);assert!(!app.modify.active());assert_eq!(app.rotate_hint(),"Select objects to rotate");
+    }
+    #[test]
+    fn mixed_loose_and_mirrored_component_use_one_history_entry() {
+        let (mut app,_)=fixture();
+        let path=app.create_container(DefinitionKind::Component).unwrap();let definition=app.history.instance(&path).unwrap().definition;
+        let mirror=DMat4::from_scale(DVec3::new(-2.,3.,1.));app.history.organization(Org::Transform {path:path.clone(),transform:mirror}).unwrap();
+        app.execute(Command::AddPolyline {points:vec![DVec3::X*5.,DVec3::X*6.,DVec3::X*6.+DVec3::Y,DVec3::X*5.+DVec3::Y],closed:true}).unwrap();
+        let before=app.history.to_data();let def=app.history.definition_model(definition).unwrap().clone();let depth=app.history.undo_depth();
+        app.choose_modify(ModifyKind::Rotate);app.rotate.instance=Some((path.clone(),mirror,DMat4::IDENTITY));app.rotate.has_loose=true;
+        app.modify.begin_rotation(app.model().vertices().keys().copied().collect(),DVec3::ZERO,DVec3::Z).unwrap();
+        typed(&mut app,"30");typed(&mut app,"60");assert_eq!(app.history.undo_depth(),depth+1);
+        assert_eq!(app.history.definition_model(definition).unwrap(),&def);
+        let expected=cindral_tools::rotation::matrix(DVec3::ZERO,DVec3::Z,60_f64.to_radians())*mirror;
+        assert!(app.history.instance(&path).unwrap().transform.abs_diff_eq(expected,1e-10));
+        app.history.undo().unwrap();assert_eq!(app.history.to_data(),before);app.history.redo().unwrap();app.history.model().validate().unwrap();
+        assert!(app.history.instances(DefinitionId(0)).unwrap().contains_key(path.last().unwrap()));
+    }
+    #[test]
+    fn nested_scaled_context_uses_world_rotation_and_preserves_other_definitions() {
+        let (mut app,_)=fixture();let parent=app.create_container(DefinitionKind::Group).unwrap();
+        let placement=DMat4::from_rotation_x(0.4)*DMat4::from_scale(DVec3::new(-2.,3.,0.5));
+        app.history.organization(Org::Transform {path:parent.clone(),transform:placement}).unwrap();
+        app.enter_context(parent.clone()).unwrap();app.selection.vertices=app.model().vertices().keys().copied().collect();
+        let child=app.create_container(DefinitionKind::Component).unwrap();app.refresh_mesh();
+        let def=app.history.instance(&child).unwrap().definition;let before_def=app.history.definition_model(def).unwrap().clone();
+        let root=app.history.definition_model(DefinitionId(0)).unwrap().clone();
+        app.choose_modify(ModifyKind::Rotate);app.rotate.instance=Some((child.clone(),DMat4::IDENTITY,placement));
+        let center=DVec3::new(2.,4.,3.);let normal=DVec3::new(1.,2.,3.).normalize();
+        app.modify.begin_rotation(vec![],center,normal).unwrap();typed(&mut app,"37");
+        let expected=placement.inverse()*cindral_tools::rotation::matrix(center,normal,37_f64.to_radians())*placement;
+        assert!(app.history.instance(&child).unwrap().transform.abs_diff_eq(expected,1e-9));
+        assert_eq!(app.history.definition_model(def).unwrap(),&before_def);assert_eq!(app.history.definition_model(DefinitionId(0)).unwrap(),&root);
+        app.history.undo().unwrap();assert_eq!(app.history.instance(&child).unwrap().transform,DMat4::IDENTITY);
+        // Loose geometry inside the same mirrored/nonuniform context uses conjugation too.
+        app.enter_context(child).unwrap();let before=app.model().clone();let world=app.history.world_transform();
+        app.choose_modify(ModifyKind::Rotate);app.modify.begin_rotation(before.vertices().keys().copied().collect(),center,normal).unwrap();typed(&mut app,"37");
+        for (id,v) in before.vertices() {let expected=cindral_tools::rotation::matrix(center,normal,37_f64.to_radians()).transform_point3(world.transform_point3(v.position));assert!(world.transform_point3(app.model().vertices()[id].position).distance(expected)<1e-8);}
+        app.model().validate().unwrap();app.history.undo().unwrap();assert_eq!(app.model(),&before);
+    }
+
 }

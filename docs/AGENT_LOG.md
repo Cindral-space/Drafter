@@ -541,3 +541,8 @@
 
 - Rotate copy completion accepts the existing Nx/*N//N parser and bounded count (1–256). Nx gives N additional copies at multiples of the established angle; /N gives N additional copies dividing that angle, including the original destination. Retyping replaces the same geometry/organization undo slot. Loose arrays reuse Command::Batch; occurrence arrays reuse DuplicateMany, preserving definition semantics.
 - Five targeted Rotate kernel tests pass, including exact array spacing/replacement/one-entry undo/redo. Overlapping loose copies retain the kernel's existing transactional rejection rather than introducing a new overlap repair system. Count semantics remain a concrete user verification question.
+
+### Rotate item 14 — rigid/context placement and mixed targets
+
+- World-space Rotate commands are conjugated into the active definition or selected occurrence owner, so mirrored/nonuniform/nested placements preserve rigid world rotation and shared definitions remain unchanged. Mixed loose geometry plus the selected occurrence use the same local/graph preview deltas, committed/replaced as one global Organization history entry with a local geometry step. Shift selection can preserve loose and occurrence targets together.
+- Added kernel-backed app tests for mixed mirrored components, nested scaled contexts and local world-conjugated geometry. Targeted core/app test-target checks pass. Initial three-click app test exposed its fixture losing selection through undo (existing behavior); explicitly reselected before the next operation. Two initial app tests passed; rerun follows with nested coverage. Existing UI still selects one occurrence at a time; multiple-occurrence selection is not claimed here.

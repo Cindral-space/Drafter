@@ -1195,11 +1195,13 @@ impl DrafterApp {
             .map(|h| h.path[..context.len() + 1].to_vec());
         if self.modifying && self.modify.kind() == ModifyKind::Select && clicked {
             if let Some(path) = child {
+                let loose = self.selection.clone();
                 self.select_instance(path);
+                if ctx.input(|i| i.modifiers.shift) { self.selection = loose; }
                 self.selection_start = None;
                 return true;
             }
-            self.organization.selected = None;
+            if !ctx.input(|i| i.modifiers.shift) { self.organization.selected = None; }
         }
         if self.modifying && self.modify.kind() == ModifyKind::PaintBucket && pressed {
             if let Some(path) = child {

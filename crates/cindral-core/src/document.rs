@@ -918,8 +918,68 @@ impl DocumentHistory {
         self.geometry_changed(id);
         result
     }
+    /// Preview selected loose geometry together with one selected occurrence.
+    /// Uses the same local transform and placement deltas as individual Move operations.
+    pub fn preview_selection_transform(&mut self, geometry: Command, placement: OrganizationCommand) -> Result<bool, KernelError> {
+        let snapshot = (self.graph.clone(), self.instance_preview.clone(), self.organization_preview.clone(), self.duplicate_preview, self.preview_redo.clone(), self.redo.clone());
+        let saved = self.geometry_preview.take();
+        let result = match placement {
+            OrganizationCommand::Transform {path,transform} => self.preview_instance_transform(&path,transform),
+            OrganizationCommand::Duplicate {path,transform} => self.preview_duplicate(&path,transform),
+            command @ OrganizationCommand::DuplicateMany {..} => {
+                let redo = self.redo.clone();
+                self.organization(command)?;
+                self.preview_redo = Some(redo);
+                self.organization_preview = self.undo.pop();
+                Ok(true)
+            }
+            _ => Err(invalid("Unsupported selection preview")),
+        };
+        self.geometry_preview = saved;
+        result?;
+        let id = self.active_definition();
+        let result = self.history_mut(id)?.preview_atomic(geometry);
+        if result.is_err() {
+            (self.graph,self.instance_preview,self.organization_preview,self.duplicate_preview,self.preview_redo,self.redo)=snapshot;
+            self.geometry_preview=saved;
+            self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
+        }
+        self.geometry_preview = Some(id);
+        let dirty = BTreeMap::from([(id,self.history(id).changes().clone())]);
+        self.changed(dirty,true,false);
+        result
+    }
+    /// Replace a completed mixed geometry/occurrence transform as one undo entry.
+    pub fn replace_selection_transform(&mut self, geometry: Command, placement: OrganizationCommand) -> Result<bool, KernelError> {
+        self.cancel_preview()?;
+        let id = self.active_definition();
+        let Some(DocumentEntry::Organization {delta,steps}) = self.undo.last().cloned() else { return Err(invalid("No completed mixed transform")); };
+        if steps != vec![id] { return Err(invalid("Transform context changed")); }
+        let current = self.graph.clone();
+        delta.apply(&mut self.graph,false)?;
+        let old = self.undo.pop().ok_or(KernelError::MissingEntity)?;
+        // Validate graph destinations first, then replace local geometry atomically.
+        let graph_result = self.organization(placement);
+        if !matches!(graph_result,Ok(true)) { self.graph=current; self.undo.push(old); return graph_result; }
+        let result = self.history_mut(id)?.replace_last(geometry);
+        if !matches!(result,Ok(true)) {
+            self.undo.pop(); self.graph=current; self.undo.push(old); return result;
+        }
+        self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
+        if let Some(DocumentEntry::Organization {steps,..}) = self.undo.last_mut() { steps.push(id); }
+        self.changed(BTreeMap::from([(id,self.history(id).changes().clone())]),true,false);
+        Ok(true)
+    }
     /// Cancel provisional geometry or an instance placement without touching global history.
     pub fn cancel_preview(&mut self) -> Result<bool, KernelError> {
+        if self.geometry_preview.is_some() && (self.instance_preview.is_some() || self.organization_preview.is_some()) {
+            let id = self.geometry_preview.take().ok_or(KernelError::MissingEntity)?;
+            self.cancel_preview()?;
+            self.history_mut(id)?.cancel_preview()?;
+            self.changed(BTreeMap::from([(id,self.history(id).changes().clone())]),true,false);
+            self.pending_cancel = self.changes.geometry.clone();
+            return Ok(true);
+        }
         if let Some(entry) = self.organization_preview.take() {
             self.duplicate_preview = None;
             if let DocumentEntry::Organization { delta, .. } = &entry {
@@ -956,6 +1016,17 @@ impl DocumentHistory {
     }
     /// Commit the last provisional edit as exactly one global undo entry.
     pub fn commit_preview(&mut self) -> Result<bool, KernelError> {
+        if self.geometry_preview.is_some() && (self.instance_preview.is_some() || self.organization_preview.is_some()) {
+            let id = self.geometry_preview.take().ok_or(KernelError::MissingEntity)?;
+            let geometry = self.history_mut(id)?.commit_preview()?;
+            let placement = self.commit_preview()?;
+            if geometry {
+                if placement {
+                    if let Some(DocumentEntry::Organization {steps,..}) = self.undo.last_mut() { steps.push(id); }
+                } else { self.undo.push(DocumentEntry::Geometry(id)); self.redo.clear(); }
+            }
+            return Ok(geometry || placement);
+        }
         if let Some(entry) = self.organization_preview.take() {
             self.duplicate_preview = None;
             self.preview_redo = None;

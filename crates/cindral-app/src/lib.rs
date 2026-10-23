@@ -274,11 +274,11 @@ impl DrafterApp {
         }
     }
     fn apply_measurement(&mut self) {
-        if self.modifying && self.modify.kind() == ModifyKind::Rotate {
-            self.rotate_measurement();
+        if self.instance_measurement() {
             return;
         }
-        if self.instance_measurement() {
+        if self.modifying && self.modify.kind() == ModifyKind::Rotate {
+            self.rotate_measurement();
             return;
         }
         if self.modifying {
