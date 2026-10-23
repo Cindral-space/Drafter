@@ -3,6 +3,7 @@ use super::*;
 use cindral_tools::{Hit, ModifyKind};
 impl DrafterApp {
     pub(crate) fn choose_modify(&mut self, kind: ModifyKind) {
+        self.shortcuts.navigation = None;
         self.cancel_section();
         self.cancel_modify();
         self.modifying = true;
@@ -128,8 +129,8 @@ impl DrafterApp {
                 * self.history.world_transform(),
             size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
         };
-        let keyboard_free = !response.ctx.wants_keyboard_input();
-        let escape = response.ctx.input(|i| i.key_pressed(Key::Escape));
+        let keyboard_free = !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
+        let escape = response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel));
         if keyboard_free && escape {
             self.cancel_modify();
             self.measurements.reset();
@@ -139,10 +140,9 @@ impl DrafterApp {
         if keyboard_free {
             let undo = response
                 .ctx
-                .input(|i| i.modifiers.command && i.key_pressed(Key::Z));
+                .input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
             let redo = response.ctx.input(|i| {
-                i.modifiers.command
-                    && (i.key_pressed(Key::Y) || i.modifiers.shift && i.key_pressed(Key::Z))
+                shortcuts::pressed(i, shortcuts::Action::Redo)
             });
             if undo || redo {
                 self.cancel_modify();
@@ -151,15 +151,15 @@ impl DrafterApp {
             }
             response.ctx.input(|i| {
                 for (key, axis) in [
-                    (Key::ArrowRight, Axis::X),
-                    (Key::ArrowLeft, Axis::Y),
-                    (Key::ArrowUp, Axis::Z),
+                    (shortcuts::Action::AxisX, Axis::X),
+                    (shortcuts::Action::AxisY, Axis::Y),
+                    (shortcuts::Action::AxisZ, Axis::Z),
                 ] {
-                    if i.key_pressed(key) {
+                    if shortcuts::pressed(i, key) {
                         self.axis_lock = Some(axis);
                     }
                 }
-                if i.key_pressed(Key::ArrowDown) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisClear) {
                     self.axis_lock = None;
                 }
             });
@@ -858,7 +858,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Push/Pull parity: P currently activates Polygon"]
     fn push_pull_parity_p_activates_push_pull() {
         let mut app = DrafterApp::default();
         let ctx = egui::Context::default();

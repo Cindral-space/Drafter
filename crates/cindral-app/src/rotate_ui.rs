@@ -206,17 +206,16 @@ impl DrafterApp {
     }
     pub(crate) fn rotate_pointer(&mut self, response: &egui::Response) {
         let ctx = &response.ctx;
-        if !ctx.wants_keyboard_input() {
-            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+        if !ctx.wants_keyboard_input() && self.measurements.text.is_empty() {
+            if ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
                 self.cancel_modify();
                 self.measurements.reset();
                 self.error = None;
                 return;
             }
-            let undo = ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z));
+            let undo = ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
             let redo = ctx.input(|i| {
-                i.modifiers.command
-                    && (i.key_pressed(Key::Y) || i.modifiers.shift && i.key_pressed(Key::Z))
+                shortcuts::pressed(i, shortcuts::Action::Redo)
             });
             if undo || redo {
                 self.cancel_modify();
@@ -319,14 +318,14 @@ impl DrafterApp {
                 _ => DVec3::Z,
             }
         };
-        if !ctx.wants_keyboard_input() && !self.modify.active() {
+        if !ctx.wants_keyboard_input() && self.measurements.text.is_empty() && !self.modify.active() {
             ctx.input(|i| {
                 for (key, axis) in [
-                    (Key::ArrowUp, DVec3::Z),
-                    (Key::ArrowRight, DVec3::X),
-                    (Key::ArrowLeft, DVec3::Y),
+                    (shortcuts::Action::AxisZ, DVec3::Z),
+                    (shortcuts::Action::AxisX, DVec3::X),
+                    (shortcuts::Action::AxisY, DVec3::Y),
                 ] {
-                    if i.key_pressed(key) {
+                    if shortcuts::pressed(i, key) {
                         self.rotate.lock = if self.rotate.lock.is_some_and(|n| {
                             n.abs_diff_eq(axis, 1e-9) || n.abs_diff_eq(-axis, 1e-9)
                         }) {
@@ -336,7 +335,7 @@ impl DrafterApp {
                         };
                     }
                 }
-                if i.key_pressed(Key::ArrowDown) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisClear) {
                     self.rotate.lock = if self.rotate.lock.is_some() {
                         None
                     } else {

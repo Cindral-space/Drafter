@@ -999,8 +999,8 @@ impl DrafterApp {
     }
     pub(crate) fn organization_pointer(&mut self, response: &egui::Response) -> bool {
         let ctx = &response.ctx;
-        let keyboard = !ctx.wants_keyboard_input();
-        if keyboard && ctx.input(|i| i.key_pressed(Key::Escape)) {
+        let keyboard = !ctx.wants_keyboard_input() && self.measurements.text.is_empty();
+        if keyboard && ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
             self.organization.completed = None;
             if self.organization.drag.is_some() {
                 self.organization.drag = None;
@@ -1026,10 +1026,9 @@ impl DrafterApp {
         if let Some(mut drag) = self.organization.drag.clone() {
             if keyboard {
                 let redo = ctx.input(|i| {
-                    i.modifiers.command
-                        && (i.key_pressed(Key::Y) || i.modifiers.shift && i.key_pressed(Key::Z))
+                    shortcuts::pressed(i, shortcuts::Action::Redo)
                 });
-                let undo = ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z));
+                let undo = ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo));
                 if undo || redo {
                     self.organization.drag = None;
                     self.history_step(redo);
@@ -1037,15 +1036,15 @@ impl DrafterApp {
                 }
                 ctx.input(|i| {
                     for (key, axis) in [
-                        (Key::ArrowRight, Axis::X),
-                        (Key::ArrowLeft, Axis::Y),
-                        (Key::ArrowUp, Axis::Z),
+                        (shortcuts::Action::AxisX, Axis::X),
+                        (shortcuts::Action::AxisY, Axis::Y),
+                        (shortcuts::Action::AxisZ, Axis::Z),
                     ] {
-                        if i.key_pressed(key) {
+                        if shortcuts::pressed(i, key) {
                             self.axis_lock = Some(axis);
                         }
                     }
-                    if i.key_pressed(Key::ArrowDown) {
+                    if shortcuts::pressed(i, shortcuts::Action::AxisClear) {
                         self.axis_lock = None;
                     }
                 });

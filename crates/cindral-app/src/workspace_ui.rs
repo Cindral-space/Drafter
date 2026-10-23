@@ -98,13 +98,7 @@ pub(crate) fn menu_section(ui: &mut egui::Ui, title: &str) {
     );
 }
 
-const DRAW: [(ToolKind, &str, &str); 5] = [
-    (ToolKind::Line, "Line", "L"),
-    (ToolKind::Rectangle, "Rectangle", "R"),
-    (ToolKind::Circle, "Circle", "C"),
-    (ToolKind::Arc, "Arc", "A"),
-    (ToolKind::Polygon, "Polygon", "P"),
-];
+const DRAW: [(ToolKind, &str); 5] = [(ToolKind::Line,"Line"),(ToolKind::Rectangle,"Rectangle"),(ToolKind::Circle,"Circle"),(ToolKind::Arc,"Arc"),(ToolKind::Polygon,"Polygon")];
 const MODIFY: [(ModifyKind, &str); 11] = [
     (ModifyKind::Select, "Select"),
     (ModifyKind::Eraser, "Eraser"),
@@ -138,7 +132,7 @@ impl DrafterApp {
                             if ui
                                 .add_enabled(
                                     self.history.undo_depth() > 0,
-                                    egui::Button::new("Undo").shortcut_text("Ctrl+Z"),
+                                    egui::Button::new("Undo").shortcut_text(shortcuts::hint(shortcuts::Action::Undo)),
                                 )
                                 .clicked()
                             {
@@ -148,7 +142,7 @@ impl DrafterApp {
                             if ui
                                 .add_enabled(
                                     self.history.redo_depth() > 0,
-                                    egui::Button::new("Redo").shortcut_text("Ctrl+Shift+Z"),
+                                    egui::Button::new("Redo").shortcut_text(shortcuts::hint(shortcuts::Action::Redo)),
                                 )
                                 .clicked()
                             {
@@ -181,7 +175,7 @@ impl DrafterApp {
                                 ("Right", "3", StandardView::Right),
                             ] {
                                 if ui
-                                    .add(egui::Button::new(label).shortcut_text(shortcut))
+                                    .add(egui::Button::new(label).shortcut_text(if shortcut.is_empty(){""}else{shortcuts::hint(shortcuts::Action::View(view))}))
                                     .clicked()
                                 {
                                     self.camera.set_view(view);
@@ -191,7 +185,7 @@ impl DrafterApp {
                             ui.separator();
                             ui.checkbox(&mut self.show_grid, "Construction grid");
                             if ui
-                                .add(egui::Button::new("Fit model").shortcut_text("F"))
+                                .add(egui::Button::new("Fit model").shortcut_text(shortcuts::hint(shortcuts::Action::Fit)))
                                 .clicked()
                             {
                                 let size = ctx.available_rect().size();
@@ -201,7 +195,8 @@ impl DrafterApp {
                         });
                         ui.menu_button("Draw", |ui| {
                             ui.set_min_width(224.);
-                            for (kind, label, shortcut) in DRAW {
+                            for (kind, label) in DRAW {
+                                let shortcut=shortcuts::hint(shortcuts::Action::Draw(kind));
                                 if ui
                                     .add(
                                         egui::Button::new(label)
@@ -227,11 +222,7 @@ impl DrafterApp {
                                         if index == 2 { "Modeling" } else { "Utilities" },
                                     );
                                 }
-                                let shortcut = if kind == ModifyKind::Select {
-                                    "Space"
-                                } else {
-                                    ""
-                                };
+                                let shortcut=shortcuts::hint(shortcuts::Action::Modify(kind));
                                 if ui
                                     .add(
                                         egui::Button::new(label)
@@ -269,6 +260,7 @@ impl DrafterApp {
                             ui.checkbox(&mut self.show_tray, "Model inspector");
                         });
                         ui.menu_button("Help", |ui| {
+                            if ui.add(egui::Button::new("Keyboard shortcuts").shortcut_text(shortcuts::hint(shortcuts::Action::Help))).clicked(){self.shortcuts.open=true;ui.close();}
                             menu_section(ui, "Navigate");
                             ui.label("Middle mouse: orbit");
                             ui.label("Shift + middle mouse: pan");
@@ -312,7 +304,7 @@ impl DrafterApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
                             .add(egui::Button::new("Save").fill(ui.visuals().selection.bg_fill))
-                            .on_hover_text("Save document · Ctrl+S")
+                            .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e|e.action==shortcuts::Action::Save).unwrap()))
                             .clicked()
                         {
                             self.save_document();
@@ -334,7 +326,7 @@ impl DrafterApp {
                                         self.history.undo_depth() > 0,
                                         egui::Button::new("Undo").frame(false),
                                     )
-                                    .on_hover_text("Undo · Ctrl+Z")
+                                    .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e|e.action==shortcuts::Action::Undo).unwrap()))
                                     .clicked()
                                 {
                                     self.history_step(false);
@@ -344,7 +336,7 @@ impl DrafterApp {
                                         self.history.redo_depth() > 0,
                                         egui::Button::new("Redo").frame(false),
                                     )
-                                    .on_hover_text("Redo · Ctrl+Shift+Z")
+                                    .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e|e.action==shortcuts::Action::Redo).unwrap()))
                                     .clicked()
                                 {
                                     self.history_step(true);
@@ -352,7 +344,7 @@ impl DrafterApp {
                                 ui.separator();
                                 if ui
                                     .add(egui::Button::new("Fit model").frame(false))
-                                    .on_hover_text("Zoom extents · F")
+                                    .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e|e.action==shortcuts::Action::Fit).unwrap()))
                                     .clicked()
                                 {
                                     let size = ctx.available_rect().size();
@@ -446,6 +438,7 @@ impl DrafterApp {
     }
 
     fn active_tool_label(&self) -> &'static str {
+        if let Some(mode)=self.shortcuts.navigation {return match mode {shortcuts::Action::Orbit=>"Orbit",shortcuts::Action::Pan=>"Pan",_=>"Zoom"};}
         if self.modifying {
             MODIFY
                 .iter()
@@ -453,8 +446,8 @@ impl DrafterApp {
                 .map_or("Select", |(_, label)| *label)
         } else {
             DRAW.iter()
-                .find(|(kind, _, _)| *kind == self.tool.kind())
-                .map_or("Draw", |(_, label, _)| *label)
+                .find(|(kind, _)| *kind == self.tool.kind())
+                .map_or("Draw", |(_, label)| *label)
         }
     }
 
@@ -463,6 +456,7 @@ impl DrafterApp {
         if !response.hovered() && !(response.contains_pointer() && response.dragged()) {
             return;
         }
+        if self.shortcuts.navigation.is_some() {ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);return;}
         let (position, orbiting, shift) = ui.input(|i| {
             (
                 i.pointer.hover_pos(),
@@ -536,11 +530,7 @@ impl DrafterApp {
                         .show(ui, |ui| {
                             let mut cell = 0;
                             for &(kind, label) in &MODIFY[..2] {
-                                let shortcut = if kind == ModifyKind::Select {
-                                    "Space"
-                                } else {
-                                    ""
-                                };
+                                let shortcut=shortcuts::hint(shortcuts::Action::Modify(kind));
                                 if tool_button(
                                     ui,
                                     label,
@@ -556,7 +546,8 @@ impl DrafterApp {
                                     ui.end_row();
                                 }
                             }
-                            for (kind, label, shortcut) in DRAW {
+                            for (kind, label) in DRAW {
+                                let shortcut=shortcuts::hint(shortcuts::Action::Draw(kind));
                                 if tool_button(
                                     ui,
                                     label,
@@ -576,7 +567,7 @@ impl DrafterApp {
                                 if tool_button(
                                     ui,
                                     label,
-                                    "",
+                                    shortcuts::hint(shortcuts::Action::Modify(kind)),
                                     self.modifying && self.modify.kind() == kind,
                                 )
                                 .clicked()
@@ -726,6 +717,7 @@ impl DrafterApp {
         egui::TopBottomPanel::bottom("workspace_status")
             .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill).inner_margin(egui::Margin::symmetric(16, 8)))
             .show(ctx, |ui| {
+            if let Some(notice)=self.shortcuts.notice.clone() {ui.horizontal(|ui| {ui.label(&notice);if ui.small_button("Dismiss").clicked(){self.shortcuts.notice=None;}});}
             ui.horizontal(|ui| {
                 // Allocate dimensions first so contextual instructions cannot hide the input.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -734,12 +726,13 @@ impl DrafterApp {
                         .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { theme::error_background(ui.visuals()) } else { ui.visuals().extreme_bg_color }))
                         .on_hover_text("Type a precise dimension during an operation, then press Enter. Accepts m, cm, mm, ft and in.");
                     if field.changed() { self.measurements.phase = cindral_tools::measurements::BoxPhase::Typing; self.measurements.invalid = false; }
-                    if (field.has_focus() || field.lost_focus()) && ctx.input(|i| i.key_pressed(Key::Escape)) {
+                    if (field.has_focus() || field.lost_focus()) && ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
                         let cleared=self.measurements.escape();
+                        if cleared {field.surrender_focus();}
                         if !cleared && self.modifying && self.modify.kind()==ModifyKind::Rotate {self.cancel_modify();field.surrender_focus();}
                         self.error = None;
                     }
-                    if field.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
+                    if field.lost_focus() && ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Apply)) {
                         self.apply_measurement();
                     }
                     ui.label(RichText::new(readout.label).small()).on_hover_text("Right-click for document units and precision").context_menu(|ui| {
@@ -754,7 +747,7 @@ impl DrafterApp {
                     });
                     ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let prompt = if self.modifying {
+                        let prompt = if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select"} else if self.modifying {
                             match self.modify.kind() {
                                 ModifyKind::Select => "Click to select · Shift to add · Drag a selection box",
                                 ModifyKind::Rotate => self.rotate_hint(),
@@ -838,7 +831,7 @@ fn tool_button(ui: &mut egui::Ui, label: &str, shortcut: &str, selected: bool) -
     response.on_hover_text(if shortcut.is_empty() {
         label.to_owned()
     } else {
-        format!("{label} · {shortcut}")
+        format!("{label} ({shortcut})")
     })
 }
 

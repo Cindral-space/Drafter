@@ -11,17 +11,17 @@ impl DrafterApp {
                 self.modify.kind(),
                 ModifyKind::Select | ModifyKind::Eraser | ModifyKind::PaintBucket
             );
-        if !accepts {
+        if !accepts && self.measurements.text.is_empty() {
             return false;
         }
-        if response.ctx.input(|i| i.key_pressed(Key::Escape)) && !self.measurements.text.is_empty()
+        if response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) && !self.measurements.text.is_empty()
         {
             self.measurements.escape();
             self.error = None;
             return true;
         }
         response.ctx.input(|i| {
-            if i.modifiers.command || i.modifiers.alt {
+            if i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt || i.modifiers.mac_cmd {
                 return;
             }
             for event in &i.events {
@@ -31,16 +31,16 @@ impl DrafterApp {
                     }
                 }
             }
-            if i.key_pressed(Key::Backspace) {
+            if shortcuts::pressed(i, shortcuts::Action::Backspace) {
                 self.measurements.backspace();
             }
         });
-        if response.ctx.input(|i| i.key_pressed(Key::Enter)) && !self.measurements.text.is_empty() {
+        if response.ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Apply)) && !self.measurements.text.is_empty() {
             self.apply_measurement();
             self.measurements.invalid = self.error.is_some();
             return true;
         }
-        false
+        !self.measurements.text.is_empty()
     }
     pub(crate) fn measurement_readout(&self) -> Readout {
         if let Some(readout) = self.instance_readout() {
@@ -204,7 +204,7 @@ impl DrafterApp {
             ui.horizontal(|ui|{if ui.button("Resize").clicked(){answer=Some(true);}
                 if ui.button("Cancel").clicked(){answer=Some(false);}});
         });
-        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+        if ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
             answer = Some(false);
         }
         if let Some(answer) = answer {

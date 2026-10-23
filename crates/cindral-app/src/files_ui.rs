@@ -477,9 +477,9 @@ impl DrafterApp {
             ui.set_min_width(240.);
             for (text, shortcut, a) in [
                 ("New", "", Action::New),
-                ("Open…", "Ctrl+O", Action::Open),
-                ("Save", "Ctrl+S", Action::Save),
-                ("Save As…", "Ctrl+Shift+S", Action::SaveAs),
+                ("Open…", shortcuts::hint(shortcuts::Action::Open), Action::Open),
+                ("Save", shortcuts::hint(shortcuts::Action::Save), Action::Save),
+                ("Save As…", shortcuts::hint(shortcuts::Action::SaveAs), Action::SaveAs),
             ] {
                 if ui
                     .add(egui::Button::new(text).shortcut_text(shortcut))
@@ -589,19 +589,11 @@ impl DrafterApp {
                 Err(e) => self.error = Some(e.to_string()),
             }
         }
-        let shortcut = ctx.input(|i| {
-            if i.modifiers.command && i.key_pressed(Key::S) {
-                Some(if i.modifiers.shift {
-                    Action::SaveAs
-                } else {
-                    Action::Save
-                })
-            } else if i.modifiers.command && i.key_pressed(Key::O) {
-                Some(Action::Open)
-            } else {
-                None
-            }
-        });
+        let shortcut = if ctx.wants_keyboard_input() || !self.measurements.text.is_empty() || self.shortcuts.open { None } else { ctx.input(|i| {
+            if shortcuts::pressed(i,shortcuts::Action::SaveAs) {Some(Action::SaveAs)}
+            else if shortcuts::pressed(i,shortcuts::Action::Save) {Some(Action::Save)}
+            else if shortcuts::pressed(i,shortcuts::Action::Open) {Some(Action::Open)} else {None}
+        })};
         if let Some(action) = shortcut {
             if let Err(e) = self.do_file_action(action) {
                 self.error = Some(e.to_string());

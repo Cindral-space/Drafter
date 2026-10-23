@@ -25,6 +25,7 @@ mod rotate_ui;
 mod scene_cache;
 mod section_ui;
 mod shadow_ui;
+mod shortcuts;
 pub mod theme;
 mod workspace_ui;
 use eframe::egui::{self, Color32, Key, PointerButton};
@@ -39,6 +40,7 @@ pub struct DrafterApp {
     png: png_ui::PngUi,
     #[cfg(target_os = "linux")]
     system_theme: theme::SystemTheme,
+    shortcuts: shortcuts::Ui,
     show_tray: bool,
     show_grid: bool,
     presentation: cindral_core::Presentation,
@@ -83,6 +85,7 @@ impl Default for DrafterApp {
             png: Default::default(),
             #[cfg(target_os = "linux")]
             system_theme: Default::default(),
+            shortcuts: Default::default(),
             show_tray: true,
             show_grid: false,
             presentation: Default::default(),
@@ -143,7 +146,9 @@ impl DrafterApp {
         workspace_ui::configure_style(&cc.egui_ctx);
         let png = png_ui::PngUi::with_surface(render.target_format.is_srgb());
         png.theme().apply(&cc.egui_ctx);
+        let notice = shortcuts::first_launch_notice();
         Ok(Self {
+            shortcuts: shortcuts::Ui {notice, ..Default::default()},
             modifying: true,
             #[cfg(target_os = "linux")]
             system_theme: theme::SystemTheme::start(cc.egui_ctx.clone()),
@@ -160,7 +165,9 @@ impl DrafterApp {
             .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
     }
     fn set_tool(&mut self, kind: ToolKind) {
+        self.shortcuts.navigation = None;
         self.cancel_section();
+        self.cancel_modify();
         if let Ok(true) = self.history.cancel_preview() {
             self.refresh_mesh();
         }
@@ -446,6 +453,22 @@ impl DrafterApp {
         if self.capture_measurement_keys(response) {
             return;
         }
+        self.route_shortcuts(response);
+        if self.shortcuts.open {return;}
+        if let Some(mode)=self.shortcuts.navigation {
+            if response.hovered() {
+                response.clone().on_hover_cursor(egui::CursorIcon::Grab);
+                let (delta,scroll)=response.ctx.input(|i|(i.pointer.delta(),i.smooth_scroll_delta.y));
+                if response.dragged_by(PointerButton::Primary) {match mode {
+                    shortcuts::Action::Orbit=>self.camera.orbit(Vec2::new(delta.x,delta.y)),
+                    shortcuts::Action::Pan=>self.camera.pan(Vec2::new(delta.x,delta.y),rect.height()),
+                    _=>self.camera.zoom(-delta.y,Vec2::ZERO,aspect),
+                }}
+                self.camera.zoom(scroll,Vec2::ZERO,aspect);
+            }
+            if response.ctx.input(|i|shortcuts::pressed(i,shortcuts::Action::Cancel)) {self.shortcuts.navigation=None;}
+            return;
+        }
         if self.section_input(response) {
             return;
         }
@@ -468,7 +491,6 @@ impl DrafterApp {
                 return;
             }
         }
-        let keyboard_free = !response.ctx.wants_keyboard_input();
         response.ctx.input(|i| {
             if let Some(position) = i.pointer.hover_pos() {
                 let cursor = Vec2::new(
@@ -476,47 +498,6 @@ impl DrafterApp {
                     1. - 2. * (position.y - rect.top()) / rect.height(),
                 );
                 self.camera.zoom(i.smooth_scroll_delta.y, cursor, aspect);
-            }
-            if keyboard_free
-                && self.measurements.text.is_empty()
-                && !i.modifiers.command
-                && !i.modifiers.alt
-            {
-                for (key, kind) in [
-                    (Key::L, ToolKind::Line),
-                    (Key::R, ToolKind::Rectangle),
-                    (Key::C, ToolKind::Circle),
-                    (Key::A, ToolKind::Arc),
-                    (Key::P, ToolKind::Polygon),
-                ] {
-                    if i.key_pressed(key) {
-                        self.set_tool(kind);
-                    }
-                }
-                if i.key_pressed(Key::Q) {
-                    self.choose_modify(ModifyKind::Rotate);
-                }
-                if i.key_pressed(Key::Space) {
-                    self.choose_modify(ModifyKind::Select);
-                }
-                if i.key_pressed(Key::F) {
-                    self.extents(aspect);
-                }
-                if !self.modify.active() && self.tool.anchor().is_none() {
-                    for (key, view) in [
-                        (Key::Num0, StandardView::Iso),
-                        (Key::Num1, StandardView::Front),
-                        (Key::Num3, StandardView::Right),
-                        (Key::Num7, StandardView::Top),
-                    ] {
-                        if i.key_pressed(key) {
-                            self.camera.set_view(view);
-                        }
-                    }
-                    if i.key_pressed(Key::Num5) {
-                        toggle_projection(&mut self.camera);
-                    }
-                }
             }
         });
         if self.modifying {
@@ -527,10 +508,10 @@ impl DrafterApp {
             }
             return;
         }
-        let keyboard_free = !response.ctx.wants_keyboard_input();
+        let keyboard_free = !response.ctx.wants_keyboard_input() && self.measurements.text.is_empty();
         response.ctx.input(|i| {
             if keyboard_free {
-                if i.key_pressed(Key::Escape) {
+                if shortcuts::pressed(i, shortcuts::Action::Cancel) {
                     self.tool.cancel();
                     self.measurements.reset();
                     self.axis_lock = None;
@@ -538,35 +519,35 @@ impl DrafterApp {
                     self.draw_press = None;
                     self.draw_drag = None;
                 }
-                if i.key_pressed(Key::ArrowRight) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisX) {
                     self.axis_lock = if self.axis_lock == Some(Axis::X) {
                         None
                     } else {
                         Some(Axis::X)
                     };
                 }
-                if i.key_pressed(Key::ArrowLeft) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisY) {
                     self.axis_lock = if self.axis_lock == Some(Axis::Y) {
                         None
                     } else {
                         Some(Axis::Y)
                     };
                 }
-                if i.key_pressed(Key::ArrowUp) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisZ) {
                     self.axis_lock = if self.axis_lock == Some(Axis::Z) {
                         None
                     } else {
                         Some(Axis::Z)
                     };
                 }
-                if i.key_pressed(Key::ArrowDown) {
+                if shortcuts::pressed(i, shortcuts::Action::AxisClear) {
                     self.axis_lock = None;
                 }
-                if i.modifiers.command && i.key_pressed(Key::Z) {
-                    self.history_step(i.modifiers.shift);
+                if shortcuts::pressed(i, shortcuts::Action::Undo) || shortcuts::pressed(i, shortcuts::Action::Redo) {
+                    self.history_step(shortcuts::pressed(i, shortcuts::Action::Redo));
                     return;
                 }
-                if i.modifiers.command && i.key_pressed(Key::Y) {
+                if shortcuts::pressed(i, shortcuts::Action::Redo) {
                     self.history_step(true);
                     return;
                 }
@@ -741,6 +722,7 @@ impl DrafterApp {
             self.camera.projection,
         );
         let ui_profile = cindral_core::profile::Scope::new(7);
+        self.shortcut_overlay(ctx);
         self.workspace_header(ctx);
         self.workspace_status(ctx);
         self.tape_resize_window(ctx);
