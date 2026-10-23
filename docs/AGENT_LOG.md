@@ -550,3 +550,7 @@
 ### Rotate item 15 — partial-selection safety
 
 - Partial targets continue through the shared Transform cavity/connectivity path used by Move. Nonplanar/crossing results are rejected by the existing kernel; an invalid interactive Rotate now cancels its entire preview and reports the reason, leaving no undo entry. Invalid typed input retains the preceding provisional/completed geometry. Added connected-box corner/edge validity and exact-cancel tests; no autofold triangulation claimed.
+
+### Rotate item 16 — edit context isolation
+
+- Context entry/exit already cancels the shared session and resets inference state. Rotate routes only the active definition's loose IDs and its directly selected child occurrence; sibling/ancestor picks cannot broaden targets. Added nested mirrored/nonuniform context coverage with unchanged root/shared-definition assertions and exact undo. The protractor remains in world coordinates while inference rays/points/normals cross the context transform explicitly. Targeted app check passes.
