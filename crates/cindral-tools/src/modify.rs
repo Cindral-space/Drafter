@@ -388,6 +388,10 @@ impl ModifySession {
         Ok(())
     }
 
+    /// Rotation baseline and radius retained for protractor feedback.
+    pub fn rotation_reference(&self) -> Option<(DVec3, f64)> {
+        self.reference_dir.map(|d| (d, self.reference_radius))
+    }
     /// Normalized interaction axis fixed at begin.
     pub fn axis(&self) -> DVec3 {
         self.axis

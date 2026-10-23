@@ -503,3 +503,7 @@
 - Branch agent/rotate-parity; preserved pre-existing .gitignore edit. Read requested measurements/parity docs, architecture skim and recent log. OpenCode disabled; no vendor code/assets or importer changes.
 - Q activation, Angle caption and selection-required stage hints. One Rotate input route now handles explicit center/reference/end clicks for loose selection and a selected occurrence, using ModifySession's angle math and existing geometry/placement preview/history APIs. No hovered target added. Center-only typed completion and post-completion replacement retain existing measurements state. Escape uses shared text-first routing then exact preview cancellation.
 - Targeted cargo check -p cindral-app passed (removed an unused import). Protractor, locks, copies, mixed selections and performance follow; no parity/performance certification yet.
+
+### Rotate item 5 — protractor
+
+- Added original projected ring/ticks, center and baseline feedback; axis hue or neutral inferred-plane ink, with bounded 72-segment overlay. Radius aims at 55 logical pixels. Targeted app check passed; resolved float-literal warnings. Camera-side normal selection follows with orientation tracking in item 6.

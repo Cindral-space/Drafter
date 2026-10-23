@@ -8,6 +8,8 @@ pub(crate) struct RotateUi {
     reference_set: bool,
     point: Option<DVec3>,
     normal: Option<DVec3>,
+    inferred: bool,
+    radius: f64,
     instance: Option<(InstancePath, DMat4, DMat4)>,
 }
 impl DrafterApp {
@@ -112,6 +114,13 @@ impl DrafterApp {
             (!own).then_some(context.transform_point3(s.position))
         }).or_else(|| DrawingPlane { origin: center, normal }.intersect(world_ray));
         self.rotate.point = point;
+        if let Some(c) = self.modify.anchor().or(point) {
+            let (u,v) = rotate_basis(normal);
+            if let Some(p) = view_world.project(c) {
+                let scale = [u,v].into_iter().filter_map(|d| view_world.project(c+d).map(|q| q.distance(p))).fold(0_f64, f64::max);
+                self.rotate.radius = 55./scale.max(1e-6);
+            }
+        }
         let clicked = response.clicked_by(PointerButton::Primary);
         if !self.modify.active() {
             self.rotate.normal = Some(normal);
@@ -150,5 +159,36 @@ impl DrafterApp {
             }
         }
     }
-    pub(crate) fn rotate_overlay(&self, _ui: &egui::Ui, _rect: egui::Rect) {}
+    pub(crate) fn rotate_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
+        if !self.modifying || self.modify.kind() != ModifyKind::Rotate { return; }
+        let Some(center) = self.modify.anchor().or(self.rotate.point) else { return; };
+        let normal = self.rotate.normal.unwrap_or(DVec3::Z);
+        let (u, v) = rotate_basis(normal);
+        let radius = self.rotate.radius;
+        let view = View { matrix: self.camera.view_projection(rect.width()/rect.height().max(1.)).as_dmat4(), size: DVec2::new(rect.width() as f64, rect.height() as f64) };
+        let screen = |p| view.project(p).map(|p| rect.min + egui::vec2(p.x as f32, p.y as f32));
+        let color = self.viewport_overlay(if self.rotate.inferred { self.viewport_ink() } else if normal.z.abs() > 0.999 { Color32::from_rgb(55,125,240) } else if normal.x.abs() > 0.999 { Color32::from_rgb(230,65,65) } else if normal.y.abs() > 0.999 { Color32::from_rgb(45,175,85) } else { self.viewport_ink() });
+        let painter = ui.painter().with_clip_rect(rect);
+        let at = |angle: f64, r: f64| center + (u*angle.cos()+v*angle.sin())*r;
+        for i in 0..72 {
+            let a = i as f64*std::f64::consts::TAU/72.;
+            let b = (i+1) as f64*std::f64::consts::TAU/72.;
+            if let (Some(a), Some(b)) = (screen(at(a,radius)),screen(at(b,radius))) { painter.line_segment([a,b],egui::Stroke::new(1.5_f32,color)); }
+            if i%3 == 0 {
+                if let (Some(a),Some(b)) = (screen(at(a,radius)),screen(at(a,radius*if i%18==0 {0.8} else {0.9}))) { painter.line_segment([a,b],egui::Stroke::new(1_f32,color)); }
+            }
+        }
+        if let Some(c) = screen(center) {
+            painter.circle_filled(c,3.,color);
+            if self.modify.active() {
+                let reference = if self.rotate.reference_set { self.modify.rotation_reference().map(|(u,_)| center+u*radius) } else { self.rotate.point };
+                if let Some(p) = reference.and_then(screen) { painter.line_segment([c,p],egui::Stroke::new(2_f32,color)); }
+            }
+        }
+    }
+}
+
+fn rotate_basis(normal: DVec3) -> (DVec3,DVec3) {
+    let u = normal.cross(if normal.z.abs()<0.9 { DVec3::Z } else { DVec3::Y }).normalize();
+    (u,normal.cross(u))
 }
