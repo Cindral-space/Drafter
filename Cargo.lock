@@ -443,6 +443,7 @@ dependencies = [
  "cindral-core",
  "cindral-skp",
  "cindral-tools",
+ "earcutr",
  "glam",
  "image",
  "ron",

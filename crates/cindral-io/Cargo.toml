@@ -11,6 +11,7 @@ workspace = true
 cindral-skp = { path = "../cindral-skp" }
 cindral-core = { path = "../cindral-core" }
 glam = "0.30"
+earcutr = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ron = "0.12"

@@ -78,7 +78,18 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
         }
     }
     let mut assignments = Vec::new();
-    for def in source.definitions {
+    let parents: Vec<Vec<String>> = (0..source.definitions.len()).map(|index| {
+        source.definitions.iter().enumerate().flat_map(|(parent, d)| d.instances.iter().filter(move |i| i.definition == index).map(move |i| format!("{}[{}]/{}", d.name, parent, i.name))).collect()
+    }).collect();
+    for (index, mut def) in source.definitions.into_iter().enumerate() {
+        let labels: Vec<_> = (0..def.geometry.faces.len()).map(|face| {
+            let tag = def.face_assignments.get(&face).and_then(|v| v.0).and_then(|i| scene.tags.get(i)).map_or("Untagged", |t| t.name.as_str());
+            format!("entity {}, definition {}[{}], parent instances {:?}, tag {}", def.face_ids.get(&face).map_or_else(|| format!("unavailable (face {face})"), ToString::to_string), def.name, index, parents[index], tag)
+        }).collect();
+        if scaled(def.geometry.clone()).build_cancellable(false, false, || control.is_cancelled()).is_err() {
+            control.check()?;
+            def.geometry = crate::skp_repair::recover(def.geometry, &labels, &mut def.face_assignments, &mut scene, control)?;
+        }
         assignments.push((def.face_assignments, def.edge_tags));
         control.check()?;
         scene.definitions.push(ImportedDefinition {
@@ -94,21 +105,6 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
     scene.roots = source.roots.into_iter().map(placement).collect();
     for (index, (faces, edges)) in assignments.into_iter().enumerate() {
         partition_tagged_geometry(&mut scene, index, faces, edges, control)?;
-    }
-    // A valid fast path pays one bounded validation pass. On damaged geometry,
-    // isolate polygon failures instead of rejecting unrelated source records.
-    for index in 0..scene.definitions.len() {
-        control.check()?;
-        let geometry = &scene.definitions[index].geometry;
-        let valid = scaled(geometry.clone())
-            .build_cancellable(false, false, || control.is_cancelled())
-            .is_ok();
-        control.check()?;
-        if !valid {
-            let original = std::mem::take(&mut scene.definitions[index].geometry);
-            let fixed = recover_geometry(original, &mut scene, control)?;
-            scene.definitions[index].geometry = fixed;
-        }
     }
     sanitize_graph(&mut scene);
     control.set_progress(0.4);
@@ -148,80 +144,6 @@ fn scaled(mut geometry: BulkGeometry) -> BulkGeometry {
         *point *= 0.0254;
     }
     geometry
-}
-fn recover_geometry(
-    mut source: BulkGeometry,
-    scene: &mut ImportedScene,
-    control: &ImportControl,
-) -> Result<BulkGeometry> {
-    let mut remap = vec![None; source.vertices.len()];
-    let mut fixed = BulkGeometry::default();
-    for (i, point) in source.vertices.drain(..).enumerate() {
-        if point.is_finite() && (point * 0.0254).abs().max_element() <= cindral_core::MAX_COORDINATE
-        {
-            remap[i] = Some(fixed.vertices.len());
-            fixed.vertices.push(point);
-        } else {
-            warn(scene, "Invalid/out-of-range vertex skipped");
-        }
-    }
-    let mut work = 0usize;
-    for mut face in source.faces {
-        control.check()?;
-        let size: usize = std::iter::once(&face.outer)
-            .chain(&face.holes)
-            .map(Vec::len)
-            .sum();
-        work = work.saturating_add(size.saturating_mul(size));
-        if size > 4096 || work > 64_000_000 {
-            warn(scene, "Face exceeds recovery work limit; skipped");
-            continue;
-        }
-        let mut local = BulkGeometry::default();
-        let mut good = true;
-        for ring in std::iter::once(&mut face.outer).chain(&mut face.holes) {
-            for vertex in ring {
-                if let Some(Some(mapped)) = remap.get(*vertex) {
-                    *vertex = *mapped;
-                } else {
-                    good = false;
-                }
-            }
-        }
-        if !good {
-            warn(scene, "Face references a missing vertex; skipped");
-            continue;
-        }
-        let mut sample = face.clone();
-        for ring in std::iter::once(&mut sample.outer).chain(&mut sample.holes) {
-            for vertex in ring {
-                let point = fixed.vertices[*vertex];
-                *vertex = local.vertices.len();
-                local.vertices.push(point);
-            }
-        }
-        local.faces.push(sample);
-        if scaled(local).build(false, false).is_ok() {
-            fixed.faces.push(face);
-        } else {
-            warn(scene, "Corrupt/nonplanar polygon skipped");
-        }
-    }
-    for mut edge in source.edges {
-        match (remap.get(edge.vertices[0]), remap.get(edge.vertices[1])) {
-            (Some(Some(a)), Some(Some(b)))
-                if a != b
-                    && fixed.vertices[*a].distance(fixed.vertices[*b]) * 0.0254
-                        > cindral_core::TOLERANCE =>
-            {
-                edge.vertices = [*a, *b];
-                fixed.edges.push(edge);
-            }
-            _ => warn(scene, "Invalid edge skipped"),
-        }
-    }
-    // All retained positions and rings have independently passed kernel validation.
-    Ok(fixed)
 }
 fn sanitize_graph(scene: &mut ImportedScene) {
     let count = scene.definitions.len();

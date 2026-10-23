@@ -1,4 +1,4 @@
-# Read-only SketchUp import (I2)
+# Editable SketchUp import (I2)
 
 `cindral-skp` independently reads the binary containers into shared local
 polygons. It is Rust only, forbids unsafe code, has no native dependency or
@@ -75,9 +75,10 @@ DOM parsing; DTD/entity declarations are rejected. Texture decoding uses existin
 4096×4096 per-image limits, 127 assets and a 256 MiB aggregate decoded-pixel
 budget. Nothing from an archive is extracted to disk or fetched over the network.
 
-Known-length malformed records are isolated where possible. Bad vertices,
-edges, polygons, textures and references warn without discarding independent
-records. Warnings are bounded to 256 messages. Hard container/resource limits
+Known-length malformed records are isolated where possible. Reader diagnostics
+are bounded to 256 messages; adapter polygon repairs/skips are individually
+reported without truncation. Invalid nondegenerate polygon recovery stops the
+import with an explicit error rather than dropping geometry. Hard container/resource limits
 return errors. Invalid TLV lengths stop that sibling run; unknown/unreadable
 legacy classes stop the archive walk and return recovered definitions/root
 records with an explicit partial-import warning. Neither format safely permits
@@ -158,3 +159,29 @@ For the private mybedroom model, raw reader counts are 1760 vertices, 2021 edges
 305 faces and one authored component placement. Before repair, 304 faces survived;
 Open produces one instance, while Import as Component produces two (one wrapper).
 SketchUp Model Info Statistics were not supplied, so that comparison is unknown.
+
+
+### Polygon repair policy
+
+Source topology can contain weakly simple loops with retraced bridges. Split
+those walks at repeated tolerance-welded vertices into simple outer/hole rings;
+preserve all original explicit edges, including bridge edges and their styles.
+For a nonplanar polygon, compute the least-squares plane (smallest covariance
+eigenvector over all boundary vertices in meters). If its maximum deviation is
+at most **0.0254 mm (0.001 inch)**, project onto that plane. This adapter policy
+uses the approximate SketchUp tolerance supplied for this task; it is not a
+claim about SketchUp's internal algorithm. Kernel validation remains 1e-7 m.
+Otherwise earcut the validated projected footprint, including holes, and build
+planar triangles from the original 3D positions, preserving material and color.
+Verify projected coverage before accepting triangles. Preserve explicit source
+edges. Only degenerate outer loops (zero area at kernel precision or fewer than
+three distinct vertices) are skipped. Nondegenerate invalid footprints, missing
+coordinates and exhausted work budgets fail explicitly without partial loss.
+Every adapter repair/skip includes entity identity (or an unavailable-ID marker),
+parent definition/placements, tag, local position and reason. Per-face assignments
+are replicated onto all resulting triangles before tag/hidden partitioning.
+
+The private model's face 44340 is already planar. Four vertices are revisited
+exactly across a retraced bridge, rather than newly collapsed by welding. Simple
+boundary decomposition restores it without moving any source position or adding
+edges: Open changes 1760/2021/304/1, skipped 1 to 1760/2021/305/1, skipped 0.
