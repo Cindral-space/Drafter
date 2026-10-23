@@ -9,6 +9,8 @@ pub(crate) struct RotateUi {
     point: Option<DVec3>,
     normal: Option<DVec3>,
     inferred: bool,
+    lock: Option<DVec3>,
+    held: Option<DVec3>,
     radius: f64,
     instance: Option<(InstancePath, DMat4, DMat4)>,
 }
@@ -97,8 +99,19 @@ impl DrafterApp {
             Some(cindral_tools::Hit::Face(id)) => inverse.transpose().transform_vector3(self.history.model().faces()[&id].plane.normal).normalize(),
             _ => DVec3::Z,
         } };
+        if !ctx.wants_keyboard_input() && !self.modify.active() {
+            ctx.input(|i| {
+                for (key, axis) in [(Key::ArrowUp,DVec3::Z),(Key::ArrowRight,DVec3::X),(Key::ArrowLeft,DVec3::Y)] {
+                    if i.key_pressed(key) { self.rotate.lock = if self.rotate.lock.is_some_and(|n| n.abs_diff_eq(axis,1e-9) || n.abs_diff_eq(-axis,1e-9)) { None } else { Some(axis) }; }
+                }
+                if i.key_pressed(Key::ArrowDown) { self.rotate.lock = if self.rotate.lock.is_some() {None} else {self.rotate.normal.or(Some(normal))}; }
+                if i.modifiers.shift { if self.rotate.held.is_none() { self.rotate.held = self.rotate.normal.or(Some(normal)); } }
+                else { self.rotate.held = None; }
+            });
+        }
+        let normal = self.rotate.lock.or(self.rotate.held).filter(|_| !self.modify.active()).unwrap_or(normal);
         let normal = if !self.modify.active() && normal.dot(world_ray.direction)>0. { -normal } else { normal };
-        if !self.modify.active() { self.rotate.inferred = matches!(hit, Some(cindral_tools::Hit::Face(_))); }
+        if !self.modify.active() { self.rotate.inferred = self.rotate.lock.is_none() && matches!(hit, Some(cindral_tools::Hit::Face(_))); }
         let center = self.modify.anchor().unwrap_or(DVec3::ZERO);
         let local_normal = context.transpose().transform_vector3(normal).normalize();
         let mut query = Query::new(cursor, ray, view);

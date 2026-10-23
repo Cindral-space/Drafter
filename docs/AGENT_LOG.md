@@ -511,3 +511,7 @@
 ### Rotate item 6 — hover orientation
 
 - Idle protractor now follows active-definition face normals and cursor points, with world-horizontal Z default for edges/endpoints/empty space. Normal points toward the camera-visible side before placement and freezes at the center. Context normals use inverse transpose. Exact reference edge/endpoint behavior remains a user trial. cargo check -p cindral-app passes.
+
+### Rotate item 7 — plane locks
+
+- Up/Right/Left toggle world Z/X/Y orientation before center; Down toggles inferred orientation, Shift holds the preceding orientation until release. Placement freezes the plane. Locks reset with cancel/tool activation. Targeted app check passes. Tests will cover synthetic key frames.
