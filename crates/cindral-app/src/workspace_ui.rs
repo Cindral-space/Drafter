@@ -2,6 +2,13 @@
 use super::*;
 use egui::{Align, Layout, RichText, Stroke};
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum InspectorTab {
+    Model,
+    Appearance,
+    Recovery,
+}
+
 pub(crate) fn configure_style(ctx: &egui::Context) {
     ctx.options_mut(|o| o.fallback_theme = egui::Theme::Dark);
     ctx.all_styles_mut(|style| {
@@ -642,20 +649,30 @@ impl DrafterApp {
             return;
         }
         egui::SidePanel::right("default_tray")
-            .default_width(264.)
-            .width_range(250. ..=420.)
+            .default_width(320.)
+            .width_range(300. ..=460.)
             .frame(
                 egui::Frame::new()
                     .fill(ctx.style().visuals.panel_fill)
                     .inner_margin(20),
             )
             .show(ctx, |ui| {
-                let tab_id = egui::Id::new("inspector_appearance");
-                let mut appearance =
-                    ctx.data(|data| data.get_temp::<bool>(tab_id).unwrap_or(false));
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut appearance, false, "Model");
-                    ui.selectable_value(&mut appearance, true, "Appearance");
+                    ui.spacing_mut().item_spacing.x = 4.;
+                    ui.spacing_mut().button_padding.x = 4.;
+                    ui.selectable_value(&mut self.inspector_tab, InspectorTab::Model, "Model");
+                    ui.selectable_value(
+                        &mut self.inspector_tab,
+                        InspectorTab::Appearance,
+                        "Appearance",
+                    );
+                    let count = self.recovery_count();
+                    let label = if count == 0 {
+                        "Recovery".into()
+                    } else {
+                        format!("Recovery ({count})")
+                    };
+                    ui.selectable_value(&mut self.inspector_tab, InspectorTab::Recovery, label);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
                             .add(
@@ -672,12 +689,13 @@ impl DrafterApp {
                         }
                     });
                 });
-                ctx.data_mut(|data| data.insert_temp(tab_id, appearance));
                 ui.add_space(12.);
                 egui::ScrollArea::vertical()
-                    .id_salt("tray_scroll")
+                    .id_salt(("tray_scroll", self.inspector_tab))
                     .show(ui, |ui| {
-                        if appearance {
+                        if self.inspector_tab == InspectorTab::Recovery {
+                            self.recovery_panel(ui);
+                        } else if self.inspector_tab == InspectorTab::Appearance {
                             self.presentation_panel(ui);
                         } else {
                             ui.label(

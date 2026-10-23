@@ -9,6 +9,37 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+fn sorted_recovery_files(directory: &Path) -> cindral_io::Result<Vec<PathBuf>> {
+    let mut files = cindral_io::recovery_files(directory)?;
+    files.sort_by_cached_key(|path| {
+        (
+            std::cmp::Reverse(std::fs::metadata(path).and_then(|m| m.modified()).ok()),
+            path.clone(),
+        )
+    });
+    Ok(files)
+}
+
+fn snapshot_age(path: &Path) -> String {
+    let Some(age) = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+    else {
+        return "Snapshot time unavailable".into();
+    };
+    let seconds = age.as_secs();
+    if seconds < 60 {
+        "Saved less than a minute ago".into()
+    } else if seconds < 3600 {
+        format!("Saved {} min ago", seconds / 60)
+    } else if seconds < 86400 {
+        format!("Saved {} h ago", seconds / 3600)
+    } else {
+        format!("Saved {} days ago", seconds / 86400)
+    }
+}
+
 struct AutosaveJob {
     path: PathBuf,
     generation: u64,
@@ -535,50 +566,10 @@ impl DrafterApp {
                 }
             });
             ui.separator();
-            // Keep the snapshot list open for repeated discard/refresh actions.
-            egui::containers::menu::SubMenuButton::new("Recovery snapshots")
-                .config(
-                    egui::containers::menu::MenuConfig::new()
-                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
-                )
-                .ui(ui, |ui| {
-                    if ui.button("Refresh recovery snapshots").clicked() {
-                        match cindral_io::recovery_files(&self.files.directory) {
-                            Ok(files) => self.files.candidates = files,
-                            Err(e) => self.error = Some(e.to_string()),
-                        }
-                    }
-                    if self.files.candidates.is_empty() {
-                        ui.label("No recovery snapshots found.");
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(210.)
-                        .show(ui, |ui| {
-                            for path in self.files.candidates.clone() {
-                                ui.horizontal(|ui| {
-                                    ui.add_sized(
-                                        [180., 30.],
-                                        egui::Label::new(
-                                            path.file_name().unwrap_or_default().to_string_lossy(),
-                                        )
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(path.display().to_string());
-                                    if ui.small_button("Recover").clicked() {
-                                        action = Some(Action::Recover(path.clone()));
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .add(egui::Button::new("×").min_size(egui::vec2(30., 30.)))
-                                        .on_hover_text("Discard this recovery snapshot permanently")
-                                        .clicked()
-                                    {
-                                        action = Some(Action::Discard(path));
-                                    }
-                                });
-                            }
-                        });
-                });
+            if ui.button("Recovery snapshots").clicked() {
+                self.open_recovery_panel();
+                ui.close();
+            }
         });
         if let Some(action) = action {
             if let Err(e) = self.do_file_action(action) {
@@ -593,7 +584,7 @@ impl DrafterApp {
         self.import_window(ctx);
         if !self.files.checked {
             self.files.checked = true;
-            match cindral_io::recovery_files(&self.files.directory) {
+            match sorted_recovery_files(&self.files.directory) {
                 Ok(files) => {
                     self.files.offer = !files.is_empty();
                     self.files.candidates = files;
@@ -663,38 +654,70 @@ impl DrafterApp {
             self.error = Some(e.to_string());
         }
     }
-    pub(crate) fn recovery_window(&mut self, ctx: &egui::Context) {
-        if !self.files.offer {
-            return;
+    pub(crate) fn recovery_count(&self) -> usize {
+        self.files.candidates.len()
+    }
+    pub(crate) fn recovery_offer(&mut self) {
+        if self.files.offer {
+            self.files.offer = false;
+            self.show_tray = true;
+            self.inspector_tab = workspace_ui::InspectorTab::Recovery;
+        }
+    }
+    fn open_recovery_panel(&mut self) {
+        match sorted_recovery_files(&self.files.directory) {
+            Ok(files) => self.files.candidates = files,
+            Err(e) => self.error = Some(e.to_string()),
+        }
+        self.show_tray = true;
+        self.inspector_tab = workspace_ui::InspectorTab::Recovery;
+    }
+    pub(crate) fn recovery_panel(&mut self, ui: &mut egui::Ui) {
+        ui.strong("Recovery snapshots");
+        ui.label("Recover opens an unsaved draft. Closing this panel keeps your snapshots.");
+        if ui.button("Refresh").clicked() {
+            self.open_recovery_panel();
+        }
+        if self.files.candidates.is_empty() {
+            ui.weak("No recovery snapshots found.");
         }
         let mut action = None;
-        let mut open = true;
-        egui::Window::new("Recover a draft")
-            .collapsible(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label("A previous session left recovery snapshots. Recover opens a new unsaved draft.");
-                for path in self.files.candidates.clone() {
-                    ui.horizontal(|ui| {
-                        ui.label(path.file_name().unwrap_or_default().to_string_lossy());
-                        if ui.button("Recover").clicked() {
-                            action = Some(Action::Recover(path.clone()));
-                        }
-                        if ui.add(egui::Button::new("×").frame(false).min_size(egui::vec2(28., 28.)))
-                            .on_hover_text("Discard this recovery snapshot permanently")
-                            .clicked() {
-                            action = Some(Action::Discard(path));
-                        }
-                    });
+        for (index, path) in self.files.candidates.iter().enumerate() {
+            ui.separator();
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            let name = if filename
+                .strip_prefix("draft-")
+                .and_then(|name| name.strip_suffix(".cdraft.autosave"))
+                .is_some_and(|parts| {
+                    parts.split('-').count() == 3
+                        && parts.split('-').all(|part| part.parse::<u128>().is_ok())
+                }) {
+                format!("Recovery snapshot {}", index + 1)
+            } else {
+                filename.trim_end_matches(".cdraft.autosave").to_owned()
+            };
+            ui.add(egui::Label::new(egui::RichText::new(name).strong()).wrap())
+                .on_hover_text(path.display().to_string());
+            ui.weak(snapshot_age(path));
+            ui.horizontal(|ui| {
+                if ui.button("Recover").clicked() {
+                    action = Some(Action::Recover(path.clone()));
+                }
+                if ui
+                    .small_button("Delete permanently")
+                    .on_hover_text("Permanently delete this recovery snapshot")
+                    .clicked()
+                {
+                    action = Some(Action::Discard(path.clone()));
                 }
             });
-        self.files.offer = open;
+        }
         if let Some(action) = action {
-            if let Err(e) = self.do_file_action(action) {
-                self.error = Some(e.to_string());
-            }
-            if self.files.candidates.is_empty() {
-                self.files.offer = false;
+            let recovering = matches!(action, Action::Recover(_));
+            match self.do_file_action(action) {
+                Ok(()) if recovering => self.inspector_tab = workspace_ui::InspectorTab::Model,
+                Ok(()) => {}
+                Err(e) => self.error = Some(e.to_string()),
             }
         }
     }
@@ -1245,6 +1268,94 @@ mod tests {
             .unwrap();
         app
     }
+    #[test]
+    fn recovery_inspector_discovers_once_preserves_dismissed_files_and_refreshes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let first = directory.path().join("z-old.cdraft.autosave");
+        let second = directory.path().join("a-new.cdraft.autosave");
+        for (path, seconds) in [(&first, 100), (&second, 200)] {
+            let file = std::fs::File::create(path).unwrap();
+            file.set_modified(UNIX_EPOCH + Duration::from_secs(seconds))
+                .unwrap();
+        }
+        editor.files.checked = false;
+        editor.show_tray = false;
+        editor.file_tick(&egui::Context::default());
+        editor.recovery_offer();
+        assert!(editor.show_tray);
+        assert!(editor.inspector_tab == workspace_ui::InspectorTab::Recovery);
+        assert_eq!(editor.files.candidates, vec![second.clone(), first.clone()]);
+        editor.show_tray = false;
+        editor.file_tick(&egui::Context::default());
+        editor.recovery_offer();
+        assert!(!editor.show_tray, "dismissal must survive later frames");
+        assert!(first.exists() && second.exists());
+        editor.open_recovery_panel();
+        assert!(editor.show_tray);
+        editor.do_file_action(Action::Discard(second)).unwrap();
+        editor.do_file_action(Action::Discard(first)).unwrap();
+        editor.open_recovery_panel();
+        assert_eq!(editor.recovery_count(), 0);
+        assert!(editor.inspector_tab == workspace_ui::InspectorTab::Recovery);
+    }
+
+    #[test]
+    fn recovery_inspector_button_recovers_unsaved_values_and_retains_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = app(directory.path());
+        let path = directory.path().join("named.cdraft.autosave");
+        let expected = source.file_values();
+        cindral_io::save_autosave(&path, &expected).unwrap();
+        let mut editor = app(directory.path());
+        editor
+            .history
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::Z,
+            })
+            .unwrap();
+        editor.open_recovery_panel();
+        let ctx = egui::Context::default();
+        workspace_ui::configure_style(&ctx);
+        let frame =
+            |editor: &mut DrafterApp, input| ctx.run(input, |ctx| editor.model_inspector(ctx));
+        // The first layout pass initializes fonts and panel sizing.
+        let _ = frame(&mut editor, egui::RawInput::default());
+        let output = frame(&mut editor, egui::RawInput::default());
+        let position = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Recover" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .expect("Recovery tab must expose its Recover button");
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = frame(&mut editor, input);
+        }
+        assert_eq!(editor.file_values(), expected);
+        assert!(editor.files.path.is_none());
+        assert!(path.exists());
+        assert_eq!(editor.files.recovered_from, Some(path));
+        assert_eq!(editor.history.undo_depth(), 0);
+        assert!(editor.inspector_tab == workspace_ui::InspectorTab::Model);
+    }
+
     #[test]
     fn saved_state_tracks_edits_and_is_not_cleared_by_recovery_autosave() {
         let directory = tempfile::tempdir().unwrap();

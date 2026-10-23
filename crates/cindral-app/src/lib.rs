@@ -42,6 +42,7 @@ pub struct DrafterApp {
     system_theme: theme::SystemTheme,
     shortcuts: shortcuts::Ui,
     show_tray: bool,
+    inspector_tab: workspace_ui::InspectorTab,
     show_grid: bool,
     presentation: cindral_core::Presentation,
     presentation_ui: presentation_ui::PresentationUi,
@@ -87,6 +88,7 @@ impl Default for DrafterApp {
             system_theme: Default::default(),
             shortcuts: Default::default(),
             show_tray: true,
+            inspector_tab: workspace_ui::InspectorTab::Model,
             show_grid: false,
             presentation: Default::default(),
             presentation_ui: Default::default(),
@@ -737,7 +739,7 @@ impl DrafterApp {
         self.workspace_header(ctx);
         self.workspace_status(ctx);
         self.tape_resize_window(ctx);
-        self.recovery_window(ctx);
+        self.recovery_offer();
         self.autosave_tick(ctx);
         self.scene_tabs(ctx);
         self.tool_palette(ctx);
