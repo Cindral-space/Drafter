@@ -121,7 +121,13 @@ impl SceneCache {
                 });
                 continue;
             }
-            let placement = model.geometry_frame() * self.baselines.get(id).copied().unwrap_or(glam::DMat4::IDENTITY).inverse();
+            let placement = model.geometry_frame()
+                * self
+                    .baselines
+                    .get(id)
+                    .copied()
+                    .unwrap_or(glam::DMat4::IDENTITY)
+                    .inverse();
             translated |= self.placements.insert(*id, placement) != Some(placement);
             let offset = placement.w_axis.truncate();
             let dirty = changes.geometry.get(id);
@@ -132,13 +138,21 @@ impl SceneCache {
                 continue;
             }
             if dirty.is_some() || changes.appearance || textures_changed {
-                if placement.x_axis != glam::DVec4::X || placement.y_axis != glam::DVec4::Y || placement.z_axis != glam::DVec4::Z {
-                    let (cache,mesh)=MeshCache::rebuild_styled(model,&|face_id,face| style(doc,face_id,face,&self.texture_layers))?;
-                    self.meshes.insert(*id,cache);
-                    self.baselines.insert(*id,model.geometry_frame());
-                    self.placements.insert(*id,glam::DMat4::IDENTITY);
-                    translated=true;
-                    update.geometry.push(DefinitionUpdate {definition:*id,mesh:Arc::new(mesh)});
+                if placement.x_axis != glam::DVec4::X
+                    || placement.y_axis != glam::DVec4::Y
+                    || placement.z_axis != glam::DVec4::Z
+                {
+                    let (cache, mesh) = MeshCache::rebuild_styled(model, &|face_id, face| {
+                        style(doc, face_id, face, &self.texture_layers)
+                    })?;
+                    self.meshes.insert(*id, cache);
+                    self.baselines.insert(*id, model.geometry_frame());
+                    self.placements.insert(*id, glam::DMat4::IDENTITY);
+                    translated = true;
+                    update.geometry.push(DefinitionUpdate {
+                        definition: *id,
+                        mesh: Arc::new(mesh),
+                    });
                     continue;
                 }
                 let mut faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
@@ -174,7 +188,11 @@ impl SceneCache {
             let mut batches: BTreeMap<DefinitionId, Vec<InstanceData>> = BTreeMap::new();
             for item in &self.occurrences {
                 let world = (item.world
-                    * self.placements.get(&item.definition).copied().unwrap_or(glam::DMat4::IDENTITY))
+                    * self
+                        .placements
+                        .get(&item.definition)
+                        .copied()
+                        .unwrap_or(glam::DMat4::IDENTITY))
                 .as_mat4();
                 if !world.is_finite() {
                     return Err(KernelError::InvalidPosition);

@@ -34,7 +34,7 @@ pub enum OrganizationCommand {
     /// Transform/copy a set of direct children in one transaction, preserving definitions.
     TransformSet {
         /// Source paths and one or more absolute destinations per source.
-        placements: Vec<(InstancePath,Vec<DMat4>)>,
+        placements: Vec<(InstancePath, Vec<DMat4>)>,
         /// Retain the source and create destinations when true.
         copy: bool,
     },
@@ -305,9 +305,9 @@ enum DocumentEntry {
 }
 #[derive(Clone, Debug)]
 struct PlacementCache {
-    signature: Vec<(InstancePath,usize)>,
+    signature: Vec<(InstancePath, usize)>,
     copy: bool,
-    targets: Vec<(DefinitionId,InstanceId)>,
+    targets: Vec<(DefinitionId, InstanceId)>,
 }
 #[derive(Clone, Debug)]
 struct InstancePreview {
@@ -935,48 +935,132 @@ impl DocumentHistory {
         result
     }
     /// Preview several occurrence placements, caching the destination IDs across pointer moves.
-    pub fn preview_placement_set(&mut self, command: OrganizationCommand) -> Result<bool,KernelError> {
-        let mut command=command;
-        if let OrganizationCommand::TransformSet {placements,..}=&mut command {placements.sort_by(|a,b|a.0.cmp(&b.0));}
-        let OrganizationCommand::TransformSet {placements,copy} = &command else {return Err(invalid("Expected transform set"))};
-        if placements.iter().any(|(p,_)| !p.starts_with(&self.context) || p.len()!=self.context.len()+1) {return Err(invalid("Placement target outside active context"));}
-        let signature=placements.iter().map(|(p,m)|(p.clone(),m.len())).collect::<Vec<_>>();
-        for (_,matrices) in placements {for matrix in matrices {validate_instance_transform(*matrix)?;}}
-        if let Some(cache)=&self.transform_set_cache {
-            if cache.signature==signature && cache.copy==*copy {
-                for ((owner,id),matrix) in cache.targets.iter().zip(placements.iter().flat_map(|(_,m)|m)) {
-                    self.graph.definitions.get_mut(owner).and_then(|d|d.instances.get_mut(id)).ok_or(KernelError::MissingEntity)?.transform=*matrix;
-                    if let Some(DocumentEntry::Organization {delta,..})=&mut self.organization_preview {
-                        if let Some((_,Some(node)))=delta.instances.get_mut(&(*owner,*id)) {node.transform=*matrix;}
+    pub fn preview_placement_set(
+        &mut self,
+        command: OrganizationCommand,
+    ) -> Result<bool, KernelError> {
+        let mut command = command;
+        if let OrganizationCommand::TransformSet { placements, .. } = &mut command {
+            placements.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        let OrganizationCommand::TransformSet { placements, copy } = &command else {
+            return Err(invalid("Expected transform set"));
+        };
+        if placements
+            .iter()
+            .any(|(p, _)| !p.starts_with(&self.context) || p.len() != self.context.len() + 1)
+        {
+            return Err(invalid("Placement target outside active context"));
+        }
+        let signature = placements
+            .iter()
+            .map(|(p, m)| (p.clone(), m.len()))
+            .collect::<Vec<_>>();
+        for (_, matrices) in placements {
+            for matrix in matrices {
+                validate_instance_transform(*matrix)?;
+            }
+        }
+        if let Some(cache) = &self.transform_set_cache {
+            if cache.signature == signature && cache.copy == *copy {
+                for ((owner, id), matrix) in cache
+                    .targets
+                    .iter()
+                    .zip(placements.iter().flat_map(|(_, m)| m))
+                {
+                    self.graph
+                        .definitions
+                        .get_mut(owner)
+                        .and_then(|d| d.instances.get_mut(id))
+                        .ok_or(KernelError::MissingEntity)?
+                        .transform = *matrix;
+                    if let Some(DocumentEntry::Organization { delta, .. }) =
+                        &mut self.organization_preview
+                    {
+                        if let Some((_, Some(node))) = delta.instances.get_mut(&(*owner, *id)) {
+                            node.transform = *matrix;
+                        }
                     }
                 }
-                self.changed(BTreeMap::new(),true,false);return Ok(true);
+                self.changed(BTreeMap::new(), true, false);
+                return Ok(true);
             }
         }
         self.cancel_preview()?;
-        let redo=self.redo.clone();
-        if !self.organization(command.clone())? {return Ok(false);}
-        self.preview_redo=Some(redo);
-        self.organization_preview=self.undo.pop();
-        let targets=if *copy {
-            let Some(DocumentEntry::Organization {delta,..})=&self.organization_preview else {return Ok(false)};
-            delta.instances.iter().filter_map(|(key,(before,after))| (key.0==self.active_definition() && before.is_none() && after.is_some()).then_some(*key)).collect()
-        } else {placements.iter().map(|(path,_)|self.graph.node(path).map(|(owner,node)|(owner,node.id))).collect::<Result<Vec<_>,_>>()?};
-        self.transform_set_cache=Some(PlacementCache {signature,copy:*copy,targets});Ok(true)
+        let redo = self.redo.clone();
+        if !self.organization(command.clone())? {
+            return Ok(false);
+        }
+        self.preview_redo = Some(redo);
+        self.organization_preview = self.undo.pop();
+        let targets = if *copy {
+            let Some(DocumentEntry::Organization { delta, .. }) = &self.organization_preview else {
+                return Ok(false);
+            };
+            delta
+                .instances
+                .iter()
+                .filter_map(|(key, (before, after))| {
+                    (key.0 == self.active_definition() && before.is_none() && after.is_some())
+                        .then_some(*key)
+                })
+                .collect()
+        } else {
+            placements
+                .iter()
+                .map(|(path, _)| self.graph.node(path).map(|(owner, node)| (owner, node.id)))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        self.transform_set_cache = Some(PlacementCache {
+            signature,
+            copy: *copy,
+            targets,
+        });
+        Ok(true)
     }
     /// Preview selected loose geometry together with one selected occurrence.
     /// Uses the same local transform and placement deltas as individual Move operations.
-    pub fn preview_selection_transform(&mut self, geometry: Command, placement: OrganizationCommand) -> Result<bool, KernelError> {
-        let snapshot = (self.graph.clone(), self.instance_preview.clone(), self.organization_preview.clone(), self.duplicate_preview, self.preview_redo.clone(), self.redo.clone(), self.transform_set_cache.clone());
+    pub fn preview_selection_transform(
+        &mut self,
+        geometry: Command,
+        placement: OrganizationCommand,
+    ) -> Result<bool, KernelError> {
+        let snapshot = (
+            self.graph.clone(),
+            self.instance_preview.clone(),
+            self.organization_preview.clone(),
+            self.duplicate_preview,
+            self.preview_redo.clone(),
+            self.redo.clone(),
+            self.transform_set_cache.clone(),
+        );
         // Keep provisional private definitions available for rollback without cloning their geometry.
-        let private_ids=match &self.organization_preview {Some(DocumentEntry::Organization {delta,..})=>delta.definitions.iter().filter_map(|(id,(before,after))|(before.is_none() && after.is_some()).then_some(*id)).collect::<Vec<_>>(),_=>Vec::new()};
-        let retained=private_ids.into_iter().filter_map(|id|self.geometry.remove(&id).map(|h|(id,h))).collect::<Vec<_>>();
+        let private_ids = match &self.organization_preview {
+            Some(DocumentEntry::Organization { delta, .. }) => delta
+                .definitions
+                .iter()
+                .filter_map(|(id, (before, after))| {
+                    (before.is_none() && after.is_some()).then_some(*id)
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let retained = private_ids
+            .into_iter()
+            .filter_map(|id| self.geometry.remove(&id).map(|h| (id, h)))
+            .collect::<Vec<_>>();
         let saved = self.geometry_preview.take();
         let result = match placement {
-            OrganizationCommand::Transform {path,transform} => self.preview_instance_transform(&path,transform),
-            OrganizationCommand::Duplicate {path,transform} => self.preview_duplicate(&path,transform),
-            command @ OrganizationCommand::TransformSet {..} => self.preview_placement_set(command),
-            command @ OrganizationCommand::DuplicateMany {..} => {
+            OrganizationCommand::Transform { path, transform } => {
+                self.preview_instance_transform(&path, transform)
+            }
+            OrganizationCommand::Duplicate { path, transform } => {
+                self.preview_duplicate(&path, transform)
+            }
+            command @ OrganizationCommand::TransformSet { .. } => {
+                self.preview_placement_set(command)
+            }
+            command @ OrganizationCommand::DuplicateMany { .. } => {
                 let redo = self.redo.clone();
                 self.organization(command)?;
                 self.preview_redo = Some(redo);
@@ -986,55 +1070,113 @@ impl DocumentHistory {
             _ => Err(invalid("Unsupported selection preview")),
         };
         self.geometry_preview = saved;
-        if let Err(error)=result {
-            (self.graph,self.instance_preview,self.organization_preview,self.duplicate_preview,self.preview_redo,self.redo,self.transform_set_cache)=snapshot;
-            self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
-            for (id,history) in retained {self.geometry.entry(id).or_insert(history);}
+        if let Err(error) = result {
+            (
+                self.graph,
+                self.instance_preview,
+                self.organization_preview,
+                self.duplicate_preview,
+                self.preview_redo,
+                self.redo,
+                self.transform_set_cache,
+            ) = snapshot;
+            self.geometry
+                .retain(|id, _| self.graph.definitions.contains_key(id));
+            for (id, history) in retained {
+                self.geometry.entry(id).or_insert(history);
+            }
             return Err(error);
         }
         let id = self.active_definition();
         let result = self.history_mut(id)?.preview_atomic(geometry);
         if result.is_err() {
-            (self.graph,self.instance_preview,self.organization_preview,self.duplicate_preview,self.preview_redo,self.redo,self.transform_set_cache)=snapshot;
-            self.geometry_preview=saved;
-            self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
+            (
+                self.graph,
+                self.instance_preview,
+                self.organization_preview,
+                self.duplicate_preview,
+                self.preview_redo,
+                self.redo,
+                self.transform_set_cache,
+            ) = snapshot;
+            self.geometry_preview = saved;
+            self.geometry
+                .retain(|id, _| self.graph.definitions.contains_key(id));
         }
-        for (id,history) in retained {if self.graph.definitions.contains_key(&id) {self.geometry.entry(id).or_insert(history);}}
-        if result.is_ok() { self.geometry_preview = Some(id); }
-        let dirty = BTreeMap::from([(id,self.history(id).changes().clone())]);
-        self.changed(dirty,true,false);
+        for (id, history) in retained {
+            if self.graph.definitions.contains_key(&id) {
+                self.geometry.entry(id).or_insert(history);
+            }
+        }
+        if result.is_ok() {
+            self.geometry_preview = Some(id);
+        }
+        let dirty = BTreeMap::from([(id, self.history(id).changes().clone())]);
+        self.changed(dirty, true, false);
         result
     }
     /// Replace a completed mixed geometry/occurrence transform as one undo entry.
-    pub fn replace_selection_transform(&mut self, geometry: Command, placement: OrganizationCommand) -> Result<bool, KernelError> {
+    pub fn replace_selection_transform(
+        &mut self,
+        geometry: Command,
+        placement: OrganizationCommand,
+    ) -> Result<bool, KernelError> {
         self.cancel_preview()?;
         let id = self.active_definition();
-        let Some(DocumentEntry::Organization {delta,steps}) = self.undo.last().cloned() else { return Err(invalid("No completed mixed transform")); };
-        if steps != vec![id] { return Err(invalid("Transform context changed")); }
+        let Some(DocumentEntry::Organization { delta, steps }) = self.undo.last().cloned() else {
+            return Err(invalid("No completed mixed transform"));
+        };
+        if steps != vec![id] {
+            return Err(invalid("Transform context changed"));
+        }
         let current = self.graph.clone();
-        delta.apply(&mut self.graph,false)?;
+        delta.apply(&mut self.graph, false)?;
         let old = self.undo.pop().ok_or(KernelError::MissingEntity)?;
         // Validate graph destinations first, then replace local geometry atomically.
         let graph_result = self.organization(placement);
-        if !matches!(graph_result,Ok(true)) { self.graph=current; self.undo.push(old); return graph_result; }
-        let result = self.history_mut(id)?.replace_last(geometry);
-        if !matches!(result,Ok(true)) {
-            self.undo.pop(); self.graph=current; self.undo.push(old);
-            self.geometry.retain(|id,_|self.graph.definitions.contains_key(id)); return result;
+        if !matches!(graph_result, Ok(true)) {
+            self.graph = current;
+            self.undo.push(old);
+            return graph_result;
         }
-        self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
-        if let Some(DocumentEntry::Organization {steps,..}) = self.undo.last_mut() { steps.push(id); }
-        self.changed(BTreeMap::from([(id,self.history(id).changes().clone())]),true,false);
+        let result = self.history_mut(id)?.replace_last(geometry);
+        if !matches!(result, Ok(true)) {
+            self.undo.pop();
+            self.graph = current;
+            self.undo.push(old);
+            self.geometry
+                .retain(|id, _| self.graph.definitions.contains_key(id));
+            return result;
+        }
+        self.geometry
+            .retain(|id, _| self.graph.definitions.contains_key(id));
+        if let Some(DocumentEntry::Organization { steps, .. }) = self.undo.last_mut() {
+            steps.push(id);
+        }
+        self.changed(
+            BTreeMap::from([(id, self.history(id).changes().clone())]),
+            true,
+            false,
+        );
         Ok(true)
     }
     /// Cancel provisional geometry or an instance placement without touching global history.
     pub fn cancel_preview(&mut self) -> Result<bool, KernelError> {
-        self.transform_set_cache=None;
-        if self.geometry_preview.is_some() && (self.instance_preview.is_some() || self.organization_preview.is_some()) {
-            let id = self.geometry_preview.take().ok_or(KernelError::MissingEntity)?;
+        self.transform_set_cache = None;
+        if self.geometry_preview.is_some()
+            && (self.instance_preview.is_some() || self.organization_preview.is_some())
+        {
+            let id = self
+                .geometry_preview
+                .take()
+                .ok_or(KernelError::MissingEntity)?;
             self.cancel_preview()?;
             self.history_mut(id)?.cancel_preview()?;
-            self.changed(BTreeMap::from([(id,self.history(id).changes().clone())]),true,false);
+            self.changed(
+                BTreeMap::from([(id, self.history(id).changes().clone())]),
+                true,
+                false,
+            );
             self.pending_cancel = self.changes.geometry.clone();
             return Ok(true);
         }
@@ -1074,15 +1216,25 @@ impl DocumentHistory {
     }
     /// Commit the last provisional edit as exactly one global undo entry.
     pub fn commit_preview(&mut self) -> Result<bool, KernelError> {
-        self.transform_set_cache=None;
-        if self.geometry_preview.is_some() && (self.instance_preview.is_some() || self.organization_preview.is_some()) {
-            let id = self.geometry_preview.take().ok_or(KernelError::MissingEntity)?;
+        self.transform_set_cache = None;
+        if self.geometry_preview.is_some()
+            && (self.instance_preview.is_some() || self.organization_preview.is_some())
+        {
+            let id = self
+                .geometry_preview
+                .take()
+                .ok_or(KernelError::MissingEntity)?;
             let geometry = self.history_mut(id)?.commit_preview()?;
             let placement = self.commit_preview()?;
             if geometry {
                 if placement {
-                    if let Some(DocumentEntry::Organization {steps,..}) = self.undo.last_mut() { steps.push(id); }
-                } else { self.undo.push(DocumentEntry::Geometry(id)); self.redo.clear(); }
+                    if let Some(DocumentEntry::Organization { steps, .. }) = self.undo.last_mut() {
+                        steps.push(id);
+                    }
+                } else {
+                    self.undo.push(DocumentEntry::Geometry(id));
+                    self.redo.clear();
+                }
             }
             return Ok(geometry || placement);
         }
@@ -1456,20 +1608,42 @@ impl DocumentHistory {
         graph.definitions.insert(id, info);
         Ok(id)
     }
-    fn place_nodes(&self,graph:&mut Graph,created:&mut BTreeMap<DefinitionId,Model>,placements:Vec<(InstancePath,Vec<DMat4>)>,copy:bool)->Result<(),KernelError> {
-        if placements.is_empty() || placements.len()>100_000 {return Err(invalid("Select instances first"));}
-        for (path,matrices) in placements {
-            if matrices.is_empty() || matrices.len()>256 || !copy && matrices.len()!=1 {return Err(invalid("Array count must be between 1 and 256"));}
-            let (owner,source)=graph.node(&path)?;let source=source.clone();
-            for transform in matrices {
-                validate_instance_transform(transform)?;let mut node=source.clone();node.transform=transform;
-                if copy {
-                    node.id=InstanceId(graph.allocate()?);node.name=format!("{} copy",node.name);
-                    if self.definition_kind(node.definition)==Some(DefinitionKind::Group) {node.definition=self.clone_definition(node.definition,graph,created)?;}
-                }
-                graph.definitions.get_mut(&owner).ok_or(KernelError::MissingEntity)?.instances.insert(node.id,node);
+    fn place_nodes(
+        &self,
+        graph: &mut Graph,
+        created: &mut BTreeMap<DefinitionId, Model>,
+        placements: Vec<(InstancePath, Vec<DMat4>)>,
+        copy: bool,
+    ) -> Result<(), KernelError> {
+        if placements.is_empty() || placements.len() > 100_000 {
+            return Err(invalid("Select instances first"));
+        }
+        for (path, matrices) in placements {
+            if matrices.is_empty() || matrices.len() > 256 || !copy && matrices.len() != 1 {
+                return Err(invalid("Array count must be between 1 and 256"));
             }
-        }Ok(())
+            let (owner, source) = graph.node(&path)?;
+            let source = source.clone();
+            for transform in matrices {
+                validate_instance_transform(transform)?;
+                let mut node = source.clone();
+                node.transform = transform;
+                if copy {
+                    node.id = InstanceId(graph.allocate()?);
+                    node.name = format!("{} copy", node.name);
+                    if self.definition_kind(node.definition) == Some(DefinitionKind::Group) {
+                        node.definition = self.clone_definition(node.definition, graph, created)?;
+                    }
+                }
+                graph
+                    .definitions
+                    .get_mut(&owner)
+                    .ok_or(KernelError::MissingEntity)?
+                    .instances
+                    .insert(node.id, node);
+            }
+        }
+        Ok(())
     }
     /// Apply a document-level organization command as one global undo step.
     pub fn organization(&mut self, command: OrganizationCommand) -> Result<bool, KernelError> {
@@ -1631,14 +1805,19 @@ impl DocumentHistory {
                         },
                     );
             }
-            OrganizationCommand::Duplicate {path,transform} => {
-                self.place_nodes(&mut after,&mut created,vec![(path,vec![transform])],true)?;
+            OrganizationCommand::Duplicate { path, transform } => {
+                self.place_nodes(
+                    &mut after,
+                    &mut created,
+                    vec![(path, vec![transform])],
+                    true,
+                )?;
             }
-            OrganizationCommand::DuplicateMany {path,transforms} => {
-                self.place_nodes(&mut after,&mut created,vec![(path,transforms)],true)?;
+            OrganizationCommand::DuplicateMany { path, transforms } => {
+                self.place_nodes(&mut after, &mut created, vec![(path, transforms)], true)?;
             }
-            OrganizationCommand::TransformSet {placements,copy} => {
-                self.place_nodes(&mut after,&mut created,placements,copy)?;
+            OrganizationCommand::TransformSet { placements, copy } => {
+                self.place_nodes(&mut after, &mut created, placements, copy)?;
             }
             OrganizationCommand::Delete(path) => {
                 let (owner, node) = node_mut(&mut after, &path)?;
@@ -1706,8 +1885,13 @@ impl DocumentHistory {
                     .instances
                     .insert(node.id, node);
             }
-            OrganizationCommand::Transform {path,transform} => {
-                self.place_nodes(&mut after,&mut created,vec![(path,vec![transform])],false)?;
+            OrganizationCommand::Transform { path, transform } => {
+                self.place_nodes(
+                    &mut after,
+                    &mut created,
+                    vec![(path, vec![transform])],
+                    false,
+                )?;
             }
             OrganizationCommand::Reparent { path, parent } => {
                 if path.is_empty() || parent.starts_with(&path) {

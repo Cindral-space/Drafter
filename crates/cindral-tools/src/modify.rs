@@ -377,7 +377,12 @@ impl ModifySession {
     }
 
     /// Begin Rotate with the already collected transform targets, including container-only selections.
-    pub fn begin_rotation(&mut self, vertices: Vec<VertexId>, center: DVec3, normal: DVec3) -> Result<(), ToolError> {
+    pub fn begin_rotation(
+        &mut self,
+        vertices: Vec<VertexId>,
+        center: DVec3,
+        normal: DVec3,
+    ) -> Result<(), ToolError> {
         validate_point(center)?;
         let normal = normal.try_normalize().ok_or(ToolError::Degenerate)?;
         self.cancel();
@@ -391,7 +396,9 @@ impl ModifySession {
     }
 
     /// Set copy mode without altering Rotate anchors or targets.
-    pub fn set_rotation_copy(&mut self, copy: bool) { self.rotation_copy = copy; }
+    pub fn set_rotation_copy(&mut self, copy: bool) {
+        self.rotation_copy = copy;
+    }
     /// Rotation baseline and radius retained for protractor feedback.
     pub fn rotation_reference(&self) -> Option<(DVec3, f64)> {
         self.reference_dir.map(|d| (d, self.reference_radius))
@@ -627,13 +634,25 @@ impl ModifySession {
         Ok(())
     }
     /// Sweep Rotate with the document increment and a world-space protractor radius.
-    pub fn update_rotation(&mut self, point: DVec3, radius: f64, increment: u16) -> Result<Option<Command>, ToolError> {
+    pub fn update_rotation(
+        &mut self,
+        point: DVec3,
+        radius: f64,
+        increment: u16,
+    ) -> Result<Option<Command>, ToolError> {
         let center = self.anchor.ok_or(ToolError::NotReady)?;
         let reference = self.reference_dir.ok_or(ToolError::NotReady)?;
-        let offset = point-center;
-        let planar = offset-self.axis*offset.dot(self.axis);
-        let angle = crate::rotation::snap(crate::rotation::angle(self.axis,reference,planar),planar.length(),radius,increment);
-        let point = center + (reference*angle.cos()+self.axis.cross(reference)*angle.sin())*planar.length();
+        let offset = point - center;
+        let planar = offset - self.axis * offset.dot(self.axis);
+        let angle = crate::rotation::snap(
+            crate::rotation::angle(self.axis, reference, planar),
+            planar.length(),
+            radius,
+            increment,
+        );
+        let point = center
+            + (reference * angle.cos() + self.axis.cross(reference) * angle.sin())
+                * planar.length();
         self.update(point)
     }
     /// Produce an absolute preview mutation command from the initial anchor to the prospective point.
@@ -716,7 +735,9 @@ impl ModifySession {
                     matrix,
                     copy: self.rotation_copy,
                 };
-                if self.last_command.as_ref() == Some(&cmd) { return Ok(None); }
+                if self.last_command.as_ref() == Some(&cmd) {
+                    return Ok(None);
+                }
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
             }
@@ -1050,24 +1071,35 @@ impl MeasurementTool for ModifySession {
             || ToolError::InvalidMeasurement("Input is not supported by this modify tool".into());
         let command = match input {
             Measurement::Copies { count, divide }
-                if matches!(candidate.kind, ModifyKind::Move | ModifyKind::Copy) || candidate.kind == ModifyKind::Rotate && candidate.rotation_copy =>
+                if matches!(candidate.kind, ModifyKind::Move | ModifyKind::Copy)
+                    || candidate.kind == ModifyKind::Rotate && candidate.rotation_copy =>
             {
                 if !(1..=256).contains(count) {
                     return Err(bad());
                 }
                 let anchor = candidate.anchor.ok_or(ToolError::NotReady)?;
                 let delta = candidate.current_pointer.ok_or(ToolError::NotReady)? - anchor;
-                if delta.length() <= TOLERANCE || candidate.kind == ModifyKind::Rotate && candidate.measurement.is_none_or(|a| a.abs() <= 1e-10) {
+                if delta.length() <= TOLERANCE
+                    || candidate.kind == ModifyKind::Rotate
+                        && candidate.measurement.is_none_or(|a| a.abs() <= 1e-10)
+                {
                     return Err(bad());
                 }
                 let commands = (1..=*count)
                     .map(|i| Command::Transform {
                         vertices: candidate.target_vertices.clone(),
                         matrix: if candidate.kind == ModifyKind::Rotate {
-                            crate::rotation::matrix(anchor,candidate.axis,candidate.measurement.unwrap_or(0.).to_radians() * i as f64 / if *divide { *count as f64 } else { 1. })
-                        } else { DMat4::from_translation(
-                            delta * (i as f64) / if *divide { *count as f64 } else { 1. },
-                        ) },
+                            crate::rotation::matrix(
+                                anchor,
+                                candidate.axis,
+                                candidate.measurement.unwrap_or(0.).to_radians() * i as f64
+                                    / if *divide { *count as f64 } else { 1. },
+                            )
+                        } else {
+                            DMat4::from_translation(
+                                delta * (i as f64) / if *divide { *count as f64 } else { 1. },
+                            )
+                        },
                         copy: true,
                     })
                     .collect();

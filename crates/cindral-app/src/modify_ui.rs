@@ -7,6 +7,9 @@ impl DrafterApp {
         self.cancel_modify();
         self.modifying = true;
         self.modify.set_kind(kind);
+        if kind == ModifyKind::Rotate {
+            self.axis_lock = None;
+        }
         self.modify.set_color(self.paint_color);
         self.tool.cancel();
         self.measurements.reset();
@@ -1453,7 +1456,12 @@ mod transform_parity_tests {
             vec![egui::Event::PointerMoved(p), button(p, true)],
             egui::Modifiers::NONE,
         );
-        frame(&mut app,&ctx,vec![button(p,false)],egui::Modifiers::NONE);
+        frame(
+            &mut app,
+            &ctx,
+            vec![button(p, false)],
+            egui::Modifiers::NONE,
+        );
         assert!(app.modify.anchor().unwrap().distance(DVec3::ZERO) < 1e-6);
     }
     #[test]

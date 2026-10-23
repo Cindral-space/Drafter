@@ -496,7 +496,13 @@ impl DrafterApp {
         let painter = ui.painter().with_clip_rect(response.rect);
         let center = position + egui::vec2(23., 23.);
         if self.modifying && self.modify.kind() == ModifyKind::Rotate && self.rotate.copy {
-            painter.text(center+egui::vec2(12.,-12.), egui::Align2::CENTER_CENTER, "+", egui::FontId::proportional(18.), self.viewport_ink());
+            painter.text(
+                center + egui::vec2(12., -12.),
+                egui::Align2::CENTER_CENTER,
+                "+",
+                egui::FontId::proportional(18.),
+                self.viewport_ink(),
+            );
         }
         // A light outline keeps the tool readable against both sky and geometry.
         paint_tool_icon(

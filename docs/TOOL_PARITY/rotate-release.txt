@@ -14,3 +14,6 @@ Synthetic excludes inference, UI, meshing, upload and GPU. Validity, subsequent 
 exact geometry cancel/undo/redo and single history entry assertions passed.
 External hard timeouts: 90 seconds real-file runs; 60 seconds synthetic execution.
 Build time excluded; first-placement setup/loading excluded from sweep samples.
+Final source replay after shared shortcut/zoom routing and inference eligibility fixes:
+mean=2.726 ms p95=3.808 ms max=4.553 ms, GPU=true (same Vega 11 / GL adapter).
+Maximum across all recorded real-file GPU runs remains 9.619 ms.

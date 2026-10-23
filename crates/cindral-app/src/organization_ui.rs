@@ -116,7 +116,7 @@ impl DrafterApp {
                 .is_some_and(|p| self.history.instance(p).is_none())
             {
                 self.organization.selected = None;
-        self.organization.multiple.clear();
+                self.organization.multiple.clear();
             }
         }
         Ok(changed)
@@ -740,9 +740,9 @@ impl DrafterApp {
                 let offset = point - drag.pivot;
                 let planar = offset - normal * offset.dot(normal);
                 let angle = typed.map(f64::to_radians).unwrap_or_else(|| {
-                    cindral_tools::rotation::angle(normal,drag.reference,planar)
+                    cindral_tools::rotation::angle(normal, drag.reference, planar)
                 });
-                cindral_tools::rotation::matrix(drag.pivot,normal,angle)
+                cindral_tools::rotation::matrix(drag.pivot, normal, angle)
             }
             ModifyKind::Scale => {
                 let offset = point - drag.pivot;
@@ -1198,14 +1198,22 @@ impl DrafterApp {
             if let Some(path) = child {
                 let loose = self.selection.clone();
                 let mut multiple = self.organization.multiple.clone();
-                if let Some(previous)=self.organization.selected.clone() {multiple.insert(previous);}
+                if let Some(previous) = self.organization.selected.clone() {
+                    multiple.insert(previous);
+                }
                 multiple.insert(path.clone());
                 self.select_instance(path);
-                if ctx.input(|i| i.modifiers.shift) { self.selection = loose; self.organization.multiple=multiple; }
+                if ctx.input(|i| i.modifiers.shift) {
+                    self.selection = loose;
+                    self.organization.multiple = multiple;
+                }
                 self.selection_start = None;
                 return true;
             }
-            if !ctx.input(|i| i.modifiers.shift) { self.organization.selected = None; self.organization.multiple.clear(); }
+            if !ctx.input(|i| i.modifiers.shift) {
+                self.organization.selected = None;
+                self.organization.multiple.clear();
+            }
         }
         if self.modifying && self.modify.kind() == ModifyKind::PaintBucket && pressed {
             if let Some(path) = child {

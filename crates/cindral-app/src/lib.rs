@@ -11,7 +11,6 @@ mod dae_ui;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
-mod rotate_ui;
 mod organization_ui;
 pub mod png_cli;
 pub mod png_export;
@@ -22,6 +21,7 @@ mod presentation_ui;
 pub mod real_file_benchmark;
 #[cfg(feature = "kernel-benchmark")]
 mod real_file_gpu;
+mod rotate_ui;
 mod scene_cache;
 mod section_ui;
 mod shadow_ui;
@@ -375,7 +375,10 @@ impl DrafterApp {
             i.pointer.button_down(PointerButton::Middle)
                 || i.smooth_scroll_delta != egui::Vec2::ZERO
         });
-        if (self.modifying && self.modify.kind() != ModifyKind::Rotate) || !response.hovered() || navigating {
+        if (self.modifying && self.modify.kind() != ModifyKind::Rotate)
+            || !response.hovered()
+            || navigating
+        {
             return;
         }
         let Some(snap) = &self.snap else {
@@ -446,16 +449,18 @@ impl DrafterApp {
         if self.section_input(response) {
             return;
         }
-        if self.modifying && self.modify.kind() == ModifyKind::Rotate {
-            self.rotate_pointer(response);
-            return;
-        }
-        if self.organization_pointer(response) {
+        if !(self.modifying && self.modify.kind() == ModifyKind::Rotate)
+            && self.organization_pointer(response)
+        {
             return;
         }
         if !response.hovered() {
             if self.modifying && (self.modify.active() || self.selection_start.is_some()) {
-                self.modify_viewport_input(response);
+                if self.modify.kind() == ModifyKind::Rotate {
+                    self.rotate_pointer(response);
+                } else {
+                    self.modify_viewport_input(response);
+                }
                 return;
             }
             if !drawing_drag {
@@ -515,7 +520,11 @@ impl DrafterApp {
             }
         });
         if self.modifying {
-            self.modify_viewport_input(response);
+            if self.modify.kind() == ModifyKind::Rotate {
+                self.rotate_pointer(response);
+            } else {
+                self.modify_viewport_input(response);
+            }
             return;
         }
         let keyboard_free = !response.ctx.wants_keyboard_input();

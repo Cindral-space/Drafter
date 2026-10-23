@@ -107,9 +107,16 @@ pub(crate) fn expanded(bounds: AABB<[f64; 3]>) -> AABB<[f64; 3]> {
 impl Spatial {
     fn local_bounds(&self, bounds: AABB<[f64; 3]>) -> AABB<[f64; 3]> {
         let inverse = self.basis.inverse();
-        let low=DVec3::from_array(bounds.lower())-self.offset;
-        let high=DVec3::from_array(bounds.upper())-self.offset;
-        envelope([low.x,high.x].into_iter().flat_map(|x| [low.y,high.y].into_iter().flat_map(move |y| [low.z,high.z].into_iter().map(move |z| inverse.transform_point3(DVec3::new(x,y,z)))))).expect("eight bounds corners")
+        let low = DVec3::from_array(bounds.lower()) - self.offset;
+        let high = DVec3::from_array(bounds.upper()) - self.offset;
+        envelope([low.x, high.x].into_iter().flat_map(|x| {
+            [low.y, high.y].into_iter().flat_map(move |y| {
+                [low.z, high.z]
+                    .into_iter()
+                    .map(move |z| inverse.transform_point3(DVec3::new(x, y, z)))
+            })
+        }))
+        .expect("eight bounds corners")
     }
     #[tracing::instrument(level = "info", skip_all, name = "spatial.build")]
     pub fn build(model: &Model) -> Result<Self, KernelError> {
@@ -169,12 +176,34 @@ impl Spatial {
             .map(|item| item.id)
             .collect()
     }
-    fn local_point(&self,p:DVec3)->DVec3 { self.basis.inverse().transform_point3(p-self.offset) }
-    fn indexed_edge_bounds(&self,edge:&Edge,model:&Model)->Result<AABB<[f64;3]>,KernelError> {
-        envelope(edge.vertices.iter().map(|id| model.position(*id).map(|p| self.local_point(p))).collect::<Result<Vec<_>,_>>()?).ok_or(KernelError::MissingEntity)
+    fn local_point(&self, p: DVec3) -> DVec3 {
+        self.basis.inverse().transform_point3(p - self.offset)
     }
-    fn indexed_face_bounds(&self,face:&Face,model:&Model)->Result<AABB<[f64;3]>,KernelError> {
-        envelope(face.outer.iter().map(|id| model.position(*id).map(|p| self.local_point(p))).collect::<Result<Vec<_>,_>>()?).ok_or(KernelError::MissingEntity)
+    fn indexed_edge_bounds(
+        &self,
+        edge: &Edge,
+        model: &Model,
+    ) -> Result<AABB<[f64; 3]>, KernelError> {
+        envelope(
+            edge.vertices
+                .iter()
+                .map(|id| model.position(*id).map(|p| self.local_point(p)))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+        .ok_or(KernelError::MissingEntity)
+    }
+    fn indexed_face_bounds(
+        &self,
+        face: &Face,
+        model: &Model,
+    ) -> Result<AABB<[f64; 3]>, KernelError> {
+        envelope(
+            face.outer
+                .iter()
+                .map(|id| model.position(*id).map(|p| self.local_point(p)))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+        .ok_or(KernelError::MissingEntity)
     }
     pub fn add_vertex(&mut self, id: VertexId, p: DVec3) {
         self.vertices.insert(Item {
@@ -184,11 +213,7 @@ impl Spatial {
     }
     pub fn remove_vertex(&mut self, id: VertexId, p: DVec3) {
         let point = self.local_point(p);
-        remove_item(
-            &mut self.vertices,
-            id,
-            AABB::from_point(point.to_array()),
-        );
+        remove_item(&mut self.vertices, id, AABB::from_point(point.to_array()));
         self.adjacency.remove(&id);
     }
     pub fn add_edge(&mut self, id: EdgeId, edge: &Edge, model: &Model) -> Result<(), KernelError> {
@@ -265,9 +290,13 @@ impl Spatial {
             local = model.clone();
             local.spatial = None;
             let inverse = self.basis.inverse();
-            for v in local.vertices.values_mut() { v.position = inverse.transform_point3(v.position-self.offset); }
+            for v in local.vertices.values_mut() {
+                v.position = inverse.transform_point3(v.position - self.offset);
+            }
             Self::build(&local)?
-        } else { Self::build(model)? };
+        } else {
+            Self::build(model)?
+        };
         let vertices = |tree: &RTree<Item<VertexId>>| {
             tree.iter()
                 .map(|i| (i.id, i.bounds))

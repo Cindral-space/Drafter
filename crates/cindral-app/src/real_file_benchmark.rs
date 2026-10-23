@@ -274,6 +274,99 @@ pub fn run(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Release Rotate replay on a private imported model, including inference and egui tessellation.
+pub fn run_rotate(path: &Path) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("use --release".into());
+    }
+    if std::env::var("CINDRAL_BENCH_GPU").as_deref() == Ok("1") {
+        match super::real_file_gpu::Gpu::new() {
+            Ok(gpu) => GPU.with_borrow_mut(|g| *g = Some(gpu)),
+            Err(e) => println!("GPU skipped: {e}"),
+        }
+    }
+    let mut app = DrafterApp::default();
+    let ctx = egui::Context::default();
+    workspace_ui::configure_style(&ctx);
+    app.load_replay(path).map_err(|e| e.to_string())?;
+    frame(&mut app, &ctx, vec![]);
+    let path = app
+        .scene
+        .occurrences()
+        .iter()
+        .find(|o| {
+            !o.path.is_empty()
+                && app
+                    .history
+                    .definition_model(o.definition)
+                    .is_some_and(|m| !m.faces().is_empty())
+        })
+        .map(|o| o.path[..1].to_vec())
+        .ok_or("no visible occurrence")?;
+    let (lo, hi) = app
+        .selected_world_bounds(&path)
+        .ok_or("missing occurrence bounds")?;
+    app.organization.selected = Some(path);
+    app.selection.clear();
+    app.choose_modify(ModifyKind::Rotate);
+    app.camera.set_view(StandardView::Top);
+    let rect = app.replay_rect;
+    app.camera
+        .zoom_extents(lo.as_vec3(), hi.as_vec3(), rect.width() / rect.height());
+    let view = View {
+        matrix: app
+            .camera
+            .view_projection(rect.width() / rect.height())
+            .as_dmat4(),
+        size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
+    };
+    let p = view
+        .project((lo + hi) * 0.5)
+        .ok_or("selected object offscreen")?;
+    let center = rect.min + egui::vec2(p.x as f32, p.y as f32);
+    if !rect.shrink(160.).contains(center) {
+        return Err("selected object lacks 160px sweep margin".into());
+    }
+    let click = |app: &mut DrafterApp, p| {
+        frame(app, &ctx, vec![Event::PointerMoved(p)]);
+        for down in [true, false] {
+            frame(app, &ctx, vec![button(p, down)]);
+        }
+    };
+    click(&mut app, center);
+    click(&mut app, center + egui::vec2(80., 0.));
+    if !app.modify.active() || !app.rotate.reference_set {
+        return Err(format!("Rotate failed to start: {:?}", app.error));
+    }
+    let depth = app.history.undo_depth();
+    let before = app.history.to_data();
+    let mut samples = Vec::new();
+    for i in 1..=60 {
+        let a = i as f32 * 0.02;
+        let p = center + egui::vec2(a.cos(), -a.sin()) * 140.;
+        let dt = frame(&mut app, &ctx, vec![Event::PointerMoved(p)]);
+        samples.push(dt);
+        if app.error.is_some() {
+            return Err(format!("preview failed: {:?}", app.error));
+        }
+    }
+    assert_eq!(app.history.undo_depth(), depth);
+    assert_ne!(
+        app.history.to_data(),
+        before,
+        "sweep must change an actual occurrence placement"
+    );
+    app.cancel_modify();
+    assert_eq!(app.history.to_data(), before);
+    samples.sort_by(f64::total_cmp);
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    println!("REAL private mybedroom.skp: selected occurrence Rotate, 60 full CPU frames incl inference/mesh/egui/tessellation; mean={mean:.3}ms p95={:.3}ms max={:.3}ms; GPU={}",samples[56],samples[59],GPU.with_borrow(|g|g.is_some()));
+    if samples[59] > 33. {
+        return Err("Rotate frame exceeds minimum 33ms budget".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -293,31 +386,4 @@ mod tests {
         }
         super::run(path).unwrap();
     }
-}
-
-/// Release Rotate replay on a private imported model, including inference and egui tessellation.
-pub fn run_rotate(path: &Path) -> Result<(),String> {
-    if cfg!(debug_assertions) {return Err("use --release".into());}
-    if std::env::var("CINDRAL_BENCH_GPU").as_deref()==Ok("1") {
-        match super::real_file_gpu::Gpu::new() {Ok(gpu)=>GPU.with_borrow_mut(|g|*g=Some(gpu)),Err(e)=>println!("GPU skipped: {e}")}
-    }
-    let mut app=DrafterApp::default();let ctx=egui::Context::default();workspace_ui::configure_style(&ctx);
-    app.load_replay(path).map_err(|e|e.to_string())?;frame(&mut app,&ctx,vec![]);
-    let path=app.scene.occurrences().iter().find(|o|!o.path.is_empty() && app.history.definition_model(o.definition).is_some_and(|m|!m.faces().is_empty())).map(|o|o.path[..1].to_vec()).ok_or("no visible occurrence")?;
-    let (lo,hi)=app.selected_world_bounds(&path).ok_or("missing occurrence bounds")?;
-    app.organization.selected=Some(path);app.selection.clear();app.choose_modify(ModifyKind::Rotate);
-    app.camera.set_view(StandardView::Top);let rect=app.replay_rect;app.camera.zoom_extents(lo.as_vec3(),hi.as_vec3(),rect.width()/rect.height());
-    let view=View {matrix:app.camera.view_projection(rect.width()/rect.height()).as_dmat4(),size:glam::DVec2::new(rect.width() as f64,rect.height() as f64)};
-    let p=view.project((lo+hi)*0.5).ok_or("selected object offscreen")?;
-    let center=rect.min+egui::vec2(p.x as f32,p.y as f32);
-    if !rect.shrink(160.).contains(center) {return Err("selected object lacks 160px sweep margin".into());}
-    let click=|app:&mut DrafterApp,p| {frame(app,&ctx,vec![Event::PointerMoved(p)]);for down in [true,false] {frame(app,&ctx,vec![button(p,down)]);}};
-    click(&mut app,center);click(&mut app,center+egui::vec2(80.,0.));
-    if !app.modify.active() || !app.rotate.reference_set {return Err(format!("Rotate failed to start: {:?}",app.error));}
-    let depth=app.history.undo_depth();let before=app.history.to_data();let mut samples=Vec::new();
-    for i in 1..=60 {let a=i as f32*0.02;let p=center+egui::vec2(a.cos(),-a.sin())*140.;let dt=frame(&mut app,&ctx,vec![Event::PointerMoved(p)]);samples.push(dt);if app.error.is_some() {return Err(format!("preview failed: {:?}",app.error));}}
-    assert_eq!(app.history.undo_depth(),depth);assert_ne!(app.history.to_data(),before,"sweep must change an actual occurrence placement");app.cancel_modify();assert_eq!(app.history.to_data(),before);
-    samples.sort_by(f64::total_cmp);let mean=samples.iter().sum::<f64>()/samples.len() as f64;
-    println!("REAL private mybedroom.skp: selected occurrence Rotate, 60 full CPU frames incl inference/mesh/egui/tessellation; mean={mean:.3}ms p95={:.3}ms max={:.3}ms; GPU={}",samples[56],samples[59],GPU.with_borrow(|g|g.is_some()));
-    if samples[59]>33. {return Err("Rotate frame exceeds minimum 33ms budget".into());}Ok(())
 }
