@@ -528,3 +528,7 @@
 ### Rotate item 10 — typed angles and slopes
 
 - Retained shared degrees/radians parsing, center-only application, invalid-input state and absolute completed replacement. Slope now uses atan(rise/run), including negative denominators, and rejects zero run. Added actual-kernel tests for all requested signed/slope forms, repeated replacement, invalid preservation, exact undo/redo and cancellation at each session stage; arbitrary-plane inverse rotation proptest and ring threshold checks. Targeted tools test-target check passes; execution follows targeted test runs.
+
+### Rotate item 11 — sign convention
+
+- Consolidated typed and pointer rotation onto shared matrix/signed-angle helpers. Positive is right-handed: X→Y for +90° about +Z, counterclockwise when viewing the plane from the tip of its camera-facing normal. Normal direction freezes at center, avoiding sign changes during sweep. Explicit sign, arbitrary-center/normal and inverse properties cover this convention.

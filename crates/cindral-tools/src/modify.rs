@@ -696,21 +696,16 @@ impl ModifySession {
                 let u_ref = self
                     .reference_dir
                     .unwrap_or_else(|| plane_basis_for(axis).0);
-                let v_basis = axis.cross(u_ref);
                 let diff = point - anchor;
                 let in_plane = diff - axis * diff.dot(axis);
                 let angle_rad = if in_plane.length() > TOLERANCE {
-                    let cos_val = in_plane.dot(u_ref);
-                    let sin_val = in_plane.dot(v_basis);
-                    sin_val.atan2(cos_val)
+                    crate::rotation::angle(axis, u_ref, in_plane)
                 } else {
                     0.0
                 };
                 let angle_deg = angle_rad.to_degrees();
                 self.measurement = Some(angle_deg);
-                let rot_mat = DMat4::from_axis_angle(axis, angle_rad);
-                let matrix =
-                    DMat4::from_translation(anchor) * rot_mat * DMat4::from_translation(-anchor);
+                let matrix = crate::rotation::matrix(anchor, axis, angle_rad);
                 let cmd = Command::Transform {
                     vertices: self.target_vertices.clone(),
                     matrix,
@@ -891,9 +886,7 @@ impl ModifySession {
             ModifyKind::Rotate => {
                 let deg = value;
                 let rad = deg.to_radians();
-                let rot_mat = DMat4::from_axis_angle(self.axis, rad);
-                let matrix =
-                    DMat4::from_translation(anchor) * rot_mat * DMat4::from_translation(-anchor);
+                let matrix = crate::rotation::matrix(anchor, self.axis, rad);
                 let u_ref = self
                     .reference_dir
                     .unwrap_or_else(|| plane_basis_for(self.axis).0);
