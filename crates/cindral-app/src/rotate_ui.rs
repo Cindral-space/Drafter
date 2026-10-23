@@ -5,7 +5,7 @@ use glam::{DMat4, DVec2};
 
 #[derive(Default)]
 pub(crate) struct RotateUi {
-    reference_set: bool,
+    pub(crate) reference_set: bool,
     pub(crate) copy: bool,
     copy_key_down: bool,
     point: Option<DVec3>,
@@ -185,7 +185,8 @@ impl DrafterApp {
                 None => false,
             };
             (!own).then_some(context.transform_point3(s.position))
-        }).or_else(|| DrawingPlane { origin: center, normal }.intersect(world_ray));
+        }).or_else(|| DrawingPlane { origin: center, normal }.intersect(world_ray))
+        .or_else(|| if !self.modify.active() {DrawingPlane {origin:context.transform_point3(self.work_plane.origin),normal:world_ray.direction}.intersect(world_ray)} else {None});
         self.rotate.point = point;
         if let Some(c) = self.modify.anchor().or(point) {
             let (u,v) = rotate_basis(normal);
@@ -378,6 +379,42 @@ mod tests {
         app.choose_modify(ModifyKind::Rotate);app.modify.begin_rotation(before.vertices().keys().copied().collect(),center,normal).unwrap();typed(&mut app,"37");
         for (id,v) in before.vertices() {let expected=cindral_tools::rotation::matrix(center,normal,37_f64.to_radians()).transform_point3(world.transform_point3(v.position));assert!(world.transform_point3(app.model().vertices()[id].position).distance(expected)<1e-8);}
         app.model().validate().unwrap();app.history.undo().unwrap();assert_eq!(app.model(),&before);
+    }
+
+    #[test]
+    fn pointer_copy_group_arrays_and_invalid_reentry_are_atomic() {
+        let (mut app,ctx)=fixture();let path=app.create_container(DefinitionKind::Group).unwrap();let before=app.history.to_data();let depth=app.history.undo_depth();
+        app.choose_modify(ModifyKind::Rotate);let pos=position(&app,DVec3::new(-5.,0.,0.));frame(&mut app,&ctx,vec![egui::Event::PointerMoved(pos)],egui::Modifiers::NONE);
+        let copy=if cfg!(target_os="macos") {egui::Modifiers {alt:true,..Default::default()}} else {egui::Modifiers {ctrl:true,..Default::default()}};
+        frame(&mut app,&ctx,vec![],copy);frame(&mut app,&ctx,vec![],egui::Modifiers::NONE);assert!(app.rotate.copy);
+        click(&mut app,&ctx,DVec3::new(-5.,0.,0.));click(&mut app,&ctx,DVec3::new(-4.,0.,0.));typed(&mut app,"30");
+        for (text,count) in [("3x",4),("/3",4),("*2",3)] {typed(&mut app,text);assert_eq!(app.history.instances(DefinitionId(0)).unwrap().len(),count);assert_eq!(app.history.undo_depth(),depth+1);}
+        let after=app.history.to_data();app.measurements.text="1:0".into();app.apply_measurement();assert!(app.measurements.invalid);assert_eq!(app.history.to_data(),after);
+        app.history.undo().unwrap();let mut restored=app.history.to_data();restored.next_id=before.next_id;assert_eq!(restored,before);app.history.redo().unwrap();assert_eq!(app.history.to_data(),after);assert!(app.history.instance(&path).is_some());
+    }
+    #[test]
+    fn cached_whole_rotate_updates_placements_without_mesh_rebuild() {
+        let (mut app,_)=fixture();let before=app.model().clone();let depth=app.history.undo_depth();app.pending=None;
+        app.modify.begin_rotation(before.vertices().keys().copied().collect(),DVec3::ZERO,DVec3::Y).unwrap();
+        for text in ["15","30","45"] {
+            let command=app.modify.measure(text).unwrap().unwrap();app.rotate_preview(command);assert!(app.error.is_none(),"{:?}",app.error);
+            assert!(app.pending.as_ref().unwrap().geometry.is_empty());assert!(app.pending.as_ref().unwrap().batches.is_some());
+            assert_eq!(app.history.undo_depth(),depth);app.model().validate().unwrap();app.pending=None;
+        }
+        app.cancel_modify();assert_eq!(app.model(),&before);assert_eq!(app.history.undo_depth(),depth);assert!(app.pending.as_ref().unwrap().geometry.is_empty());
+    }
+
+    #[test]
+    fn zero_multi_preview_preserves_prior_undo_and_destinations_are_cached() {
+        let (mut app,_)=fixture();let first=app.create_container(DefinitionKind::Group).unwrap();
+        app.history.organization(Org::Duplicate {path:first.clone(),transform:DMat4::from_translation(DVec3::X*5.)}).unwrap();
+        let second=vec![*app.history.instances(DefinitionId(0)).unwrap().keys().next_back().unwrap()];let before=app.history.to_data();let depth=app.history.undo_depth();
+        let original=vec![(first.clone(),vec![app.history.instance(&first).unwrap().transform]),(second.clone(),vec![app.history.instance(&second).unwrap().transform])];
+        assert!(!app.history.preview_placement_set(Org::TransformSet {placements:original.clone(),copy:false}).unwrap());assert_eq!(app.history.undo_depth(),depth);
+        let command=|a:f64| Org::TransformSet {placements:original.iter().map(|(p,m)|(p.clone(),vec![DMat4::from_rotation_z(a)*m[0]])).collect(),copy:true};
+        app.history.preview_placement_set(command(0.2)).unwrap();let ids=app.history.instances(DefinitionId(0)).unwrap().keys().copied().collect::<Vec<_>>();
+        app.history.preview_placement_set(command(0.4)).unwrap();assert_eq!(app.history.instances(DefinitionId(0)).unwrap().keys().copied().collect::<Vec<_>>(),ids);assert_eq!(app.history.undo_depth(),depth);
+        app.history.commit_preview().unwrap();assert_eq!(app.history.undo_depth(),depth+1);app.history.undo().unwrap();let mut restored=app.history.to_data();restored.next_id=before.next_id;assert_eq!(restored,before);
     }
 
 }

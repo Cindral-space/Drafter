@@ -99,6 +99,7 @@ impl DrafterApp {
         self.selection.clear();
         self.tool.cancel();
         self.modify.cancel();
+        self.rotate = Default::default();
         self.refresh_mesh();
         Ok(())
     }

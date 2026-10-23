@@ -254,6 +254,7 @@ impl DrafterApp {
             self.refresh_mesh();
         }
         self.modify.cancel();
+        self.rotate = Default::default();
         self.organization.drag = None;
         self.organization.completed = None;
         self.selection.clear();

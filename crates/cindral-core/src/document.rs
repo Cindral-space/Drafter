@@ -955,12 +955,12 @@ impl DocumentHistory {
         }
         self.cancel_preview()?;
         let redo=self.redo.clone();
-        self.organization(command.clone())?;
+        if !self.organization(command.clone())? {return Ok(false);}
         self.preview_redo=Some(redo);
         self.organization_preview=self.undo.pop();
         let targets=if *copy {
             let Some(DocumentEntry::Organization {delta,..})=&self.organization_preview else {return Ok(false)};
-            delta.instances.iter().filter_map(|(key,(before,after))| (before.is_none() && after.is_some()).then_some(*key)).collect()
+            delta.instances.iter().filter_map(|(key,(before,after))| (key.0==self.active_definition() && before.is_none() && after.is_some()).then_some(*key)).collect()
         } else {placements.iter().map(|(path,_)|self.graph.node(path).map(|(owner,node)|(owner,node.id))).collect::<Result<Vec<_>,_>>()?};
         self.transform_set_cache=Some(PlacementCache {signature,copy:*copy,targets});Ok(true)
     }
@@ -968,6 +968,9 @@ impl DocumentHistory {
     /// Uses the same local transform and placement deltas as individual Move operations.
     pub fn preview_selection_transform(&mut self, geometry: Command, placement: OrganizationCommand) -> Result<bool, KernelError> {
         let snapshot = (self.graph.clone(), self.instance_preview.clone(), self.organization_preview.clone(), self.duplicate_preview, self.preview_redo.clone(), self.redo.clone(), self.transform_set_cache.clone());
+        // Keep provisional private definitions available for rollback without cloning their geometry.
+        let private_ids=match &self.organization_preview {Some(DocumentEntry::Organization {delta,..})=>delta.definitions.iter().filter_map(|(id,(before,after))|(before.is_none() && after.is_some()).then_some(*id)).collect::<Vec<_>>(),_=>Vec::new()};
+        let retained=private_ids.into_iter().filter_map(|id|self.geometry.remove(&id).map(|h|(id,h))).collect::<Vec<_>>();
         let saved = self.geometry_preview.take();
         let result = match placement {
             OrganizationCommand::Transform {path,transform} => self.preview_instance_transform(&path,transform),
@@ -986,6 +989,7 @@ impl DocumentHistory {
         if let Err(error)=result {
             (self.graph,self.instance_preview,self.organization_preview,self.duplicate_preview,self.preview_redo,self.redo,self.transform_set_cache)=snapshot;
             self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
+            for (id,history) in retained {self.geometry.entry(id).or_insert(history);}
             return Err(error);
         }
         let id = self.active_definition();
@@ -995,6 +999,7 @@ impl DocumentHistory {
             self.geometry_preview=saved;
             self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
         }
+        for (id,history) in retained {if self.graph.definitions.contains_key(&id) {self.geometry.entry(id).or_insert(history);}}
         if result.is_ok() { self.geometry_preview = Some(id); }
         let dirty = BTreeMap::from([(id,self.history(id).changes().clone())]);
         self.changed(dirty,true,false);
@@ -1014,7 +1019,8 @@ impl DocumentHistory {
         if !matches!(graph_result,Ok(true)) { self.graph=current; self.undo.push(old); return graph_result; }
         let result = self.history_mut(id)?.replace_last(geometry);
         if !matches!(result,Ok(true)) {
-            self.undo.pop(); self.graph=current; self.undo.push(old); return result;
+            self.undo.pop(); self.graph=current; self.undo.push(old);
+            self.geometry.retain(|id,_|self.graph.definitions.contains_key(id)); return result;
         }
         self.geometry.retain(|id,_| self.graph.definitions.contains_key(id));
         if let Some(DocumentEntry::Organization {steps,..}) = self.undo.last_mut() { steps.push(id); }

@@ -728,7 +728,11 @@ impl DrafterApp {
                         .hint_text(&self.measurements.display).frame(true).background_color(if self.measurements.invalid { theme::error_background(ui.visuals()) } else { ui.visuals().extreme_bg_color }))
                         .on_hover_text("Type a precise dimension during an operation, then press Enter. Accepts m, cm, mm, ft and in.");
                     if field.changed() { self.measurements.phase = cindral_tools::measurements::BoxPhase::Typing; self.measurements.invalid = false; }
-                    if (field.has_focus() || field.lost_focus()) && ctx.input(|i| i.key_pressed(Key::Escape)) { self.measurements.escape(); self.error = None; }
+                    if (field.has_focus() || field.lost_focus()) && ctx.input(|i| i.key_pressed(Key::Escape)) {
+                        let cleared=self.measurements.escape();
+                        if !cleared && self.modifying && self.modify.kind()==ModifyKind::Rotate {self.cancel_modify();field.surrender_focus();}
+                        self.error = None;
+                    }
                     if field.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
                         self.apply_measurement();
                     }
