@@ -206,13 +206,14 @@ impl DrafterApp {
     }
     pub(crate) fn rotate_pointer(&mut self, response: &egui::Response) {
         let ctx = &response.ctx;
-        if !ctx.wants_keyboard_input() && self.measurements.text.is_empty() {
-            if ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel)) {
-                self.cancel_modify();
-                self.measurements.reset();
-                self.error = None;
-                return;
-            }
+        if !ctx.wants_keyboard_input()
+            && self.measurements.text.is_empty()
+            && ctx.input(|i| shortcuts::pressed(i, shortcuts::Action::Cancel))
+        {
+            self.cancel_modify();
+            self.measurements.reset();
+            self.error = None;
+            return;
         }
         let copy_down = ctx.input(|i| {
             if cfg!(target_os = "macos") {

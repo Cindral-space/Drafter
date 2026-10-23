@@ -419,6 +419,7 @@ impl DrafterApp {
                 .collect::<Vec<_>>()
         });
         for action in actions {
+            ctx.request_repaint();
             match action {
                 Draw(k) => self.set_tool(k),
                 Modify(k) => self.choose_modify(k),
