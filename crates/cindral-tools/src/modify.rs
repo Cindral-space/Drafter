@@ -374,6 +374,20 @@ impl ModifySession {
         self.active
     }
 
+    /// Begin Rotate with the already collected transform targets, including container-only selections.
+    pub fn begin_rotation(&mut self, vertices: Vec<VertexId>, center: DVec3, normal: DVec3) -> Result<(), ToolError> {
+        validate_point(center)?;
+        let normal = normal.try_normalize().ok_or(ToolError::Degenerate)?;
+        self.cancel();
+        self.kind = ModifyKind::Rotate;
+        self.active = true;
+        self.anchor = Some(center);
+        self.axis = normal;
+        self.reference_dir = Some(plane_basis_for(normal).0);
+        self.target_vertices = vertices;
+        Ok(())
+    }
+
     /// Normalized interaction axis fixed at begin.
     pub fn axis(&self) -> DVec3 {
         self.axis

@@ -11,6 +11,7 @@ mod dae_ui;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
+mod rotate_ui;
 mod organization_ui;
 pub mod png_cli;
 pub mod png_export;
@@ -51,6 +52,7 @@ pub struct DrafterApp {
     selection_start: Option<glam::DVec2>,
     modify_press: Option<glam::DVec2>,
     drag_axis: DVec3,
+    rotate: rotate_ui::RotateUi,
     paint_color: [u8; 4],
     last_tape: Option<f64>,
     tape_resize: Option<measurements_ui::TapeResize>,
@@ -94,6 +96,7 @@ impl Default for DrafterApp {
             selection_start: None,
             modify_press: None,
             drag_axis: DVec3::Z,
+            rotate: Default::default(),
             paint_color: [210, 130, 75, 255],
             last_tape: None,
             tape_resize: None,
@@ -271,6 +274,10 @@ impl DrafterApp {
         }
     }
     fn apply_measurement(&mut self) {
+        if self.modifying && self.modify.kind() == ModifyKind::Rotate {
+            self.rotate_measurement();
+            return;
+        }
         if self.instance_measurement() {
             return;
         }
@@ -438,6 +445,10 @@ impl DrafterApp {
         if self.section_input(response) {
             return;
         }
+        if self.modifying && self.modify.kind() == ModifyKind::Rotate {
+            self.rotate_pointer(response);
+            return;
+        }
         if self.organization_pointer(response) {
             return;
         }
@@ -475,6 +486,9 @@ impl DrafterApp {
                     if i.key_pressed(key) {
                         self.set_tool(kind);
                     }
+                }
+                if i.key_pressed(Key::Q) {
+                    self.choose_modify(ModifyKind::Rotate);
                 }
                 if i.key_pressed(Key::Space) {
                     self.choose_modify(ModifyKind::Select);
@@ -808,6 +822,7 @@ impl DrafterApp {
                         .map(|p| rect.min + egui::vec2(p.x as f32, p.y as f32))
                 };
                 self.modify_overlay(ui, rect, view);
+                self.rotate_overlay(ui, rect);
                 self.organization_overlay(ui, rect);
                 let preview = self.tool.preview();
                 for segment in preview.windows(2) {

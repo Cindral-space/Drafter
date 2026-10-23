@@ -25,6 +25,7 @@ impl DrafterApp {
             _ => {}
         }
         self.modify.cancel();
+        self.rotate = Default::default();
         self.modify_press = None;
         self.selection_start = None;
     }

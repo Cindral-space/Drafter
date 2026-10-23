@@ -743,6 +743,7 @@ impl DrafterApp {
                         let prompt = if self.modifying {
                             match self.modify.kind() {
                                 ModifyKind::Select => "Click to select · Shift to add · Drag a selection box",
+                                ModifyKind::Rotate => self.rotate_hint(),
                                 ModifyKind::TapeMeasure => "Click two points to measure or create a guide",
                                 _ => "Select geometry, then drag · Type a value + Enter · Esc cancels",
                             }
