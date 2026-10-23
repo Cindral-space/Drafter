@@ -54,6 +54,15 @@ Hardcoded UI colors replaced (five groups):
 cargo run -p cindral-app
 ```
 
+If linking fails with `ld.lld: error: undefined hidden symbol`, clear the app's generated build files and retry:
+
+```sh
+cargo clean -p cindral-app
+cargo run -p cindral-app
+```
+
+This resolved a local stale-build failure without changing application source or documents.
+
 The dev profile keeps debug assertions and overflow checks on while optimizing the workspace crates and dependencies, so everyday testing on imported models stays responsive. With [bacon](https://dystroy.org/bacon/), `bacon run` rebuilds and restarts the dev app on change. Use `bacon run-release` to compare against a fully optimized build without dev debug assertions.
 
 The native window launches maximized on every start, including after closing it at a smaller size. The workspace fills the window and adjusts its canvas and panels when resized. Normal window controls remain available.
