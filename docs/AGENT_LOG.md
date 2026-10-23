@@ -546,3 +546,7 @@
 
 - World-space Rotate commands are conjugated into the active definition or selected occurrence owner, so mirrored/nonuniform/nested placements preserve rigid world rotation and shared definitions remain unchanged. Mixed loose geometry plus the selected occurrence use the same local/graph preview deltas, committed/replaced as one global Organization history entry with a local geometry step. Shift selection can preserve loose and occurrence targets together.
 - Added kernel-backed app tests for mixed mirrored components, nested scaled contexts and local world-conjugated geometry. Targeted core/app test-target checks pass. Initial three-click app test exposed its fixture losing selection through undo (existing behavior); explicitly reselected before the next operation. Two initial app tests passed; rerun follows with nested coverage. Existing UI still selects one occurrence at a time; multiple-occurrence selection is not claimed here.
+
+### Rotate item 15 — partial-selection safety
+
+- Partial targets continue through the shared Transform cavity/connectivity path used by Move. Nonplanar/crossing results are rejected by the existing kernel; an invalid interactive Rotate now cancels its entire preview and reports the reason, leaving no undo entry. Invalid typed input retains the preceding provisional/completed geometry. Added connected-box corner/edge validity and exact-cancel tests; no autofold triangulation claimed.

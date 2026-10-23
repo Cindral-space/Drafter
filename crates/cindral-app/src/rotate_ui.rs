@@ -56,7 +56,11 @@ impl DrafterApp {
             Err(e) => Err(e),
             _ => unreachable!(),
         };
-        self.error = result.err().map(|e| e.to_string());
+        if let Err(error) = result {
+            self.cancel_modify();
+            self.measurements.reset();
+            self.error = Some(format!("Rotation canceled: {error}"));
+        } else { self.error = None; }
         self.refresh_mesh();
     }
     pub(crate) fn rotate_measurement(&mut self) {

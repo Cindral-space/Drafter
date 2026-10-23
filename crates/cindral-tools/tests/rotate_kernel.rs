@@ -84,3 +84,17 @@ fn radial_arrays_replace_in_one_undo_slot() {
     }
     let copied=h.model().clone();h.undo().unwrap();assert_eq!(h.model(),&before);h.redo().unwrap();assert_eq!(h.model(),&copied);
 }
+
+#[test]
+fn partial_selection_uses_shared_connectivity_and_rejects_nonplanar() {
+    let mut h=fixture();let face=*h.model().faces().keys().next().unwrap();
+    h.execute(Command::PushPull {face,distance:1.}).unwrap();let before=h.model().clone();let depth=h.undo_depth();
+    let corner=*before.vertices().iter().find(|(_,v)|v.position.distance(DVec3::new(1.,1.,1.))<1e-9).unwrap().0;
+    let mut s=ModifySession::new(ModifyKind::Rotate);s.begin_rotation(vec![corner],DVec3::ZERO,DVec3::Z).unwrap();
+    assert!(h.preview(s.measure("37").unwrap().unwrap()).is_err());h.cancel_preview().unwrap();assert_eq!(h.model(),&before);assert_eq!(h.undo_depth(),depth);h.model().validate().unwrap();
+    // An entire connected edge can rotate within its adjacent planes or be rejected atomically.
+    let edge=*before.edges().keys().next().unwrap();let selected=before.edges()[&edge].vertices.to_vec();
+    s.begin_rotation(selected,DVec3::ZERO,DVec3::Z).unwrap();let result=h.preview(s.measure("90").unwrap().unwrap());
+    if result.is_ok() {h.model().validate().unwrap();}
+    h.cancel_preview().unwrap();assert_eq!(h.model(),&before);
+}
