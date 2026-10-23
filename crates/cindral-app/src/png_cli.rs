@@ -27,3 +27,17 @@ pub fn run(args:impl IntoIterator<Item=OsString>)->Result<(),String> {
     png_job::export(bundle,None,scene.as_deref(),&output,&options,false,&name,force,&Control::default())?;
     println!("Exported {} ({}×{})",output.display(),options.width,options.height);Ok(())
 }
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rejects_missing_sizes_bad_quality_and_unknown_flags_before_gpu() {
+        for (args,expected) in [
+            (vec!["--export-png","in.cdraft","out.png"],"requires --width"),
+            (vec!["--export-png","in.cdraft","out.png","--aa","bad"],"--aa must"),
+            (vec!["--export-png","in.cdraft","out.png","--wat"],"unknown PNG flag"),
+            (vec!["--export-png","in.cdraft","out.png","--width","0","--height","1"],"dimension"),
+        ] {
+            assert!(super::run(args.into_iter().map(std::ffi::OsString::from)).unwrap_err().contains(expected));
+        }
+    }
+}

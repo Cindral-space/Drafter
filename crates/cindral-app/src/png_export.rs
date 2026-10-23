@@ -35,21 +35,26 @@ pub struct Options {
     pub transparent: bool,
     /// Match the physical viewport on the next export.
     pub match_window: bool,
+    /// Editing context snapshot, excluded from persistent settings and PNG metadata.
+    #[serde(skip)]
+    pub context: Vec<cindral_core::InstanceId>,
     /// Last chosen directory (never embedded in the image).
     pub folder: PathBuf,
 }
 impl Default for Options {
-    fn default()->Self { Self {width:1920,height:1080,aa:Aa::Medium,transparent:false,match_window:true,folder:PathBuf::new()} }
+    fn default()->Self { Self {width:1920,height:1080,aa:Aa::Medium,transparent:false,match_window:true,context:Vec::new(),folder:PathBuf::new()} }
 }
 impl Options {
     /// Conservative peak estimate: GPU color/depth, padded readback and CPU copy,
-    /// final pixels/encoder, doubled upload geometry, plus 128 MiB textures/shadows/headroom.
+    /// final pixels/encoder, upload geometry headroom, plus 128 MiB textures/shadows/headroom.
     pub fn estimate(&self, geometry_bytes: u64)->Result<([u32;2],u64),String> {
         let w=self.width.checked_mul(self.aa.scale()).ok_or("PNG size overflow")?;
         let h=self.height.checked_mul(self.aa.scale()).ok_or("PNG size overflow")?;
         if w==0 || h==0 || w>MAX_DIMENSION || h>MAX_DIMENSION {
             return Err("PNG render dimension must be 1..8192 including AA (Medium ×2, High ×3); reduce size or AA".into());
         }
+        let aspect=self.width as f32/self.height as f32;
+        if !(0.001..=1000.).contains(&aspect) {return Err("PNG aspect must be between 1:1000 and 1000:1 (camera limit)".into());}
         let bytes=u64::from(w)*u64::from(h)*12 + u64::from(row_stride(w))*u64::from(h)
             + u64::from(self.width)*u64::from(self.height)*8 + 128*1024*1024;
         let bytes=bytes.checked_add(geometry_bytes.checked_mul(4).ok_or("PNG memory estimate overflow")?).ok_or("PNG memory estimate overflow")?;
@@ -142,6 +147,8 @@ pub fn destination(path:&Path,force:bool)->Result<(),String> {
 }
 /// Encode metadata and pixels into a temporary file, then publish atomically.
 pub fn write_png(path:&Path,options:&Options,rgba:&[u8],document:&str,force:bool,control:&Control)->Result<(),String> {
+    options.estimate(0)?;
+    if rgba.len()!=options.width as usize*options.height as usize*4 {return Err("incomplete PNG pixels".into());}
     destination(path,force)?;control.check()?;
     let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut temp=tempfile::NamedTempFile::new_in(parent).map_err(|e|format!("PNG destination {}: {e}",path.display()))?;
@@ -151,7 +158,7 @@ pub fn write_png(path:&Path,options:&Options,rgba:&[u8],document:&str,force:bool
         encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
         encoder.add_text_chunk("Software".into(),"Cindral Drafter".into()).map_err(|e|e.to_string())?;
         let name=Path::new(document).file_name().unwrap_or_default().to_string_lossy();
-        encoder.add_text_chunk("Document".into(),name.into_owned()).map_err(|e|e.to_string())?;
+        encoder.add_itxt_chunk("Document".into(),name.into_owned()).map_err(|e|e.to_string())?;
         let mut writer=encoder.write_header().map_err(|e|e.to_string())?;
         {use std::io::Write; let mut stream=writer.stream_writer().map_err(|e|e.to_string())?;
         for row in rgba.chunks(options.width as usize*4) {control.check()?;stream.write_all(row).map_err(|e|format!("PNG write failed: {e}"))?;}
@@ -215,10 +222,12 @@ mod tests {
         let old=std::fs::read(&path).unwrap();assert!(write_png(&path,&options,&pixels,"x",false,&Control::default()).is_err());assert_eq!(std::fs::read(&path).unwrap(),old);
         let decoder=png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));let reader=decoder.read_info().unwrap();
         assert_eq!((reader.info().width,reader.info().height),(2,2));
-        assert_eq!(reader.info().uncompressed_latin1_text.iter().map(|t|(&*t.keyword,&*t.text)).collect::<Vec<_>>(),vec![("Software","Cindral Drafter"),("Document","model.cdraft")]);
+        assert_eq!(reader.info().uncompressed_latin1_text.iter().map(|t|(&*t.keyword,&*t.text)).collect::<Vec<_>>(),vec![("Software","Cindral Drafter")]);
+        assert_eq!(reader.info().utf8_text[0].keyword,"Document");
+        assert_eq!(reader.info().utf8_text[0].get_text().unwrap(),"model.cdraft");
         let missing=dir.path().join("missing/out.png");assert!(write_png(&missing,&options,&pixels,"x",false,&Control::default()).is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(),1);
-        write_png(&path,&options,&pixels,"replacement",true,&Control::default()).unwrap();
+        write_png(&path,&options,&pixels,"房间.cdraft",true,&Control::default()).unwrap();
     }
     #[cfg(unix)]
     #[test]
@@ -226,5 +235,18 @@ mod tests {
         // /proc is unwritable even when tests execute as root.
         let path=Path::new("/proc/cindral-png-export-test.png");
         assert!(write_png(path,&small(),&[0;16],"x",false,&Control::default()).is_err());assert!(!path.exists());
+    }
+}
+#[cfg(test)]
+mod cancellation_test {
+    #[test]
+    fn concurrent_cancel_never_publishes_after_successful_cancel() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("race.png");
+        let options=super::Options{width:1024,height:512,aa:super::Aa::Off,..Default::default()};
+        let control=super::Control::default();let worker=control.clone();let destination=path.clone();
+        let barrier=std::sync::Arc::new(std::sync::Barrier::new(2));let start=barrier.clone();
+        let thread=std::thread::spawn(move||{let rgba=vec![123;1024*512*4];start.wait();super::write_png(&destination,&options,&rgba,"test",false,&worker)});
+        barrier.wait();let cancelled=control.cancel();let result=thread.join().unwrap();
+        if cancelled {assert!(result.is_err());assert!(!path.exists());assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(),0);}else{assert!(result.is_ok());assert!(path.exists());}
     }
 }

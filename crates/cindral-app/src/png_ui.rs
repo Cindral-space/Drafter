@@ -33,7 +33,8 @@ fn preferences_path()->PathBuf {
 impl DrafterApp {
     fn start_png(&mut self,path:PathBuf,force:bool) {
         self.cancel_modify();self.tool.cancel();self.cancel_section();
-        let options=self.png.options.clone();
+        let mut options=self.png.options.clone();
+        options.context=self.history.context().to_vec();
         if let Err(e)=options.estimate(0) {self.png.status=e;return;}
         let bundle=self.file_values();let camera=self.camera.clone();let srgb=self.png.srgb_surface;
         let name=self.files.path.as_ref().and_then(|p|p.file_name()).map(|s|s.to_string_lossy().into_owned()).unwrap_or_else(||"Untitled".into());
