@@ -1,0 +1,38 @@
+Release build: cargo build --release -p cindral-app --features kernel-benchmark --example png_benchmark --bin cindral-app
+Sequential fresh processes, no concurrent builds or agents during measurement. Each invocation bounded by timeout 90s.
+
+Command: WGPU_BACKEND=gl timeout 90s target/release/examples/png_benchmark 1920 1080
+5000-component document setup: 9.362 ms
+5000 occurrence traversal + initial mesh/instance preparation: 3.935 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.560 ms
+single-definition dirty mesh preparation: 0.072 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.036 ms
+shared edit redo: 0.030 ms
+one instance transform preview: 0.005 ms; instance batch preparation: 2.549 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.846 ms; hit: true
+21600-face connected group placement preview: 0.003 ms
+connected group placement commit: 0.004 ms
+connected group placement undo: 0.002 ms
+1920x1080 High: 455.220 ms; estimate 432 MiB; PNG 715072 bytes; adapter AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+Process peak RSS: VmHWM:	  233132 kB
+
+Command: WGPU_BACKEND=gl timeout 90s target/release/examples/png_benchmark 2048 1152
+5000-component document setup: 6.947 ms
+5000 occurrence traversal + initial mesh/instance preparation: 2.885 ms; definitions with geometry: 2
+shared face edit (5000 visible occurrences): 0.567 ms
+single-definition dirty mesh preparation: 0.071 ms; updated definitions: 1; instance upload: false
+shared edit undo: 0.033 ms
+shared edit redo: 0.029 ms
+one instance transform preview: 0.005 ms; instance batch preparation: 2.136 ms; geometry uploads: 0
+5000 occurrence transformed pick: 1.325 ms; hit: true
+21600-face connected group placement preview: 0.003 ms
+connected group placement commit: 0.004 ms
+connected group placement undo: 0.003 ms
+2048x1152 High: 493.151 ms; estimate 474 MiB; PNG 770849 bytes; adapter AdapterInfo { name: "AMD Radeon Vega 11 Graphics (radeonsi, raven, ACO, DRM 3.64, 7.2.7-arch1-1)", vendor: 4098, device: 0, device_type: Other, driver: "", driver_info: "4.6 (Core Profile) Mesa 26.2.3-arch1.1", backend: Gl }
+Process peak RSS: VmHWM:	  242836 kB
+
+Command: WGPU_BACKEND=gl timeout 90s target/release/examples/png_benchmark 3840 2160
+3840x2160 High: REFUSED: PNG render dimension must be 1..8192 including AA (Medium ×2, High ×3); reduce size or AA
+
+Command: WGPU_BACKEND=gl timeout 90s target/release/examples/png_benchmark 8192 8192
+8192x8192 High: REFUSED: PNG render dimension must be 1..8192 including AA (Medium ×2, High ×3); reduce size or AA

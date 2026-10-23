@@ -446,7 +446,9 @@ impl DrafterApp {
                     );
                 }
             }
-            Action::Png => { self.png.open = true; },
+            Action::Png => {
+                self.png.open = true;
+            }
             Action::Dae => {
                 self.files.dae.open = true;
             }

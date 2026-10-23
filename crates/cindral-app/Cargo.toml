@@ -71,3 +71,7 @@ features = ["derive"]
 
 [dependencies.serde_json]
 version = "1"
+
+[[example]]
+name = "png_benchmark"
+required-features = ["kernel-benchmark"]

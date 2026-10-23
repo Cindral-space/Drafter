@@ -158,3 +158,7 @@ production-file compatibility/performance remains unverified. See the
 Geometry, holes (triangulated), groups/components, shared instance transforms, colors, transparency, textures and current planar UVs are kept. Soft/hidden edge flags, tags/layers, scenes, styles, section planes and shadows are lost. Independent back-face materials and original UV seams are unavailable in the native model; only its current face material and planar mapping can be exported. See [export options, CLI and limitations](docs/DAE_EXPORT.md).
 
 This independent exporter follows the public COLLADA specification. Cindral Drafter is not affiliated with Trimble or SketchUp.
+
+## Exporting images
+
+Use **File > Export > Image (PNG)…** to save the current view at a chosen size with its styles, materials, sections and shadows. Transparent backgrounds and Off/Medium/High antialiasing are available. The dialog explains framing and shared-memory limits. For headless single-scene CLI export and limitations, see [PNG export](docs/PNG_EXPORT.md).

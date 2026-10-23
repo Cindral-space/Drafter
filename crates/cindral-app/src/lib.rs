@@ -8,14 +8,14 @@ use cindral_render::{
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
 mod dae_ui;
-pub mod png_export;
-pub mod png_job;
-mod png_ui;
-pub mod png_cli;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
 mod organization_ui;
+pub mod png_cli;
+pub mod png_export;
+pub mod png_job;
+mod png_ui;
 mod presentation_ui;
 #[cfg(feature = "kernel-benchmark")]
 pub mod real_file_benchmark;
@@ -133,7 +133,7 @@ impl DrafterApp {
             4,
         ));
         workspace_ui::configure_style(&cc.egui_ctx);
-        let mut png = png_ui::PngUi::default(); png.srgb_surface = render.target_format.is_srgb();
+        let png = png_ui::PngUi::with_surface(render.target_format.is_srgb());
         Ok(Self {
             modifying: true,
             png,
@@ -720,7 +720,10 @@ impl DrafterApp {
                     self.replay_rect = rect;
                 }
                 let aspect = rect.width() / rect.height();
-                self.png.viewport = [(rect.width()*ctx.pixels_per_point()).round() as u32, (rect.height()*ctx.pixels_per_point()).round() as u32];
+                self.png.viewport = [
+                    (rect.width() * ctx.pixels_per_point()).round() as u32,
+                    (rect.height() * ctx.pixels_per_point()).round() as u32,
+                ];
                 if self.files.fit {
                     self.extents(aspect);
                     self.files.fit = false;
