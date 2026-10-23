@@ -554,3 +554,7 @@
 ### Rotate item 16 — edit context isolation
 
 - Context entry/exit already cancels the shared session and resets inference state. Rotate routes only the active definition's loose IDs and its directly selected child occurrence; sibling/ancestor picks cannot broaden targets. Added nested mirrored/nonuniform context coverage with unchanged root/shared-definition assertions and exact undo. The protractor remains in world coordinates while inference rays/points/normals cross the context transform explicitly. Targeted app check passes.
+
+### Rotate item 17 — stage guidance
+
+- Shared status routing displays the requested center/start/sweep hints verbatim from the user's supplied requirements, with selection-required idle guidance and the Angle measurements caption. Both loose and occurrence placement use the same stage flags. No vendor documentation text or assets were obtained/copied.
