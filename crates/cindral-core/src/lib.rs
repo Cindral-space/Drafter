@@ -22,6 +22,7 @@
 
 mod measurement;
 pub use measurement::*;
+mod color;
 mod command;
 mod csg;
 mod document;
@@ -29,6 +30,10 @@ mod document_data;
 mod geometry;
 mod model;
 pub mod profile;
+pub use color::{
+    format_hex_rgb, linear_rgb_to_srgb, linear_to_srgb, parse_hex_rgb, srgb_to_linear,
+    srgb_to_linear_rgb,
+};
 pub use document::*;
 pub use document_data::*;
 mod modification;

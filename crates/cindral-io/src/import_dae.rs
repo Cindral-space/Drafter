@@ -595,7 +595,8 @@ fn parse_library_materials(
             let idx = materials.len();
             materials.push(Material {
                 name: name.clone(),
-                color: effect_desc.color,
+                // COLLADA diffuse channels are interchange sRGB values.
+                color: crate::srgb_bytes(effect_desc.color),
                 opacity: effect_desc.opacity,
                 texture: texture_slot,
             });
@@ -1297,9 +1298,9 @@ fn instantiate_geometry_def(
             (
                 Some(MaterialId((m_idx + 1) as u64)),
                 [
-                    (m.color[0] * 255.0).round() as u8,
-                    (m.color[1] * 255.0).round() as u8,
-                    (m.color[2] * 255.0).round() as u8,
+                    m.color[0],
+                    m.color[1],
+                    m.color[2],
                     (m.opacity * 255.0).round() as u8,
                 ],
             )

@@ -3,7 +3,7 @@ use crate::{Edge, EdgeId, Face, FaceId, KernelError, Model, Vertex, VertexId};
 use glam::DMat4;
 use std::collections::BTreeMap;
 /// Current native document schema, before M6 container encoding/migrations.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 macro_rules! id {
     ($name:ident,$doc:literal) => {
         #[doc=$doc]
@@ -129,12 +129,33 @@ pub struct Tag {
 pub struct Material {
     /// Human-readable palette name.
     pub name: String,
-    /// Linear RGB albedo in 0..=1.
-    pub color: [f32; 3],
+    /// Display sRGB albedo bytes; lighting converts to linear light.
+    /// Schema 1 stored linear floats; [`material_color_from_legacy`] upgrades
+    /// them on load so old files keep their exact rendered look.
+    #[serde(deserialize_with = "material_color_from_legacy")]
+    pub color: [u8; 3],
     /// Opacity in 0..=1.
     pub opacity: f32,
     /// Optional document-relative texture reference.
     pub texture: Option<String>,
+}
+
+/// Deserializes material color as current sRGB bytes or schema-1 linear floats.
+fn material_color_from_legacy<'de, D>(deserializer: D) -> Result<[u8; 3], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Current([u8; 3]),
+        Linear([f32; 3]),
+    }
+    use serde::Deserialize as _;
+    match Repr::deserialize(deserializer)? {
+        Repr::Current(color) => Ok(color),
+        Repr::Linear(linear) => Ok(crate::color::linear_rgb_to_srgb(linear)),
+    }
 }
 /// Serializable geometry definition and nested instance tree.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

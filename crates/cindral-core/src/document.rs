@@ -370,16 +370,13 @@ fn name(value: &str) -> Result<String, KernelError> {
 }
 fn validate_material(m: &Material) -> Result<(), KernelError> {
     name(&m.name)?;
-    if m.color
-        .iter()
-        .any(|v| !v.is_finite() || !(0.0..=1.).contains(v))
-        || !m.opacity.is_finite()
+    if !m.opacity.is_finite()
         || !(0.0..=1.).contains(&m.opacity)
         || m.texture
             .as_ref()
             .is_some_and(|s| s.len() > 4096 || s.chars().any(char::is_control))
     {
-        return Err(invalid("invalid material color, opacity or texture slot"));
+        return Err(invalid("invalid material opacity or texture slot"));
     }
     Ok(())
 }
@@ -2323,7 +2320,7 @@ fn import_material_key(material: &Material) -> (String, [u32; 3], u32, Option<St
     let bits = |v: f32| if v == 0. { 0 } else { v.to_bits() };
     (
         material.name.clone(),
-        material.color.map(bits),
+        material.color.map(u32::from),
         bits(material.opacity),
         material.texture.clone(),
     )

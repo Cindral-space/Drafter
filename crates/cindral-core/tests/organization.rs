@@ -216,7 +216,7 @@ fn tags_materials_and_versioned_data_are_separate_from_runtime_state() {
     assert_eq!(doc.occurrences().unwrap().len(), 2);
     doc.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Glass".into(),
-        color: [0.2, 0.5, 0.9],
+        color: [51, 128, 229],
         opacity: 0.4,
         texture: Some("textures/glass.png".into()),
     }))
@@ -312,7 +312,7 @@ fn splitting_and_healing_painted_faces_preserves_material_and_history() {
     square(&mut doc, 2.);
     doc.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Paint".into(),
-        color: [0.2, 0.4, 0.6],
+        color: [51, 102, 153],
         opacity: 0.7,
         texture: None,
     }))

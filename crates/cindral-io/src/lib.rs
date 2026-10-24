@@ -21,6 +21,22 @@ pub enum IoError {
 }
 /// File-boundary result.
 pub type Result<T> = std::result::Result<T, IoError>;
+/// Converts interchange sRGB float channels to material sRGB bytes.
+pub(crate) fn srgb_bytes(rgb: [f32; 3]) -> [u8; 3] {
+    let mut out = [0u8; 3];
+    for (slot, v) in out.iter_mut().zip(rgb) {
+        *slot = (v.clamp(0., 1.) * 255.).round().clamp(0., 255.) as u8;
+    }
+    out
+}
+/// Converts material sRGB bytes to interchange sRGB float channels.
+pub(crate) fn srgb_floats(bytes: [u8; 3]) -> [f32; 3] {
+    [
+        f32::from(bytes[0]) / 255.,
+        f32::from(bytes[1]) / 255.,
+        f32::from(bytes[2]) / 255.,
+    ]
+}
 /// Original encoded image, embedded once irrespective of material references.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextureAsset {

@@ -53,7 +53,7 @@ fn exported_gltf_preserves_faces_shared_instances_bounds_and_assets() {
     let (slot, asset) = texture_from_bytes(png()).unwrap();
     h.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Blue glass".into(),
-        color: [0.2, 0.4, 0.8],
+        color: [51, 102, 204],
         opacity: 0.5,
         texture: Some(slot.clone()),
     }))
@@ -123,7 +123,7 @@ fn exported_gltf_preserves_faces_shared_instances_bounds_and_assets() {
         .values()
         .find(|m| m.name == "Blue glass")
         .unwrap();
-    assert_eq!(material.color, [0.2, 0.4, 0.8]);
+    assert_eq!(material.color, [51, 102, 204]);
     assert_eq!(material.opacity, 0.5);
     assert_eq!(imported.history.undo_depth(), 1);
     let before = imported.history.to_data();

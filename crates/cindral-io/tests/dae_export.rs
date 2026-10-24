@@ -52,7 +52,7 @@ fn fixture() -> DraftBundle {
         MaterialId(10),
         Material {
             name: "Paint & glass".into(),
-            color: [0.2, 0.4, 0.6],
+            color: [51, 102, 153],
             opacity: 0.4,
             texture: None,
         },
@@ -197,7 +197,7 @@ fn nested_mirrored_holes_round_trip_both_units() {
             .document
             .materials
             .values()
-            .any(|m| m.color == [0.2, 0.4, 0.6] && (m.opacity - 0.4).abs() < 1e-6));
+            .any(|m| m.color == [51, 102, 153] && (m.opacity - 0.4).abs() < 1e-6));
         let h = validate_bundle(&loaded).unwrap();
         for o in h.occurrences().unwrap() {
             let m = h.definition_model(o.definition).unwrap();
@@ -721,8 +721,8 @@ fn xml_references_array_counts_and_tinted_alpha_are_consistent() {
     let scene = import_dae(&p, &ImportControl::default()).unwrap();
     let image = decode_texture(scene.textures.values().next().unwrap()).unwrap();
     assert_eq!(image.rgba[3], 128);
-    assert!((123..=125).contains(&image.rgba[0]));
-    assert!((77..=80).contains(&image.rgba[1]));
+    assert!((50..=52).contains(&image.rgba[0]));
+    assert!((43..=45).contains(&image.rgba[1]));
     assert!(d
         .descendants()
         .find(|n| n.has_tag_name("transparent"))

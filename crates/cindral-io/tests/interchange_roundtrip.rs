@@ -41,7 +41,7 @@ fn textured_component_export_import_preserves_placed_surface_area_and_assets() {
     let id = MaterialId(h.to_data().next_id);
     h.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Texture".into(),
-        color: [0.3, 0.5, 0.7],
+        color: [77, 128, 179],
         opacity: 0.75,
         texture: Some(key.clone()),
     }))

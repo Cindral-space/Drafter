@@ -563,15 +563,6 @@ fn unwrap_definitions(payload: &[u8]) -> Option<Vec<&[u8]>> {
     (!defs.is_empty()).then_some(defs)
 }
 
-fn srgb_to_linear(c: u8) -> f32 {
-    let c = f32::from(c) / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 /// Parse `materials/*/material.xml`; returns material-name -> palette index plus display colors.
 fn preflight_xml(xml: &str) -> Result<()> {
     let bytes = xml.as_bytes();
@@ -761,7 +752,7 @@ fn load_materials(
         );
         scene.materials.push(Material {
             name,
-            color: rgb.map(srgb_to_linear),
+            color: rgb,
             opacity,
             texture,
         });

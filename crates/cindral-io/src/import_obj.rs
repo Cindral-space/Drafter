@@ -615,7 +615,8 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
                     });
                     let material = Material {
                         name: mat_def.name,
-                        color: mat_def.color,
+                        // MTL Kd channels are interchange sRGB values.
+                        color: crate::srgb_bytes(mat_def.color),
                         opacity: mat_def.opacity,
                         texture: mat_def.texture,
                     };
@@ -758,11 +759,8 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
                     let id = material_name_to_id.get(name).copied();
                     let color = if let Some(id) = id {
                         let m = &document_materials[&id];
-                        let r = (m.color[0].clamp(0.0, 1.0) * 255.0).round() as u8;
-                        let g = (m.color[1].clamp(0.0, 1.0) * 255.0).round() as u8;
-                        let b = (m.color[2].clamp(0.0, 1.0) * 255.0).round() as u8;
                         let a = (m.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-                        [r, g, b, a]
+                        [m.color[0], m.color[1], m.color[2], a]
                     } else {
                         [160, 177, 193, 255]
                     };

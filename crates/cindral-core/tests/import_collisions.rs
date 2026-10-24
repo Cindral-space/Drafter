@@ -14,7 +14,7 @@ fn source() -> DocumentData {
         MaterialId(11),
         Material {
             name: "Paint".into(),
-            color: [1., 0., 0.],
+            color: [255, 0, 0],
             opacity: 1.,
             texture: None,
         },
@@ -50,7 +50,7 @@ fn collisions_merge_without_modifying_existing_and_undo_leaves_no_records() {
     destination.redo().unwrap();
     assert_eq!(destination.to_data().definitions, after.definitions);
     let mut different = source();
-    different.materials.get_mut(&MaterialId(11)).unwrap().color = [0., 1., 0.];
+    different.materials.get_mut(&MaterialId(11)).unwrap().color = [0, 255, 0];
     assert_eq!(
         destination.append_import_report(different).unwrap(),
         [1, 0, 1, 1]

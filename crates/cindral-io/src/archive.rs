@@ -79,9 +79,9 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
             }
             // v1 stores document schema1 only. v2 adds native coordinate metadata and
             // embedded-image records; unresolved legacy texture slots remain values.
-            manifest.archive_version = ARCHIVE_VERSION;
             manifest.presentation = Default::default();
             manifest.coordinates = Coordinates::default();
+            manifest.archive_version = ARCHIVE_VERSION;
         }
         2 => {
             manifest.presentation = Default::default();
@@ -96,6 +96,12 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
                 "unsupported .cdraft archive version {other}"
             )))
         }
+    }
+    // Document schema 2 moved material colors to sRGB bytes; schema-1 linear
+    // float colors already upgraded themselves during deserialization, so the
+    // stored rendered look is unchanged. Anything else is not a known schema.
+    if manifest.document.schema_version == 1 {
+        manifest.document.schema_version = cindral_core::SCHEMA_VERSION;
     }
     if manifest.coordinates != Coordinates::default() {
         return Err(IoError::Invalid(
@@ -327,7 +333,10 @@ mod tests {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-square.cdraft");
         let report = load_draft_report(&fixture).unwrap();
         assert_eq!(report.source_version, 1);
-        assert_eq!(report.bundle.document.schema_version, 1);
+        assert_eq!(
+            report.bundle.document.schema_version,
+            cindral_core::SCHEMA_VERSION
+        );
         let doc = validate_bundle(&report.bundle).unwrap();
         assert_eq!(doc.model().faces().len(), 1);
         assert_eq!(doc.undo_depth(), 0);
@@ -338,6 +347,84 @@ mod tests {
         let saved = load_draft_report(&output).unwrap();
         assert_eq!(saved.source_version, 4);
         assert_eq!(saved.bundle, report.bundle);
+    }
+    #[test]
+    fn schema1_linear_material_colors_migrate_preserving_the_rendered_look() {
+        use cindral_core::linear_rgb_to_srgb;
+        // Serialize a document shaped exactly like schema-1 writers produced:
+        // identical nested types, only material colors are linear floats.
+        #[derive(serde::Serialize)]
+        struct LegacyMaterial {
+            name: String,
+            color: [f32; 3],
+            opacity: f32,
+            texture: Option<String>,
+        }
+        #[derive(serde::Serialize)]
+        struct LegacyDocument {
+            schema_version: u32,
+            next_id: u64,
+            root: cindral_core::DefinitionId,
+            definitions: std::collections::BTreeMap<
+                cindral_core::DefinitionId,
+                cindral_core::DefinitionData,
+            >,
+            tags: std::collections::BTreeMap<cindral_core::TagId, cindral_core::Tag>,
+            materials: std::collections::BTreeMap<cindral_core::MaterialId, LegacyMaterial>,
+        }
+        #[derive(serde::Serialize)]
+        struct LegacyManifest<'a> {
+            archive_version: u32,
+            coordinates: Coordinates,
+            document: &'a LegacyDocument,
+            presentation: &'a cindral_core::Presentation,
+            textures: Vec<AssetRecord>,
+        }
+        let base = DraftBundle::default();
+        let linear = [0.5f32, 0.214, 1.0];
+        let legacy = LegacyManifest {
+            archive_version: ARCHIVE_VERSION,
+            coordinates: Coordinates::default(),
+            presentation: &base.presentation,
+            textures: Vec::new(),
+            document: &LegacyDocument {
+                schema_version: 1,
+                next_id: 8,
+                root: cindral_core::DefinitionId(0),
+                definitions: base.document.definitions.clone(),
+                tags: base.document.tags.clone(),
+                materials: std::collections::BTreeMap::from([(
+                    cindral_core::MaterialId(7),
+                    LegacyMaterial {
+                        name: "Legacy paint".into(),
+                        color: linear,
+                        opacity: 0.8,
+                        texture: Some("slot".into()),
+                    },
+                )]),
+            },
+        };
+        let text = ron::ser::to_string(&legacy).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.cdraft");
+        {
+            let mut zip = ZipWriter::new(File::create(&path).unwrap());
+            zip.start_file("manifest.ron", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        let bundle = load_draft(&path).unwrap();
+        assert_eq!(bundle.document.schema_version, cindral_core::SCHEMA_VERSION);
+        let material = &bundle.document.materials[&cindral_core::MaterialId(7)];
+        // linear_to_srgb per channel, quantized once to bytes: the rendered
+        // look of the legacy linear values is exactly preserved.
+        assert_eq!(material.color, linear_rgb_to_srgb(linear));
+        assert_eq!(material.opacity, 0.8);
+        assert_eq!(material.texture.as_deref(), Some("slot"));
+        let output = dir.path().join("resaved.cdraft");
+        save_draft(&output, &bundle).unwrap();
+        assert_eq!(load_draft(&output).unwrap(), bundle);
     }
     #[test]
     fn autosave_recovery_and_invalid_archives() {

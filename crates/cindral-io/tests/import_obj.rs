@@ -199,7 +199,7 @@ f 1 2 3
     assert_eq!(mat.name, "Wood");
     assert_eq!(mat.texture.as_ref(), Some(tex_key));
     assert!((mat.opacity - 0.95).abs() < 1e-4);
-    assert!((mat.color[0] - 0.6).abs() < 1e-4);
+    assert_eq!(mat.color[0], 153);
 }
 
 #[test]

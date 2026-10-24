@@ -87,7 +87,7 @@ fn resolve_face_material(
                 } else {
                     mat.name.clone()
                 },
-                color: mat.color,
+                color: crate::srgb_floats(mat.color),
                 opacity,
                 texture: mat.texture.clone(),
             };
@@ -635,8 +635,14 @@ pub fn export_gltf(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
             return idx;
         }
 
+        // glTF baseColorFactor is linear light; ResolvedMaterial colors are sRGB.
+        let linear = [
+            cindral_core::srgb_to_linear(mat.color[0]),
+            cindral_core::srgb_to_linear(mat.color[1]),
+            cindral_core::srgb_to_linear(mat.color[2]),
+        ];
         let mut pbr = json!({
-            "baseColorFactor": [mat.color[0], mat.color[1], mat.color[2], mat.opacity],
+            "baseColorFactor": [linear[0], linear[1], linear[2], mat.opacity],
             "metallicFactor": 0.0,
             "roughnessFactor": 0.5,
         });
@@ -845,7 +851,7 @@ pub fn export_gltf(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
                             } else {
                                 mat.name.clone()
                             },
-                            color: mat.color,
+                            color: crate::srgb_floats(mat.color),
                             opacity: mat.opacity,
                             texture: mat.texture.clone(),
                         }

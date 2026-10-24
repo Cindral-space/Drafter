@@ -1616,15 +1616,6 @@ pub fn parse(data: &[u8], major: u32, version: &str) -> Result<Scene> {
     Ok(scene)
 }
 
-fn srgb_to_linear(c: u8) -> f32 {
-    let c = f32::from(c) / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 /// Instance matrix: rows are `xf[0..3]`, `xf[3..6]`, `xf[6..9]`; translation `xf[9..12]` inches.
 fn transform(xf: &[f64; 12]) -> Option<DMat4> {
     if xf.iter().any(|v| !v.is_finite()) {
@@ -1921,11 +1912,7 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
         cx.colors.push(m.rgba);
         scene.materials.push(Material {
             name: m.name.clone(),
-            color: [
-                srgb_to_linear(m.rgba[0]),
-                srgb_to_linear(m.rgba[1]),
-                srgb_to_linear(m.rgba[2]),
-            ],
+            color: [m.rgba[0], m.rgba[1], m.rgba[2]],
             opacity,
             texture,
         });

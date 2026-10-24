@@ -75,7 +75,7 @@ fn populated() -> DraftBundle {
     let (key, asset) = texture_from_bytes(encoded.into_inner()).unwrap();
     doc.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Glazed".into(),
-        color: [0.2, 0.5, 0.8],
+        color: [51, 128, 204],
         opacity: 0.7,
         texture: Some(key.clone()),
     }))

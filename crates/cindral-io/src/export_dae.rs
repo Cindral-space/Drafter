@@ -632,7 +632,7 @@ fn export_inner(
         color_key([160, 177, 193, 255]),
         Material {
             name: "Default".into(),
-            color: [160. / 255., 177. / 255., 193. / 255.],
+            color: [160, 177, 193],
             opacity: 1.,
             texture: None,
         },
@@ -647,11 +647,7 @@ fn export_inner(
                     .entry(color_key(face.color))
                     .or_insert_with(|| Material {
                         name: color_key(face.color),
-                        color: [
-                            face.color[0] as f32 / 255.,
-                            face.color[1] as f32 / 255.,
-                            face.color[2] as f32 / 255.,
-                        ],
+                        color: [face.color[0], face.color[1], face.color[2]],
                         opacity: face.color[3] as f32 / 255.,
                         texture: None,
                     });
@@ -683,7 +679,7 @@ fn export_inner(
                     .ok_or_else(|| IoError::Invalid(format!("missing texture asset {key}")))?;
                 // COLLADA diffuse is color OR texture. Bake the native linear tint into
                 // an image so standard readers retain the rendered appearance.
-                let tinted = m.color != [1.; 3];
+                let tinted = m.color != [255, 255, 255];
                 let output_key = if tinted {
                     format!("tint-{material_id}")
                 } else {
@@ -691,7 +687,7 @@ fn export_inner(
                 };
                 if !textures.contains_key(&output_key) {
                     let bytes = if tinted {
-                        tinted_png(asset, m.color, control)?
+                        tinted_png(asset, cindral_core::srgb_to_linear_rgb(m.color), control)?
                     } else {
                         asset.bytes.clone()
                     };
@@ -750,11 +746,8 @@ fn export_inner(
             if texture.is_some() {
                 out.push_str("<texture texture=\"sampler\" texcoord=\"UVSET0\"/>");
             } else {
-                let _ = write!(
-                    out,
-                    "<color>{} {} {} 1</color>",
-                    m.color[0], m.color[1], m.color[2]
-                );
+                let rgb = crate::srgb_floats(m.color);
+                let _ = write!(out, "<color>{} {} {} 1</color>", rgb[0], rgb[1], rgb[2]);
             }
             out.push_str("</diffuse><transparent opaque=\"A_ONE\">");
             if texture.is_some() {

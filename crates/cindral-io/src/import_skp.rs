@@ -72,13 +72,6 @@ pub fn import_skp_bytes(bytes: &[u8], control: &ImportControl) -> Result<Importe
             material.opacity = 1.;
         }
         material.opacity = material.opacity.clamp(0., 1.);
-        for channel in &mut material.color {
-            *channel = if channel.is_finite() {
-                channel.clamp(0., 1.)
-            } else {
-                0.5
-            };
-        }
     }
     let mut assignments = Vec::new();
     let mut parents = vec![Vec::new(); source.definitions.len()];

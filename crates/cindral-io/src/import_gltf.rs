@@ -983,7 +983,8 @@ fn parse_materials_and_textures(
 
         materials.push(Material {
             name,
-            color,
+            // glTF baseColorFactor is linear light; materials store display sRGB.
+            color: cindral_core::linear_rgb_to_srgb(color),
             opacity,
             texture,
         });
@@ -1137,9 +1138,9 @@ fn parse_meshes(
                     IoError::Invalid("primitive material index out of bounds".into())
                 })?;
                 let rgba = [
-                    (mat.color[0] * 255.0).round() as u8,
-                    (mat.color[1] * 255.0).round() as u8,
-                    (mat.color[2] * 255.0).round() as u8,
+                    mat.color[0],
+                    mat.color[1],
+                    mat.color[2],
                     (mat.opacity * 255.0).round() as u8,
                 ];
                 (Some(MaterialId((mat_idx + 1) as u64)), rgba)

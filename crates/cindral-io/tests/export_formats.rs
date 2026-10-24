@@ -139,7 +139,7 @@ fn test_obj_export_with_mtl_and_textures() {
         mat_id,
         Material {
             name: "WoodFloor".to_string(),
-            color: [0.7, 0.5, 0.3],
+            color: [179, 128, 77],
             opacity: 0.85,
             texture: Some(tex_key.clone()),
         },
@@ -185,7 +185,7 @@ fn test_obj_export_with_mtl_and_textures() {
     assert!(mtl_path.exists());
     let mtl_content = std::fs::read_to_string(&mtl_path).expect("read mtl");
     assert!(mtl_content.contains("newmtl WoodFloor_mat_101"));
-    assert!(mtl_content.contains("Kd 0.700000 0.500000 0.300000"));
+    assert!(mtl_content.contains("Kd 0.701961 0.501961 0.301961"));
     assert!(mtl_content.contains("d 0.850000"));
     assert!(mtl_content.contains("map_Kd scene_tex_"));
 
@@ -219,7 +219,7 @@ fn test_gltf_schema_accessors_and_root_conversion() {
         mat_id,
         Material {
             name: "Glass".to_string(),
-            color: [0.2, 0.4, 0.9],
+            color: [51, 102, 230],
             opacity: 0.5,
             texture: Some(tex_key.clone()),
         },
@@ -661,7 +661,7 @@ fn explicit_face_color_overrides_container_material_in_every_color_format() {
     let id = MaterialId(h.to_data().next_id);
     h.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Blue".into(),
-        color: [0., 0., 1.],
+        color: [0, 0, 255],
         opacity: 0.5,
         texture: None,
     }))

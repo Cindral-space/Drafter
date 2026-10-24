@@ -75,7 +75,7 @@ fn actual_saved_v1_and_v2_files_initialize_default_presentation() {
         let report = load_draft_report(&path).unwrap();
         assert_eq!(report.source_version, version);
         assert_eq!(report.bundle.presentation, Presentation::default());
-        assert_eq!(report.bundle.document.schema_version, 1);
+        assert_eq!(report.bundle.document.schema_version, SCHEMA_VERSION);
         validate_bundle(&report.bundle).unwrap();
         assert!(report
             .bundle

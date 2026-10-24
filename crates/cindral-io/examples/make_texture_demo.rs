@@ -33,7 +33,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let id = MaterialId(h.to_data().next_id);
     h.organization(OrganizationCommand::CreateMaterial(Material {
         name: "Checker".into(),
-        color: [1., 1., 1.],
+        color: [255, 255, 255],
         opacity: 1.,
         texture: Some(key.clone()),
     }))?;
