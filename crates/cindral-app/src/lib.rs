@@ -13,6 +13,8 @@ mod files_ui;
 #[cfg(all(test, feature = "kernel-benchmark"))]
 mod materials_benchmark;
 mod materials_library;
+#[cfg(feature = "kernel-benchmark")]
+pub mod materials_real_file;
 mod materials_ui;
 mod measurements_ui;
 mod modify_ui;

@@ -64,6 +64,8 @@ pub(crate) struct MaterialsUi {
     pub(crate) eyedropper: bool,
     /// Lock-aspect toggle for the texture size editor (on by default).
     pub(crate) lock_aspect: bool,
+    /// Decoded pixel sizes per texture slot (decoded once, cached).
+    texture_sizes: BTreeMap<String, (u32, u32)>,
     pub(crate) library: crate::materials_library::LibraryCache,
     library_restored: bool,
 }
@@ -87,6 +89,7 @@ impl Default for MaterialsUi {
             library_tiles: BTreeMap::new(),
             eyedropper: false,
             lock_aspect: true,
+            texture_sizes: BTreeMap::new(),
             library: crate::materials_library::LibraryCache::new(Vec::new()),
             library_restored: false,
         }
@@ -588,45 +591,42 @@ impl DrafterApp {
                 },
             );
         }
-        if ui
+        let (image_w, image_h) = self.material_texture_size(material);
+        let reset = ui
             .button("Reset to image size")
-            .on_hover_text(format!(
-                "Physical size at 96 DPI (currently {} m × {} m)",
-                size_text(&cindral_core::TextureMapping::from_pixels(
-                    self.material_texture_size(material).0,
-                    self.material_texture_size(material).1,
-                )),
-                size_text(&cindral_core::TextureMapping::from_pixels(
-                    self.material_texture_size(material).0,
-                    self.material_texture_size(material).1,
-                ))
-                .split(" × ")
-                .nth(1)
-                .unwrap_or("?")
-            ))
-            .clicked()
-        {
-            let (w, h) = self.material_texture_size(material);
+            .on_hover_text("Physical size at 96 DPI");
+        if reset.clicked() {
             self.apply_mapping_edit(
                 id,
                 material,
-                cindral_core::TextureMapping::from_pixels(w, h),
+                cindral_core::TextureMapping::from_pixels(image_w, image_h),
             );
         }
     }
 
     /// Decoded pixel size of a material's texture (0,0 when unavailable).
-    fn material_texture_size(&self, material: &Material) -> (u32, u32) {
-        material
-            .texture
-            .as_ref()
-            .and_then(|key| self.files.textures.get(key))
+    ///
+    /// Results are cached per texture slot: decoding a 4096² image on every
+    /// frame would stall the UI.
+    fn material_texture_size(&mut self, material: &Material) -> (u32, u32) {
+        let Some(key) = material.texture.clone() else {
+            return (0, 0);
+        };
+        if let Some(size) = self.materials.texture_sizes.get(&key) {
+            return *size;
+        }
+        let size = self
+            .files
+            .textures
+            .get(&key)
             .and_then(|asset| {
                 cindral_io::decode_texture(asset)
                     .ok()
                     .map(|t| (t.width, t.height))
             })
-            .unwrap_or((0, 0))
+            .unwrap_or((0, 0));
+        self.materials.texture_sizes.insert(key, size);
+        size
     }
 
     /// Apply one live mapping edit: preview now, commit on interaction end.

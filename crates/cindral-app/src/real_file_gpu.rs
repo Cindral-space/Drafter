@@ -81,6 +81,14 @@ impl Gpu {
     pub(super) fn allow_shadows(&mut self) {
         self.allow_shadows = true;
     }
+    pub(super) fn allocated_bytes(&self) -> u64 {
+        let renderer = self
+            .renderer
+            .callback_resources
+            .get::<cindral_render::scene::SceneRenderer>()
+            .unwrap();
+        renderer.allocated_bytes()
+    }
     pub(super) fn pan_metrics(&self) -> (u64, u64) {
         let renderer = self
             .renderer
