@@ -265,14 +265,67 @@ impl Delta {
                 high_water,
             );
         }
+        // Attribute-only edits change face records without touching topology:
+        // the delta is built directly, skipping cavity cloning and validation.
+        let attribute: Result<
+            Option<BTreeMap<crate::FaceId, ValueChange<crate::Face>>>,
+            KernelError,
+        > = match command {
+            Command::SetFaceMaterial { faces, material } => faces
+                .iter()
+                .try_fold(BTreeMap::new(), |mut changes, id| {
+                    let face = model.faces.get(id).ok_or(KernelError::MissingEntity)?;
+                    if face.material != *material {
+                        let mut after = face.clone();
+                        after.material = *material;
+                        changes.insert(
+                            *id,
+                            ValueChange {
+                                before: Some(face.clone()),
+                                after: Some(after),
+                            },
+                        );
+                    }
+                    Ok(changes)
+                })
+                .map(Some),
+            Command::PaintFace { faces, color } => faces
+                .iter()
+                .try_fold(BTreeMap::new(), |mut changes, id| {
+                    let face = model.faces.get(id).ok_or(KernelError::MissingEntity)?;
+                    if face.color != *color || face.material.is_some() {
+                        let mut after = face.clone();
+                        after.color = *color;
+                        after.material = None;
+                        changes.insert(
+                            *id,
+                            ValueChange {
+                                before: Some(face.clone()),
+                                after: Some(after),
+                            },
+                        );
+                    }
+                    Ok(changes)
+                })
+                .map(Some),
+            _ => Ok(None),
+        };
+        if let Some(faces) = attribute? {
+            return Ok(Self {
+                translation: None,
+                vertices: BTreeMap::new(),
+                edges: BTreeMap::new(),
+                faces,
+                before_next: model.next_id,
+                after_next: model.next_id,
+            });
+        }
         if matches!(
             command,
             Command::EraseFaces(..)
                 | Command::PushPull { .. }
                 | Command::Transform { .. }
                 | Command::FollowMe { .. }
-                | Command::PaintFace { .. }
-                | Command::SetFaceMaterial { .. }
         ) {
             model.ensure_spatial()?;
             let (before, after) = crate::modification::prepare(model, command, high_water)?;
@@ -573,8 +626,29 @@ impl Delta {
         }
         model.ensure_spatial()?;
         let mut spatial = model.spatial.take().ok_or(KernelError::MissingEntity)?;
+        // Attribute-only face changes (material/color) keep their geometry, so
+        // their spatial index entries stay valid and are not rebuilt.
+        let restyled: std::collections::BTreeSet<crate::FaceId> = self
+            .faces
+            .iter()
+            .filter(|(_, value)| {
+                value
+                    .old(forward)
+                    .zip(value.new_value(forward))
+                    .is_some_and(|(old, new)| {
+                        old.outer == new.outer
+                            && old.holes == new.holes
+                            && old.plane == new.plane
+                            && (old.material != new.material || old.color != new.color)
+                    })
+            })
+            .map(|(id, _)| *id)
+            .collect();
         // Remove index entries while all old endpoints still exist.
         for (id, value) in &self.faces {
+            if restyled.contains(id) {
+                continue;
+            }
             if let Some(old) = value.old(forward) {
                 spatial.remove_face(*id, old, model)?;
             }
@@ -623,7 +697,9 @@ impl Delta {
         for (id, value) in &self.faces {
             if let Some(new) = value.new_value(forward) {
                 model.faces.insert(*id, new.clone());
-                spatial.add_face(*id, new, model)?;
+                if !restyled.contains(id) {
+                    spatial.add_face(*id, new, model)?;
+                }
             }
         }
         model.next_id = if forward {

@@ -10,6 +10,8 @@ use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession}
 mod builtin_materials;
 mod dae_ui;
 mod files_ui;
+#[cfg(all(test, feature = "kernel-benchmark"))]
+mod materials_benchmark;
 mod materials_library;
 mod materials_ui;
 mod measurements_ui;

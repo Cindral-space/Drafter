@@ -136,6 +136,17 @@ struct FaceSignature {
     holes: Vec<Vec<DVec3>>,
 }
 
+impl FaceSignature {
+    /// True when only style fields differ: cached triangles stay valid and a
+    /// restyle can patch color/material bytes in place.
+    fn geometry_matches(&self, other: &Self) -> bool {
+        self.normal == other.normal
+            && self.distance == other.distance
+            && self.outer == other.outer
+            && self.holes == other.holes
+    }
+}
+
 #[derive(Clone, Debug)]
 struct FaceSlot {
     /// Start index in triangles (each triangle is 3 [`FaceVertex`] elements).
@@ -279,6 +290,12 @@ impl MeshCache {
         enum PreparedFace {
             Remove(FaceId),
             Unchanged,
+            /// Geometry unchanged: existing slot vertices are patched with the
+            /// new style without re-triangulation.
+            Restyle {
+                id: FaceId,
+                signature: FaceSignature,
+            },
             Upsert {
                 id: FaceId,
                 signature: FaceSignature,
@@ -297,22 +314,31 @@ impl MeshCache {
 
         let mut seen_faces = BTreeSet::new();
         let mut prepared_faces = Vec::with_capacity(faces.len());
+        let mut geometry_changed: BTreeSet<FaceId> = BTreeSet::new();
         for &face_id in faces {
             if !seen_faces.insert(face_id) {
                 continue;
             }
             match model.faces().get(&face_id) {
-                None => prepared_faces.push(PreparedFace::Remove(face_id)),
+                None => {
+                    geometry_changed.insert(face_id);
+                    prepared_faces.push(PreparedFace::Remove(face_id));
+                }
                 Some(face) => {
                     let style = style_fn(face_id, face);
                     let signature = build_face_signature_in_frame(model, face, style, offset)?;
-                    if self
-                        .face_slots
-                        .get(&face_id)
-                        .is_some_and(|slot| slot.signature == signature)
-                    {
+                    let slot = self.face_slots.get(&face_id);
+                    if slot.is_some_and(|slot| slot.signature == signature) {
                         prepared_faces.push(PreparedFace::Unchanged);
+                    } else if slot.is_some_and(|slot| {
+                        slot.signature.geometry_matches(&signature) && slot.active_tris > 0
+                    }) {
+                        prepared_faces.push(PreparedFace::Restyle {
+                            id: face_id,
+                            signature,
+                        });
                     } else {
+                        geometry_changed.insert(face_id);
                         let vertices =
                             build_face_triangles_in_frame(model, face_id, face, style, offset)?;
                         if vertices.is_empty() {
@@ -331,12 +357,20 @@ impl MeshCache {
 
         // Face adjacency can change while an edge's endpoint IDs stay unchanged.
         // Include old and new boundaries so cached profile normals remain correct.
+        // Style-only restyles leave edges untouched.
         let mut dirty_edges: BTreeSet<_> = edges.iter().copied().collect();
-        for id in faces {
-            if let Some(slot) = self.face_slots.get(id) {
+        for id in faces
+            .iter()
+            .copied()
+            .chain(geometry_changed.iter().copied())
+        {
+            if !geometry_changed.contains(&id) {
+                continue;
+            }
+            if let Some(slot) = self.face_slots.get(&id) {
                 dirty_edges.extend(slot.boundary_edges.iter().copied());
             }
-            dirty_edges.extend(model.face_edges(*id));
+            dirty_edges.extend(model.face_edges(id));
         }
         let edges: Vec<_> = dirty_edges.into_iter().collect();
         let mut seen_edges = BTreeSet::new();
@@ -369,6 +403,26 @@ impl MeshCache {
         for op in prepared_faces {
             match op {
                 PreparedFace::Unchanged => {}
+                PreparedFace::Restyle { id, signature } => {
+                    // Patch color/material in place; positions and normals of
+                    // the cached triangles are unchanged.
+                    let style = (
+                        signature.color,
+                        signature.material_index,
+                        signature.explicit_material,
+                    );
+                    if let Some(slot) = self.face_slots.get_mut(&id) {
+                        let start_v = slot.start_tri * 3;
+                        let end_v = start_v + slot.active_tris * 3;
+                        let packed = crate::texture::pack_face_material(style.1, style.2);
+                        for vertex in &mut self.face_data[start_v..end_v] {
+                            vertex.color = style.0;
+                            vertex.material = packed;
+                        }
+                        slot.signature = signature;
+                        dirty_face_ranges.push((start_v, end_v));
+                    }
+                }
                 PreparedFace::Remove(face_id) => {
                     if let Some(slot) = self.face_slots.remove(&face_id) {
                         let start_v = slot.start_tri * 3;
