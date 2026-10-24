@@ -27,13 +27,9 @@ fn style(
     layers: &BTreeMap<String, u32>,
 ) -> FaceStyle {
     if let Some(material) = face.material.and_then(|id| doc.materials().get(&id)) {
+        let linear = cindral_core::srgb_to_linear_rgb(material.color);
         return FaceStyle {
-            color: [
-                material.color[0],
-                material.color[1],
-                material.color[2],
-                material.opacity,
-            ],
+            color: [linear[0], linear[1], linear[2], material.opacity],
             explicit_material: true,
             texture_layer: material
                 .texture
@@ -200,7 +196,10 @@ impl SceneCache {
                 let material = item
                     .material
                     .and_then(|id| doc.materials().get(&id))
-                    .map(|m| [m.color[0], m.color[1], m.color[2], m.opacity]);
+                    .map(|m| {
+                        let linear = cindral_core::srgb_to_linear_rgb(m.color);
+                        [linear[0], linear[1], linear[2], m.opacity]
+                    });
                 let dim = if item.path.starts_with(doc.context()) {
                     1.
                 } else {
@@ -428,7 +427,7 @@ mod tests {
         let material = MaterialId(doc.to_data().next_id);
         doc.organization(OrganizationCommand::CreateMaterial(Material {
             name: "Textured".into(),
-            color: [1.; 3],
+            color: [255, 255, 255],
             opacity: 1.,
             texture: Some("asset".into()),
         }))

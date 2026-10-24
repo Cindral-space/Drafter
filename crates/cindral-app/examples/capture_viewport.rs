@@ -292,7 +292,7 @@ fn seed_organization(
     })?;
     app.organize(Org::CreateMaterial(Material {
         name: "Amber".into(),
-        color: [0.85, 0.4, 0.12],
+        color: [217, 102, 31],
         opacity: 1.,
         texture: None,
     }))?;
@@ -308,7 +308,7 @@ fn seed_organization(
     })?;
     app.organize(Org::CreateMaterial(Material {
         name: "Glass".into(),
-        color: [0.1, 0.6, 0.8],
+        color: [26, 153, 204],
         opacity: 0.4,
         texture: Some("glass-slot".into()),
     }))?;

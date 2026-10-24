@@ -45,7 +45,7 @@ pub(crate) struct OrganizationUi {
     tag: Option<TagId>,
     pub(crate) material: Option<MaterialId>,
     material_name: String,
-    color: [f32; 3],
+    color: [u8; 3],
     opacity: f32,
     pub(crate) texture: String,
 }
@@ -64,7 +64,7 @@ impl Default for OrganizationUi {
             tag: None,
             material: None,
             material_name: "Material".into(),
-            color: [0.65, 0.7, 0.75],
+            color: [166, 178, 191],
             opacity: 1.,
             texture: String::new(),
         }
@@ -516,7 +516,17 @@ impl DrafterApp {
                     }
                 });
             ui.text_edit_singleline(&mut self.organization.material_name);
-            ui.color_edit_button_rgb(&mut self.organization.color);
+            let mut srgb = [
+                self.organization.color[0] as f32 / 255.,
+                self.organization.color[1] as f32 / 255.,
+                self.organization.color[2] as f32 / 255.,
+            ];
+            ui.color_edit_button_rgb(&mut srgb);
+            self.organization.color = [
+                (srgb[0] * 255.).round().clamp(0., 255.) as u8,
+                (srgb[1] * 255.).round().clamp(0., 255.) as u8,
+                (srgb[2] * 255.).round().clamp(0., 255.) as u8,
+            ];
             ui.add(egui::Slider::new(&mut self.organization.opacity, 0.0..=1.).text("Opacity"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.organization.texture)

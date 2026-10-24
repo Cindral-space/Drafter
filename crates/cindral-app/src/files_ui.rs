@@ -2282,7 +2282,7 @@ mod tests {
             }],
             materials: vec![cindral_core::Material {
                 name: "Paint".into(),
-                color: [1., 0., 0.],
+                color: [255, 0, 0],
                 opacity: 1.,
                 texture: Some(key.clone()),
             }],
