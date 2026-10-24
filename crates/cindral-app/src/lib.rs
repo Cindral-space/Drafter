@@ -21,6 +21,8 @@ mod presentation_ui;
 #[cfg(feature = "kernel-benchmark")]
 pub mod real_file_benchmark;
 #[cfg(feature = "kernel-benchmark")]
+pub mod pan_benchmark;
+#[cfg(feature = "kernel-benchmark")]
 mod real_file_gpu;
 mod rotate_ui;
 mod scene_cache;
@@ -455,7 +457,7 @@ impl DrafterApp {
         let aspect = rect.width() / rect.height().max(1.0);
         let drawing_drag =
             self.draw_drag.is_some() || response.drag_started_by(PointerButton::Primary);
-        if self.capture_measurement_keys(response) {
+        if self.pan_drag.is_none() && self.capture_measurement_keys(response) {
             return;
         }
         if self.route_shortcuts(response) {
@@ -1212,3 +1214,6 @@ mod draw_parity_tests;
 
 #[cfg(test)]
 mod shortcut_tests;
+
+#[cfg(test)]
+mod pan_tests;

@@ -30,6 +30,7 @@ pub(super) struct Gpu {
     queue: wgpu::Queue,
     renderer: egui_wgpu::Renderer,
     target: wgpu::TextureView,
+    allow_shadows: bool,
 }
 impl Gpu {
     pub(super) fn new() -> Result<Self, String> {
@@ -74,7 +75,15 @@ impl Gpu {
             queue,
             renderer,
             target,
+            allow_shadows: false,
         })
+    }
+    pub(super) fn allow_shadows(&mut self) {
+        self.allow_shadows = true;
+    }
+    pub(super) fn pan_metrics(&self) -> (u64, u64) {
+        let renderer = self.renderer.callback_resources.get::<cindral_render::scene::SceneRenderer>().unwrap();
+        (renderer.shadow_renders(), renderer.allocated_bytes())
     }
     pub(super) fn draw(
         &mut self,
@@ -125,6 +134,7 @@ impl Gpu {
         for id in textures.free {
             self.renderer.free_texture(&id);
         }
+        if !self.allow_shadows {
         assert_eq!(
             self.renderer
                 .callback_resources
@@ -134,5 +144,6 @@ impl Gpu {
             0,
             "shadows are disabled throughout this replay"
         );
+        }
     }
 }

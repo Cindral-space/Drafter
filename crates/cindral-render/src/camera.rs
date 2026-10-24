@@ -1248,3 +1248,7 @@ mod tests {
         assert_close(ortho.y, -0.7, 1e-4, "y");
     }
 }
+
+#[cfg(test)]
+#[path = "pan_tests.rs"]
+mod pan_tests;

@@ -1554,6 +1554,12 @@ impl DrafterApp {
 
 #[cfg(feature = "kernel-benchmark")]
 impl DrafterApp {
+    pub(super) fn isolate_pan_replay(&mut self) {
+        self.files.import_summary = None;
+        self.files.checked = true;
+        self.files.offer = false;
+        self.files.interval = Duration::from_secs(86400);
+    }
     pub(super) fn load_replay(&mut self, path: &Path) -> cindral_io::Result<()> {
         let control = ImportControl::default();
         let result = cindral_io::import_file(

@@ -47,9 +47,6 @@ impl DrafterApp {
         let valid = focused && rect.is_finite() && rect.width() > 0. && rect.height() > 0.;
         if !valid || escape || self.pan_drag.is_some_and(|d| d.rect != rect) {
             let owned = self.pan_drag.take().is_some();
-            if active && escape {
-                self.shortcuts.navigation = None;
-            }
             return owned || active;
         }
         if self.pan_drag.is_none() && response.hovered() && response.is_pointer_button_down_on() {
@@ -87,7 +84,7 @@ impl DrafterApp {
             if response.hovered() {
                 ctx.set_cursor_icon(egui::CursorIcon::Grab);
                 // egui already normalizes wheel/touchpad scrolling into points.
-                let delta = ctx.input(|i| i.smooth_scroll_delta);
+                let delta = ctx.input(|i| i.raw_scroll_delta);
                 if delta != egui::Vec2::ZERO {
                     self.camera.pan_at_depth(Vec2::new(delta.x, delta.y), rect.height(), self.camera.pan_depth(None));
                 }

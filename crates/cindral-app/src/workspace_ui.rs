@@ -415,7 +415,7 @@ impl DrafterApp {
                                 }
                                 ui.separator();
                                 if ui.selectable_label(self.shortcuts.navigation == Some(shortcuts::Action::Pan), "Pan")
-                                    .on_hover_text("Pan (H) · Drag to pan the view.").clicked() {
+                                    .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e| e.action == shortcuts::Action::Pan).unwrap())).clicked() {
                                     self.activate_pan();
                                 }
                                 ui.label(
