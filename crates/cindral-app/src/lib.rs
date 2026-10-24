@@ -7,8 +7,11 @@ use cindral_render::{
     scene::{SceneCallback, SceneRenderer, SceneUpdate},
 };
 use cindral_tools::{ModifyKind, ModifySession, Selection, ToolKind, ToolSession};
+mod builtin_materials;
 mod dae_ui;
 mod files_ui;
+mod materials_library;
+mod materials_ui;
 mod measurements_ui;
 mod modify_ui;
 mod organization_ui;
@@ -60,7 +63,6 @@ pub struct DrafterApp {
     modify_press: Option<glam::DVec2>,
     drag_axis: DVec3,
     rotate: rotate_ui::RotateUi,
-    paint_color: [u8; 4],
     last_tape: Option<f64>,
     tape_resize: Option<measurements_ui::TapeResize>,
     tape_target: Option<measurements_ui::TapeTarget>,
@@ -71,6 +73,8 @@ pub struct DrafterApp {
     engine: Engine,
     tool: ToolSession,
     axis_lock: Option<Axis>,
+    materials: materials_ui::MaterialsUi,
+    paint_hover: materials_ui::PaintHover,
     snap: Option<Snap>,
     draw_press: Option<Snap>,
     draw_drag: Option<()>,
@@ -107,7 +111,6 @@ impl Default for DrafterApp {
             modify_press: None,
             drag_axis: DVec3::Z,
             rotate: Default::default(),
-            paint_color: [210, 130, 75, 255],
             last_tape: None,
             tape_resize: None,
             tape_target: None,
@@ -118,6 +121,8 @@ impl Default for DrafterApp {
             engine: Engine::default(),
             tool: ToolSession::new(ToolKind::Line),
             axis_lock: None,
+            materials: Default::default(),
+            paint_hover: Default::default(),
             snap: None,
             draw_press: None,
             draw_drag: None,
@@ -840,6 +845,7 @@ impl DrafterApp {
                 self.modify_overlay(ui, rect, view);
                 self.rotate_overlay(ui, rect);
                 self.organization_overlay(ui, rect);
+                self.paint_hover_overlay(ui, rect, view);
                 let preview = self.tool.preview();
                 for segment in preview.windows(2) {
                     if let (Some(a), Some(b)) = (screen(segment[0]), screen(segment[1])) {

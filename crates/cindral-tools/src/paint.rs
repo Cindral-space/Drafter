@@ -32,6 +32,17 @@ pub fn faces_with_material(model: &Model, material: Option<MaterialId>) -> Vec<F
         .collect()
 }
 
+/// Every face whose effective material (explicit, else the container's
+/// inherited paint) matches the clicked container's material.
+pub fn faces_with_effective_material(model: &Model, inherited: Option<MaterialId>) -> Vec<FaceId> {
+    model
+        .faces()
+        .iter()
+        .filter(|(_, face)| face.material.or(inherited) == inherited)
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

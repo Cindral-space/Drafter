@@ -33,6 +33,7 @@ pub struct LibraryImage {
 }
 
 /// Result of scanning one library folder.
+#[allow(dead_code)] // folder retained for callers that key scans by origin
 #[derive(Clone, Default)]
 pub struct LibraryScan {
     /// The folder that was scanned.
@@ -61,6 +62,7 @@ impl LibraryScan {
 /// simply not scanned). Files that fail to read or decode, non-image files and
 /// duplicate basenames are counted in [`LibraryScan::skipped`] and never panic.
 /// Duplicate basenames across extensions keep the first entry in sort order.
+#[allow(dead_code)] // synchronous reference implementation; workers use the cancellable variant
 pub fn scan_folder(folder: &Path) -> LibraryScan {
     scan_folder_cancellable(folder, &AtomicBool::new(false))
 }
@@ -218,11 +220,6 @@ impl LibraryScanJob {
             cancel,
             done: false,
         }
-    }
-
-    /// The folder this job is scanning.
-    pub fn folder(&self) -> &Path {
-        &self.folder
     }
 
     /// Non-blocking poll: `None` while running, `Some` exactly once when the

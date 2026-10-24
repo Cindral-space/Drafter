@@ -418,7 +418,12 @@ fn replace_material_repaints_faces_and_instances_atomically() {
         vertices: doc.model().vertices().keys().copied().collect(),
     })
     .unwrap();
-    let instance = *doc.instances(DefinitionId(0)).unwrap().keys().next().unwrap();
+    let instance = *doc
+        .instances(DefinitionId(0))
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap();
     doc.organization(OrganizationCommand::PaintInstance {
         path: vec![instance],
         material: Some(red),
@@ -436,13 +441,21 @@ fn replace_material_repaints_faces_and_instances_atomically() {
     })
     .unwrap();
     assert_eq!(doc.undo_depth(), depth + 1);
-    assert!(doc.model().faces().values().all(|f| f.material == Some(blue)));
+    assert!(doc
+        .model()
+        .faces()
+        .values()
+        .all(|f| f.material == Some(blue)));
     assert_eq!(
         doc.instances(DefinitionId(0)).unwrap()[&instance].material,
         Some(blue)
     );
     doc.undo().unwrap();
-    assert!(doc.model().faces().values().all(|f| f.material == Some(red)));
+    assert!(doc
+        .model()
+        .faces()
+        .values()
+        .all(|f| f.material == Some(red)));
     assert_eq!(
         doc.instances(DefinitionId(0)).unwrap()[&instance].material,
         Some(red)

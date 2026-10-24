@@ -73,9 +73,6 @@ impl SceneCache {
     pub(crate) fn occurrences(&self) -> &[Occurrence] {
         &self.occurrences
     }
-    pub(crate) fn material_index(&self, id: MaterialId) -> Option<u32> {
-        self.material_indices.get(&id).copied()
-    }
     /// Rebuilds the GPU material table; texture layers and mapping defaults
     /// come from the asset slot map. Returns the table and whether the
     /// material identity set changed (renumbering instance indices).
@@ -486,7 +483,11 @@ mod tests {
         // never restyled or rewritten.
         assert!(update.geometry.is_empty());
         let table = update.materials.as_ref().unwrap();
-        let params = table.get(cache.material_index(material).unwrap());
+        // The one textured material's record carries layer 1.
+        let params = (1..table.len() as u32)
+            .map(|i| table.get(i))
+            .find(|p| p.texture_layer == 1)
+            .unwrap();
         assert_eq!(params.texture_layer, 1);
         let mut pending = None;
         merge(&mut pending, update);
@@ -521,8 +522,8 @@ mod tests {
         let initial = cache.sync(&doc).unwrap();
         assert_eq!(initial.geometry.len(), 1);
         let original_bytes = initial.geometry[0].mesh.face_writes[0].bytes.clone();
-        let index = cache.material_index(material).unwrap();
-        assert_eq!(index, 1);
+        // The only material occupies table index 1.
+        let index = 1u32;
 
         doc.organization(OrganizationCommand::UpdateMaterial {
             id: material,

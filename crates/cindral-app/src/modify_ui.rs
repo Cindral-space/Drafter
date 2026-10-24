@@ -12,7 +12,9 @@ impl DrafterApp {
         if kind == ModifyKind::Rotate {
             self.axis_lock = None;
         }
-        self.modify.set_color(self.paint_color);
+        if kind == ModifyKind::PaintBucket {
+            self.paint_hover = Default::default();
+        }
         self.tool.cancel();
         self.measurements.reset();
         self.draw_press = None;
@@ -316,10 +318,7 @@ impl DrafterApp {
                 if matches!(self.modify.kind(), ModifyKind::Rotate | ModifyKind::Scale) {
                     let _ = self.modify.set_reference(p);
                 }
-                if matches!(
-                    self.modify.kind(),
-                    ModifyKind::Eraser | ModifyKind::PaintBucket
-                ) {
+                if matches!(self.modify.kind(), ModifyKind::Eraser) {
                     match self.modify.update(p) {
                         Ok(Some(c)) => {
                             self.commit(c);
@@ -1935,6 +1934,19 @@ mod utility_parity_tests {
     fn utility_parity_click_history_and_undo_reset() {
         for kind in [ModifyKind::Eraser, ModifyKind::PaintBucket] {
             let (mut app, ctx) = setup(kind);
+            if kind == ModifyKind::PaintBucket {
+                // Painting needs a material; the default over unpainted faces
+                // is a no-op without history.
+                app.org_command(cindral_core::OrganizationCommand::CreateMaterial(
+                    cindral_core::Material {
+                        name: "Paint".into(),
+                        color: [200, 60, 40],
+                        opacity: 1.,
+                        texture: None,
+                    },
+                ));
+                app.organization.material = app.history.materials().keys().next_back().copied();
+            }
             let before = app.model().clone();
             let depth = app.history.undo_depth();
             let point = if kind == ModifyKind::Eraser {
@@ -2071,7 +2083,6 @@ mod utility_parity_tests {
         assert_eq!(app.history.undo_depth(), depth);
     }
     #[test]
-    #[ignore = "Alt sampler is not routed; click paints instead of sampling"]
     fn utility_parity_paint_alt_samples_without_painting() {
         let (mut app, ctx) = setup(ModifyKind::PaintBucket);
         let before = app.model().clone();
@@ -2083,9 +2094,40 @@ mod utility_parity_tests {
         send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
         send(&mut app, &ctx, vec![button(p, true, alt)]);
         send(&mut app, &ctx, vec![button(p, false, alt)]);
+        // Sampling never mutates the model; an unpainted face samples Default.
         assert_eq!(app.model(), &before);
-        let face = *app.model().faces().keys().next().unwrap();
-        assert_eq!(app.paint_color, app.model().faces()[&face].color);
+        assert_eq!(app.organization.material, None);
+        assert_eq!(app.organization.material_name, "Default");
+        // Painting the sampled default over unpainted faces stays a no-op;
+        // painting a real material afterwards records exactly one entry.
+        app.org_command(cindral_core::OrganizationCommand::CreateMaterial(
+            cindral_core::Material {
+                name: "Paint".into(),
+                color: [10, 120, 220],
+                opacity: 1.,
+                texture: None,
+            },
+        ));
+        let material = app.history.materials().keys().next_back().copied().unwrap();
+        app.organization.material = Some(material);
+        let depth = app.history.undo_depth();
+        send(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        send(
+            &mut app,
+            &ctx,
+            vec![button(p, true, egui::Modifiers::default())],
+        );
+        send(
+            &mut app,
+            &ctx,
+            vec![button(p, false, egui::Modifiers::default())],
+        );
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        assert!(app
+            .model()
+            .faces()
+            .values()
+            .all(|f| f.material == Some(material)));
     }
     #[cfg(feature = "kernel-benchmark")]
     #[test]

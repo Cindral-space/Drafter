@@ -285,9 +285,13 @@ impl DrafterApp {
     }
     /// Snapshot serializable file values, with encoded assets and no runtime history/caches.
     pub fn file_values(&self) -> DraftBundle {
+        // Procedural builtin pattern slots are regenerated on load; they are
+        // never embedded as binary assets.
+        let mut textures = self.files.textures.clone();
+        textures.retain(|key, _| !key.starts_with("builtin:"));
         DraftBundle {
             document: self.history.to_data(),
-            textures: self.files.textures.clone(),
+            textures,
             presentation: self.presentation.clone(),
         }
     }
@@ -338,7 +342,11 @@ impl DrafterApp {
         self.files.close_error = None;
         self.files.close_approved = false;
     }
-    fn apply_file(&mut self, bundle: DraftBundle, path: Option<PathBuf>) -> cindral_io::Result<()> {
+    pub(crate) fn apply_file(
+        &mut self,
+        bundle: DraftBundle,
+        path: Option<PathBuf>,
+    ) -> cindral_io::Result<()> {
         self.set_document_data(bundle.document)?;
         self.files.textures = bundle.textures;
         self.presentation = bundle.presentation;
@@ -347,6 +355,7 @@ impl DrafterApp {
         self.presentation_serial = self.presentation_serial.wrapping_add(1);
         self.reset_file_target(path);
         self.sync_file_textures()?;
+        self.ensure_builtin_textures();
         self.files.fit = true;
         self.files.offer = false;
         self.files.status = self.files.path.as_ref().map_or_else(

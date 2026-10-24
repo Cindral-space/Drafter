@@ -508,15 +508,23 @@ impl DrafterApp {
             }
         }
         if self.modifying && self.modify.kind() == ModifyKind::PaintBucket {
-            ui.label("Paint color");
-            let mut color = [
-                self.paint_color[0],
-                self.paint_color[1],
-                self.paint_color[2],
-            ];
-            if ui.color_edit_button_srgb(&mut color).changed() {
-                self.paint_color = [color[0], color[1], color[2], 255];
-                self.modify.set_color(self.paint_color);
+            let (name, color) = self
+                .organization
+                .material
+                .and_then(|id| self.history.materials().get(&id))
+                .map_or(("Default".to_owned(), [148u8, 159, 172]), |m| {
+                    (m.name.clone(), m.color)
+                });
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(14., 14.), egui::Sense::hover());
+            ui.painter()
+                .rect_filled(rect, 2., Color32::from_rgb(color[0], color[1], color[2]));
+            ui.label(name);
+            if ui
+                .selectable_label(self.materials.eyedropper, "Eyedropper")
+                .on_hover_text("Pick a material by clicking a face (same as Alt+click)")
+                .clicked()
+            {
+                self.materials.eyedropper = !self.materials.eyedropper;
             }
         }
     }
@@ -608,6 +616,24 @@ impl DrafterApp {
             label,
             Stroke::new(1.7_f32, rgb(39, 46, 61)),
         );
+        // Paint Bucket carries the active material swatch on the cursor.
+        if self.modifying && self.modify.kind() == ModifyKind::PaintBucket {
+            let color = self
+                .organization
+                .material
+                .and_then(|id| self.history.materials().get(&id))
+                .map_or([148u8, 159, 172], |m| m.color);
+            painter.circle_filled(
+                center + egui::vec2(-16., -16.),
+                6.,
+                Color32::from_rgb(color[0], color[1], color[2]),
+            );
+            painter.circle_stroke(
+                center + egui::vec2(-16., -16.),
+                6.,
+                Stroke::new(1.5_f32, Color32::WHITE),
+            );
+        }
     }
 
     pub(crate) fn tool_palette(&mut self, ctx: &egui::Context) {
@@ -853,24 +879,28 @@ impl DrafterApp {
                     });
                     ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let prompt = if self.shortcuts.navigation == Some(shortcuts::Action::Pan) {"Drag to pan the view."} else if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select"} else if self.modifying {
+                        let prompt = if self.shortcuts.navigation == Some(shortcuts::Action::Pan) {"Drag to pan the view.".to_owned()} else if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select".to_owned()} else if self.modifying {
                             match self.modify.kind() {
-                                ModifyKind::Select => "Click to select · Shift to add · Drag a selection box",
-                                ModifyKind::Rotate => self.rotate_hint(),
-                                ModifyKind::TapeMeasure => "Click two points to measure or create a guide",
-                                _ => "Select geometry, then drag · Type a value + Enter · Esc cancels",
+                                ModifyKind::Select => "Click to select · Shift to add · Drag a selection box".into(),
+                                ModifyKind::Rotate => self.rotate_hint().to_owned(),
+                                ModifyKind::TapeMeasure => "Click two points to measure or create a guide".into(),
+                                ModifyKind::PaintBucket => {
+                                    let mods = ctx.input(|i| i.modifiers);
+                                    self.paint_hint(&mods)
+                                }
+                                _ => "Select geometry, then drag · Type a value + Enter · Esc cancels".into(),
                             }
                         } else {
                             match self.tool.kind() {
-                                ToolKind::Line => "Drag a line or click start, then end · Esc stops chain",
-                                ToolKind::Rectangle => "Drag a rectangle or click opposite corners",
-                                ToolKind::Circle => "Click center, then radius",
-                                ToolKind::Arc => "Click center, start, then end direction",
-                                ToolKind::Polygon => "Click center, then vertex",
+                                ToolKind::Line => "Drag a line or click start, then end · Esc stops chain".into(),
+                                ToolKind::Rectangle => "Drag a rectangle or click opposite corners".into(),
+                                ToolKind::Circle => "Click center, then radius".into(),
+                                ToolKind::Arc => "Click center, start, then end direction".into(),
+                                ToolKind::Polygon => "Click center, then vertex".into(),
                             }
                         };
                         ui.label(RichText::new(self.active_tool_label()).color(ui.visuals().selection.stroke.color));
-                        ui.add(egui::Label::new(prompt).truncate()).on_hover_text(prompt);
+                        ui.add(egui::Label::new(prompt.as_str()).truncate()).on_hover_text(prompt.as_str());
                     });
                 });
             });

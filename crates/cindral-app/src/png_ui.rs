@@ -13,7 +13,7 @@ impl Drop for Job {
 }
 pub(crate) struct PngUi {
     pub(crate) open: bool,
-    options: Options,
+    pub(crate) options: Options,
     prefs: PathBuf,
     job: Option<Job>,
     status: String,
@@ -40,7 +40,7 @@ impl Default for PngUi {
         }
     }
 }
-fn preferences_path() -> PathBuf {
+pub(crate) fn preferences_path() -> PathBuf {
     let root = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {

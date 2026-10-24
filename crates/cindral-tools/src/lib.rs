@@ -9,7 +9,7 @@ pub mod paint;
 pub mod rotation;
 mod selection;
 pub use modify::{Guide, ModifyKind, ModifySession};
-pub use paint::{faces_with_material, fill_adjacent_same_material};
+pub use paint::{faces_with_effective_material, faces_with_material, fill_adjacent_same_material};
 mod session;
 pub use selection::{pick, pick_eraser_section, pick_section, Hit, Selection};
 pub mod measurements;

@@ -185,38 +185,6 @@ fn resolve_vertices_for_transform(
 }
 
 /// Resolve face IDs for the PaintBucket tool from selection and hit.
-fn resolve_faces_for_paint(model: &Model, selection: &Selection, hit: Option<Hit>) -> Vec<FaceId> {
-    let mut faces = BTreeSet::new();
-    faces.extend(&selection.faces);
-
-    match hit {
-        Some(Hit::Face(fid)) => {
-            if model.faces().contains_key(&fid) {
-                faces.insert(fid);
-            }
-        }
-        Some(Hit::Edge(eid)) => {
-            if let Some(edge) = model.edges().get(&eid) {
-                for (&fid, face) in model.faces() {
-                    if face_contains_edge(face, edge) {
-                        faces.insert(fid);
-                    }
-                }
-            }
-        }
-        Some(Hit::Vertex(vid)) => {
-            for (&fid, face) in model.faces() {
-                if face_contains_vertex(face, vid) {
-                    faces.insert(fid);
-                }
-            }
-        }
-        None => {}
-    }
-
-    faces.into_iter().collect()
-}
-
 /// Try to order selected edges into a single connected polyline path.
 fn resolve_ordered_path_from_edges(model: &Model, edges: &BTreeSet<EdgeId>) -> Option<Vec<DVec3>> {
     if edges.is_empty() {
@@ -318,7 +286,6 @@ pub struct ModifySession {
     measurement: Option<f64>,
     measurement_direction: Option<DVec3>,
     last_command: Option<Command>,
-    color: [u8; 4],
     guides: Vec<Guide>,
 
     target_vertices: Vec<VertexId>,
@@ -349,7 +316,6 @@ impl ModifySession {
             measurement: None,
             measurement_direction: None,
             last_command: None,
-            color: [255, 255, 255, 255],
             guides: Vec::new(),
             target_vertices: Vec::new(),
             target_face: None,
@@ -452,16 +418,6 @@ impl ModifySession {
             .as_deref()
             .and_then(|s| s.measurement)
             .or(self.measurement)
-    }
-
-    /// Set the color for face painting.
-    pub fn set_color(&mut self, color: [u8; 4]) {
-        self.color = color;
-    }
-
-    /// The current paint color.
-    pub fn color(&self) -> [u8; 4] {
-        self.color
     }
 
     /// Add a construction guide line through the anchor along the direction to the prospective pointer.
@@ -575,12 +531,9 @@ impl ModifySession {
                 axis.try_normalize().unwrap_or(DVec3::Z)
             }
             ModifyKind::PaintBucket => {
-                let faces = resolve_faces_for_paint(model, selection, hit);
-                if faces.is_empty() {
-                    return Err(ToolError::NotReady);
-                }
-                target_faces = faces;
-                axis.try_normalize().unwrap_or(DVec3::Z)
+                // Materials are the single source of truth for painting; the
+                // app routes Paint Bucket clicks through organization commands.
+                return Err(ToolError::NotReady);
             }
         };
 
@@ -812,18 +765,8 @@ impl ModifySession {
                 self.last_command = Some(cmd.clone());
                 Ok(Some(cmd))
             }
-            ModifyKind::PaintBucket => {
-                self.current_pointer = Some(point);
-                if self.target_faces.is_empty() {
-                    return Ok(None);
-                }
-                let cmd = Command::PaintFace {
-                    faces: self.target_faces.clone(),
-                    color: self.color,
-                };
-                self.last_command = Some(cmd.clone());
-                Ok(Some(cmd))
-            }
+            // Paint Bucket interactions are document-routed, not session-driven.
+            ModifyKind::PaintBucket => Ok(None),
         }
     }
 
@@ -1696,8 +1639,8 @@ mod tests {
     }
 
     #[test]
-    fn test_eraser_and_paint_bucket_commands() {
-        let (history, face_id, _, edges) = make_test_square();
+    fn eraser_click_target_resolves_to_one_command() {
+        let (history, _, _, edges) = make_test_square();
 
         // 1. Eraser
         let mut eraser = ModifySession::new(ModifyKind::Eraser);
@@ -1720,29 +1663,6 @@ mod tests {
         assert_eq!(erase_cmd, Command::EraseEdges(vec![edges[0]]));
         let finished_erase = eraser.finish();
         assert_eq!(finished_erase, Some(Command::EraseEdges(vec![edges[0]])));
-
-        // 2. PaintBucket
-        let mut paint = ModifySession::new(ModifyKind::PaintBucket);
-        paint.set_color([12, 34, 56, 78]);
-        assert_eq!(paint.color(), [12, 34, 56, 78]);
-
-        let mut sel_face = Selection::default();
-        sel_face.faces.insert(face_id);
-        paint
-            .begin(history.model(), &sel_face, None, DVec3::ZERO, DVec3::Z)
-            .expect("begin Paint");
-
-        let paint_cmd = paint
-            .update(DVec3::new(1.0, 1.0, 0.0))
-            .expect("update")
-            .expect("cmd");
-        assert_eq!(
-            paint_cmd,
-            Command::PaintFace {
-                faces: vec![face_id],
-                color: [12, 34, 56, 78],
-            }
-        );
     }
 
     #[test]

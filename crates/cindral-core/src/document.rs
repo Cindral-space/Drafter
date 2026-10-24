@@ -159,6 +159,8 @@ pub enum OrganizationCommand {
     },
     /// Remove a material and clear all references.
     DeleteMaterial(MaterialId),
+    /// Remove several materials in one undo step.
+    DeleteMaterials(Vec<MaterialId>),
     /// Repoint every reference from one material to another in one undo step.
     ReplaceMaterial {
         /// Material whose faces and containers are repainted.
@@ -658,6 +660,10 @@ impl DocumentHistory {
             .definitions
             .contains_key(&id)
             .then(|| self.history(id).model())
+    }
+    /// All definition identities, root included.
+    pub fn definitions(&self) -> impl Iterator<Item = DefinitionId> + '_ {
+        self.graph.definitions.keys().copied()
     }
     /// Child instances stored by one definition.
     pub fn instances(&self, id: DefinitionId) -> Option<&BTreeMap<InstanceId, Instance>> {
@@ -2015,6 +2021,44 @@ impl DocumentHistory {
                     }
                 }
             }
+            OrganizationCommand::DeleteMaterials(ids) => {
+                for id in &ids {
+                    if !after.materials.contains_key(id) {
+                        return Err(KernelError::MissingEntity);
+                    }
+                }
+                let ids: BTreeSet<MaterialId> = ids.iter().copied().collect();
+                after.materials.retain(|id, _| !ids.contains(id));
+                for d in after.definitions.values_mut() {
+                    for node in d.instances.values_mut() {
+                        if node.material.is_some_and(|id| ids.contains(&id)) {
+                            node.material = None;
+                        }
+                    }
+                }
+                for def in after.definitions.keys() {
+                    let faces = self
+                        .history(*def)
+                        .model()
+                        .faces()
+                        .iter()
+                        .filter_map(|(face, f)| {
+                            f.material
+                                .is_some_and(|id| ids.contains(&id))
+                                .then_some(*face)
+                        })
+                        .collect::<Vec<_>>();
+                    if !faces.is_empty() {
+                        commands.push((
+                            *def,
+                            Command::SetFaceMaterial {
+                                faces,
+                                material: None,
+                            },
+                        ));
+                    }
+                }
+            }
             OrganizationCommand::ReplaceMaterial { from, to } => {
                 if !after.materials.contains_key(&from) {
                     return Err(KernelError::MissingEntity);
@@ -2123,7 +2167,11 @@ impl DocumentHistory {
     /// Slider drags and keystrokes preview live through the material table;
     /// [`Self::finish_material_edit`] records exactly one undo entry on
     /// release.
-    pub fn material_preview(&mut self, id: MaterialId, material: Material) -> Result<(), KernelError> {
+    pub fn material_preview(
+        &mut self,
+        id: MaterialId,
+        material: Material,
+    ) -> Result<(), KernelError> {
         self.cancel_preview()?;
         validate_material(&material)?;
         if !self.graph.materials.contains_key(&id) {
@@ -2150,7 +2198,10 @@ impl DocumentHistory {
             return Err(KernelError::MissingEntity);
         }
         self.graph.materials.insert(id, original);
-        self.organization(OrganizationCommand::UpdateMaterial { id, material: edited })
+        self.organization(OrganizationCommand::UpdateMaterial {
+            id,
+            material: edited,
+        })
     }
 }
 

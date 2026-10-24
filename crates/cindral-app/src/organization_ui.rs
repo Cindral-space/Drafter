@@ -1,8 +1,7 @@
 //! Context navigation, Outliner and document metadata controls.
 use super::*;
 use cindral_core::{
-    DefinitionId, DefinitionKind, InstancePath, Material, MaterialId, OrganizationCommand as Org,
-    TagId,
+    DefinitionId, DefinitionKind, InstancePath, MaterialId, OrganizationCommand as Org, TagId,
 };
 use cindral_tools::Hit;
 use glam::{DMat4, DVec2};
@@ -44,9 +43,9 @@ pub(crate) struct OrganizationUi {
     tag_name: String,
     tag: Option<TagId>,
     pub(crate) material: Option<MaterialId>,
-    material_name: String,
-    color: [u8; 3],
-    opacity: f32,
+    pub(crate) material_name: String,
+    pub(crate) color: [u8; 3],
+    pub(crate) opacity: f32,
     pub(crate) texture: String,
 }
 impl Default for OrganizationUi {
@@ -121,7 +120,7 @@ impl DrafterApp {
         }
         Ok(changed)
     }
-    fn org_command(&mut self, command: Org) {
+    pub(crate) fn org_command(&mut self, command: Org) {
         match self.organize(command) {
             Ok(_) => self.error = None,
             Err(e) => self.error = Some(e.to_string()),
@@ -481,103 +480,9 @@ impl DrafterApp {
                 });
             }
         });
-        egui::CollapsingHeader::new("Materials").show(ui, |ui| {
-            let materials = self
-                .history
-                .materials()
-                .iter()
-                .map(|(id, m)| (*id, m.clone()))
-                .collect::<Vec<_>>();
-            let label = self
-                .organization
-                .material
-                .and_then(|id| self.history.materials().get(&id))
-                .map_or("Default material", |m| m.name.as_str());
-            egui::ComboBox::from_id_salt("paint_material")
-                .selected_text(label)
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(self.organization.material.is_none(), "Default")
-                        .clicked()
-                    {
-                        self.organization.material = None;
-                    }
-                    for (id, m) in &materials {
-                        if ui
-                            .selectable_label(self.organization.material == Some(*id), &m.name)
-                            .clicked()
-                        {
-                            self.organization.material = Some(*id);
-                            self.organization.material_name = m.name.clone();
-                            self.organization.color = m.color;
-                            self.organization.opacity = m.opacity;
-                            self.organization.texture = m.texture.clone().unwrap_or_default();
-                        }
-                    }
-                });
-            ui.text_edit_singleline(&mut self.organization.material_name);
-            let mut srgb = [
-                self.organization.color[0] as f32 / 255.,
-                self.organization.color[1] as f32 / 255.,
-                self.organization.color[2] as f32 / 255.,
-            ];
-            ui.color_edit_button_rgb(&mut srgb);
-            self.organization.color = [
-                (srgb[0] * 255.).round().clamp(0., 255.) as u8,
-                (srgb[1] * 255.).round().clamp(0., 255.) as u8,
-                (srgb[2] * 255.).round().clamp(0., 255.) as u8,
-            ];
-            ui.add(egui::Slider::new(&mut self.organization.opacity, 0.0..=1.).text("Opacity"));
-            ui.add(
-                egui::TextEdit::singleline(&mut self.organization.texture)
-                    .hint_text("Texture asset slot"),
-            );
-            if ui
-                .add_enabled(
-                    self.organization.material.is_some(),
-                    egui::Button::new("Load PNG/JPEG texture…"),
-                )
-                .clicked()
-            {
-                self.load_material_texture();
-            }
-            let material = Material {
-                name: self.organization.material_name.clone(),
-                color: self.organization.color,
-                opacity: self.organization.opacity,
-                texture: (!self.organization.texture.trim().is_empty())
-                    .then(|| self.organization.texture.clone()),
-            };
-            ui.horizontal(|ui| {
-                if ui.small_button("New material").clicked() {
-                    commands.push(Org::CreateMaterial(material.clone()));
-                }
-                if let Some(id) = self.organization.material {
-                    if ui.small_button("Update").clicked() {
-                        commands.push(Org::UpdateMaterial {
-                            id,
-                            material: material.clone(),
-                        });
-                    }
-                    if ui.small_button("Delete").clicked() {
-                        commands.push(Org::DeleteMaterial(id));
-                    }
-                }
-            });
-            if ui.button("Paint selected").clicked() {
-                if let Some(path) = self.organization.selected.clone() {
-                    commands.push(Org::PaintInstance {
-                        path,
-                        material: self.organization.material,
-                    });
-                } else if !self.selection.faces.is_empty() {
-                    commands.push(Org::PaintFaces {
-                        faces: self.selection.faces.iter().copied().collect(),
-                        material: self.organization.material,
-                    });
-                }
-            }
-        });
+        egui::CollapsingHeader::new("Materials")
+            .default_open(true)
+            .show(ui, |ui| self.materials_panel(ui));
         if let Some(path) = expanded {
             if !self.organization.expanded.remove(&path) {
                 self.organization.expanded.insert(path);
@@ -1144,6 +1049,12 @@ impl DrafterApp {
         };
         let clicked = response.clicked_by(PointerButton::Primary);
         let pressed = ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary));
+        // The Paint Bucket previews its click scope while merely hovering,
+        // so its update runs before the click-only guard below.
+        if self.modifying && self.modify.kind() == ModifyKind::PaintBucket && !pressed && !clicked {
+            let hover_hit = self.scene_hit(ray, view, cursor);
+            self.paint_hover_update(hover_hit.as_ref(), &ctx.input(|i| i.modifiers));
+        }
         if !clicked && !pressed && !response.double_clicked() {
             return false;
         }
@@ -1215,27 +1126,13 @@ impl DrafterApp {
                 self.organization.multiple.clear();
             }
         }
-        if self.modifying && self.modify.kind() == ModifyKind::PaintBucket && pressed {
-            if let Some(path) = child {
-                self.org_command(Org::PaintInstance {
-                    path,
-                    material: self.organization.material,
-                });
+        if self.modifying && self.modify.kind() == ModifyKind::PaintBucket {
+            let mods = ctx.input(|i| i.modifiers);
+            if pressed {
+                let _ = self.paint_bucket_click(hit.as_ref(), child.clone(), &mods);
                 return true;
             }
-            if let Some(material) = self.organization.material {
-                if let Some(hit) = &hit {
-                    if hit.path == context {
-                        if let Hit::Face(face) = hit.hit {
-                            self.org_command(Org::PaintFaces {
-                                faces: vec![face],
-                                material: Some(material),
-                            });
-                            return true;
-                        }
-                    }
-                }
-            }
+            self.paint_hover_update(hit.as_ref(), &mods);
         }
         if pressed
             && self.modifying

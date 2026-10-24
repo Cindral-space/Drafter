@@ -20,53 +20,68 @@ fn begin(h: &History, kind: ModifyKind, hit: Option<Hit>) -> ModifySession {
 }
 
 #[test]
-fn utility_parity_erase_boundary_and_paint_exact_history_and_cancel() {
-    for kind in [ModifyKind::Eraser, ModifyKind::PaintBucket] {
-        let (mut h, face) = square();
-        let edge = *h.model().edges().keys().next().unwrap();
-        let before = h.model().clone();
-        let depth = h.undo_depth();
-        let hit = if kind == ModifyKind::Eraser {
-            Hit::Edge(edge)
-        } else {
-            Hit::Face(face)
-        };
-        let mut s = begin(&h, kind, Some(hit));
-        s.set_color([17, 32, 240, 255]);
-        let c = s.update(V::X).unwrap().unwrap();
-        // Preparing then cancelling a tool does not execute its command.
-        s.cancel();
-        assert!(!s.active());
-        assert_eq!(s.anchor(), None);
-        assert_eq!(h.model(), &before);
-        assert_eq!(h.undo_depth(), depth);
-        h.execute(c).unwrap();
-        h.model().validate().unwrap();
-        assert_eq!(h.undo_depth(), depth + 1);
-        if kind == ModifyKind::Eraser {
-            assert!(!h.model().edges().contains_key(&edge));
-            assert!(h.model().faces().is_empty());
-        } else {
-            assert_eq!(h.model().vertices(), before.vertices());
-            assert_eq!(h.model().edges(), before.edges());
-            let painted = &h.model().faces()[&face];
-            let old = &before.faces()[&face];
-            assert_eq!(painted.color, [17, 32, 240, 255]);
-            assert_eq!(painted.outer, old.outer);
-            assert_eq!(painted.holes, old.holes);
-            assert_eq!(painted.plane, old.plane);
-        }
-        let after = h.model().clone();
-        assert!(h.undo().unwrap());
-        assert_eq!(h.model(), &before);
-        // Cancellation must also preserve the existing redo branch.
-        let mut pending = begin(&h, kind, Some(hit));
-        pending.update(V::Y).unwrap();
-        pending.cancel();
-        assert_eq!(h.redo_depth(), 1);
-        assert!(h.redo().unwrap());
-        assert_eq!(h.model(), &after);
+fn utility_parity_erase_boundary_and_exact_history_and_cancel() {
+    let kind = ModifyKind::Eraser;
+    let (mut h, face) = square();
+    let edge = *h.model().edges().keys().next().unwrap();
+    let before = h.model().clone();
+    let depth = h.undo_depth();
+    let hit = if kind == ModifyKind::Eraser {
+        Hit::Edge(edge)
+    } else {
+        Hit::Face(face)
+    };
+    let mut s = begin(&h, kind, Some(hit));
+    let c = s.update(V::X).unwrap().unwrap();
+    // Preparing then cancelling a tool does not execute its command.
+    s.cancel();
+    assert!(!s.active());
+    assert_eq!(s.anchor(), None);
+    assert_eq!(h.model(), &before);
+    assert_eq!(h.undo_depth(), depth);
+    h.execute(c).unwrap();
+    h.model().validate().unwrap();
+    assert_eq!(h.undo_depth(), depth + 1);
+    if kind == ModifyKind::Eraser {
+        assert!(!h.model().edges().contains_key(&edge));
+        assert!(h.model().faces().is_empty());
+    } else {
+        assert_eq!(h.model().vertices(), before.vertices());
+        assert_eq!(h.model().edges(), before.edges());
+        let painted = &h.model().faces()[&face];
+        let old = &before.faces()[&face];
+        assert_eq!(painted.outer, old.outer);
+        assert_eq!(painted.holes, old.holes);
+        assert_eq!(painted.plane, old.plane);
     }
+    let after = h.model().clone();
+    assert!(h.undo().unwrap());
+    assert_eq!(h.model(), &before);
+    // Cancellation must also preserve the existing redo branch.
+    let mut pending = begin(&h, kind, Some(hit));
+    pending.update(V::Y).unwrap();
+    pending.cancel();
+    assert_eq!(h.redo_depth(), 1);
+    assert!(h.redo().unwrap());
+    assert_eq!(h.model(), &after);
+}
+
+#[test]
+/// Paint Bucket interactions are document-routed through materials; the
+/// session must refuse to begin so nothing bypasses organization commands.
+fn utility_parity_paint_bucket_session_refuses_to_begin() {
+    let (h, face) = square();
+    let mut s = ModifySession::new(ModifyKind::PaintBucket);
+    assert!(s
+        .begin(
+            h.model(),
+            &Selection::default(),
+            Some(Hit::Face(face)),
+            V::ZERO,
+            V::Z
+        )
+        .is_err());
+    assert!(!s.active());
 }
 
 #[test]
