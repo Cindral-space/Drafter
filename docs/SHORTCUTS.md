@@ -66,7 +66,7 @@ Letters following a numeric entry, including m, s and x, remain measurement text
 Switching tools cancels provisional geometry, preserves selection and editing
 context, and refreshes the tool cursor and status guidance. Completed operations
 remain committed. Navigation keys select a primary-drag mode; Escape returns to
-Select. Middle-drag orbit, Shift+middle-drag pan and cursor-centered scroll remain.
+Select for Orbit/Zoom. Pan stays active after release or Escape; choose another tool to leave it. **Camera → Pan**, the toolbar Pan button and **H** share activation. Pan uses a hand cursor, closed while left-dragging, and says “Drag to pan the view.” Shift+middle-drag shares the same picked-depth math without cancelling the current operation. Two-axis scroll pans in Pan mode; scroll otherwise zooms. See [Pan details and reference questions](PAN_TOOL.md). Middle-drag orbit remains.
 Existing held Rotate copy (Ctrl; Option on macOS), Shift snapping and selection
 modifiers remain gestures rather than activation shortcuts.
 

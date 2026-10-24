@@ -123,7 +123,7 @@ WGPU_BACKEND=opengl cargo run -p cindral-app
 Bindings are generated/checked against the central action registry. F1 opens searchable
 help; focused text editors and nonempty measurement entries keep their keys.
 See [shortcut behavior and verification questions](docs/SHORTCUTS.md).
-Mouse navigation is unchanged: middle drag orbits, Shift+middle drag pans, scroll zooms.
+Choose **Pan** from the toolbar, **Camera → Pan**, or **H**, then left-drag to move the view. Shift+middle drag shares the same depth-anchored pan while preserving the current tool; Pan-mode two-axis scroll also pans. Middle drag orbits and scroll otherwise zooms. See [Pan behavior, validation and reference questions](docs/PAN_TOOL.md).
 Grid spacing is one meter; Fit uses model bounds or a central 20 × 20 meter area.
 
 For reproducible native GPU validation, run:
