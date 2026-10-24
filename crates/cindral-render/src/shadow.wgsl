@@ -2,6 +2,7 @@ struct Sun { matrix: mat4x4<f32>, direction: vec4<f32>, parameters: vec4<f32>, s
 @group(0) @binding(0) var<uniform> sun: Sun;
 @group(0) @binding(1) var materials: texture_2d_array<f32>;
 @group(0) @binding(2) var material_sampler: sampler;
+@group(0) @binding(3) var t_params: texture_2d<f32>;
 struct Output { @builtin(position) position: vec4<f32>, @location(0) distance: f32, @location(1) alpha: f32, @location(2) uv: vec2<f32>, @location(3) layer: f32 };
 @vertex fn vs_shadow(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>, @location(3) material: f32,
  @location(4) m0: vec4<f32>, @location(5) m1: vec4<f32>, @location(6) m2: vec4<f32>, @location(7) m3: vec4<f32>,
@@ -11,13 +12,33 @@ struct Output { @builtin(position) position: vec4<f32>, @location(0) distance: f
  out.position=sun.matrix*world;
  out.distance=select(dot(sun.section,world),0.0,material<0.0);
  let packed=u32(max(material,0.0)+0.5);
- out.layer=f32(packed/2u);
- if params.x>0.5 && packed%2u==0u && params.z>0.0 {out.layer=params.z;}
+ let index=packed/2u;
+ let explicit_bit=packed%2u;
+ var layer=0u;
+ var alpha=color.a;
+ if explicit_bit==1u {
+     if index>0u {
+         let c=textureLoad(t_params, vec2<i32>(0,i32(index)),0);
+         let m=textureLoad(t_params, vec2<i32>(1,i32(index)),0);
+         layer=u32(m.x+0.5);
+         alpha=c.a;
+     }
+ } else if params.x>0.5 {
+     let inherited_index=u32(params.z+0.5);
+     if inherited_index>0u {
+         let c=textureLoad(t_params, vec2<i32>(0,i32(inherited_index)),0);
+         let m=textureLoad(t_params, vec2<i32>(1,i32(inherited_index)),0);
+         layer=u32(m.x+0.5);
+         alpha*=c.a;
+     }
+ }
  let n=abs(normal);
+ // Texture alpha sampling uses the raw planar mapping; material table UV
+ // transforms (size/rotation) are identity in this milestone.
  out.uv=position.xy;
  if n.x>=n.y && n.x>=n.z {out.uv=position.yz;} else if n.y>=n.x && n.y>=n.z {out.uv=position.xz;}
- out.alpha=color.a;
- if params.x>0.5 && (u32(max(material,0.0)+0.5)%2u)==0u {out.alpha*=inherited.a;}
+ out.layer=f32(layer);
+ out.alpha=alpha;
  if dot(normal,normal)==0.0 {out.alpha=0.0;}
  return out;
 }

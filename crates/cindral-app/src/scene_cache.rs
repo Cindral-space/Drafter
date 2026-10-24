@@ -1,6 +1,9 @@
 //! Definition-scoped CPU caches and scene batching, independent of a GPU device.
-use cindral_core::{DefinitionId, DocumentHistory, Face, FaceId, KernelError, Occurrence};
+use cindral_core::{
+    DefinitionId, DocumentHistory, Face, FaceId, KernelError, MaterialId, Occurrence,
+};
 use cindral_render::{
+    materials::{MaterialParams, MaterialTable},
     mesh::{FaceStyle, MeshCache},
     scene::{DefinitionUpdate, InstanceBatch, InstanceData, SceneUpdate},
 };
@@ -19,22 +22,21 @@ pub(crate) struct SceneCache {
     revision: Option<u64>,
     texture_layers: BTreeMap<String, u32>,
     textures: Option<Arc<Vec<cindral_render::texture::TexturePixels>>>,
+    material_indices: BTreeMap<MaterialId, u32>,
 }
 fn style(
     doc: &DocumentHistory,
     _id: FaceId,
     face: &Face,
-    layers: &BTreeMap<String, u32>,
+    indices: &BTreeMap<MaterialId, u32>,
 ) -> FaceStyle {
     if let Some(material) = face.material.and_then(|id| doc.materials().get(&id)) {
         let linear = cindral_core::srgb_to_linear_rgb(material.color);
         return FaceStyle {
             color: [linear[0], linear[1], linear[2], material.opacity],
             explicit_material: true,
-            texture_layer: material
-                .texture
-                .as_ref()
-                .and_then(|key| layers.get(key))
+            material_index: indices
+                .get(&face.material.unwrap())
                 .copied()
                 .unwrap_or_default(),
         };
@@ -52,7 +54,7 @@ fn style(
     FaceStyle {
         color,
         explicit_material: face.color != [160, 177, 193, 255],
-        texture_layer: 0,
+        material_index: 0,
     }
 }
 impl SceneCache {
@@ -71,6 +73,35 @@ impl SceneCache {
     pub(crate) fn occurrences(&self) -> &[Occurrence] {
         &self.occurrences
     }
+    pub(crate) fn material_index(&self, id: MaterialId) -> Option<u32> {
+        self.material_indices.get(&id).copied()
+    }
+    /// Rebuilds the GPU material table; texture layers and mapping defaults
+    /// come from the asset slot map. Returns the table and whether the
+    /// material identity set changed (renumbering instance indices).
+    fn rebuild_material_table(&mut self, doc: &DocumentHistory) -> (Arc<MaterialTable>, bool) {
+        let mut table = MaterialTable::new();
+        let mut indices = BTreeMap::new();
+        for (id, material) in doc.materials() {
+            let linear = cindral_core::srgb_to_linear_rgb(material.color);
+            let index = table.push(MaterialParams {
+                color: [linear[0], linear[1], linear[2], material.opacity],
+                texture_layer: material
+                    .texture
+                    .as_ref()
+                    .and_then(|key| self.texture_layers.get(key))
+                    .copied()
+                    .unwrap_or_default(),
+                uv_scale: [1., 1.],
+                rotation: 0.,
+                flip: [1., 1.],
+            });
+            indices.insert(*id, index);
+        }
+        let renumbered = indices != self.material_indices;
+        self.material_indices = indices;
+        (Arc::new(table), renumbered)
+    }
     #[tracing::instrument(level = "info", skip_all, name = "mesh.scene_sync")]
     pub(crate) fn sync(&mut self, doc: &DocumentHistory) -> Result<SceneUpdate, KernelError> {
         let changes = doc.document_changes();
@@ -83,9 +114,19 @@ impl SceneCache {
         if instances {
             self.occurrences = doc.occurrences()?;
         }
+        // Material palette edits rewrite one GPU table record; they never
+        // re-triangulate or restyle faces. Identity changes (create/delete)
+        // renumber table indices and rebuild instance batches.
+        let (table, renumbered) = if changes.appearance || textures_changed || !self.initialized {
+            let (table, renumbered) = self.rebuild_material_table(doc);
+            (Some(table), renumbered)
+        } else {
+            (None, false)
+        };
         let visible: BTreeSet<_> = self.occurrences.iter().map(|o| o.definition).collect();
         let mut update = SceneUpdate {
             textures: self.textures.take(),
+            materials: table,
             ..Default::default()
         };
         let removed = self
@@ -106,7 +147,7 @@ impl SceneCache {
                 .ok_or(KernelError::MissingEntity)?;
             if let std::collections::btree_map::Entry::Vacant(entry) = self.meshes.entry(*id) {
                 let (cache, mesh) = MeshCache::rebuild_styled(model, &|face_id, face| {
-                    style(doc, face_id, face, &self.texture_layers)
+                    style(doc, face_id, face, &self.material_indices)
                 })?;
                 entry.insert(cache);
                 self.baselines.insert(*id, model.geometry_frame());
@@ -133,13 +174,13 @@ impl SceneCache {
             {
                 continue;
             }
-            if dirty.is_some() || changes.appearance || textures_changed {
+            if dirty.is_some() {
                 if placement.x_axis != glam::DVec4::X
                     || placement.y_axis != glam::DVec4::Y
                     || placement.z_axis != glam::DVec4::Z
                 {
                     let (cache, mesh) = MeshCache::rebuild_styled(model, &|face_id, face| {
-                        style(doc, face_id, face, &self.texture_layers)
+                        style(doc, face_id, face, &self.material_indices)
                     })?;
                     self.meshes.insert(*id, cache);
                     self.baselines.insert(*id, model.geometry_frame());
@@ -151,18 +192,10 @@ impl SceneCache {
                     });
                     continue;
                 }
-                let mut faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
+                let faces = dirty.map(|d| d.faces.clone()).unwrap_or_default();
                 let edges = dirty
                     .map(|d| d.edges.iter().copied().collect::<Vec<_>>())
                     .unwrap_or_default();
-                if changes.appearance || textures_changed {
-                    faces.extend(
-                        model
-                            .faces()
-                            .iter()
-                            .filter_map(|(id, f)| f.material.map(|_| *id)),
-                    );
-                }
                 let mesh = self
                     .meshes
                     .get_mut(id)
@@ -172,15 +205,17 @@ impl SceneCache {
                         &faces.into_iter().collect::<Vec<_>>(),
                         &edges,
                         offset,
-                        &|face_id, face| style(doc, face_id, face, &self.texture_layers),
+                        &|face_id, face| style(doc, face_id, face, &self.material_indices),
                     )?;
-                update.geometry.push(DefinitionUpdate {
-                    definition: *id,
-                    mesh: Arc::new(mesh),
-                });
+                if !mesh.face_writes.is_empty() || !mesh.edge_writes.is_empty() || mesh.reset {
+                    update.geometry.push(DefinitionUpdate {
+                        definition: *id,
+                        mesh: Arc::new(mesh),
+                    });
+                }
             }
         }
-        if instances || changes.appearance || translated || textures_changed {
+        if instances || changes.appearance || translated || textures_changed || renumbered {
             let mut batches: BTreeMap<DefinitionId, Vec<InstanceData>> = BTreeMap::new();
             for item in &self.occurrences {
                 let world = (item.world
@@ -193,24 +228,22 @@ impl SceneCache {
                 if !world.is_finite() {
                     return Err(KernelError::InvalidPosition);
                 }
+                // The shader resolves inherited materials through the table
+                // index; the baked instance color stays zeroed so palette
+                // edits cannot dirty instance buffers.
                 let material = item
                     .material
                     .and_then(|id| doc.materials().get(&id))
-                    .map(|m| {
-                        let linear = cindral_core::srgb_to_linear_rgb(m.color);
-                        [linear[0], linear[1], linear[2], m.opacity]
-                    });
+                    .map(|m| [0., 0., 0., m.opacity]);
                 let dim = if item.path.starts_with(doc.context()) {
                     1.
                 } else {
                     0.25
                 };
                 batches.entry(item.definition).or_default().push(
-                    InstanceData::new(world, material, dim).with_texture(
+                    InstanceData::new(world, material, dim).with_material(
                         item.material
-                            .and_then(|id| doc.materials().get(&id))
-                            .and_then(|m| m.texture.as_ref())
-                            .and_then(|key| self.texture_layers.get(key))
+                            .and_then(|id| self.material_indices.get(&id))
                             .copied()
                             .unwrap_or_default(),
                     ),
@@ -449,13 +482,86 @@ mod tests {
         );
         let update = cache.sync(&doc).unwrap();
         assert_eq!(update.textures.as_ref().unwrap().len(), 1);
-        let bytes = &update.geometry[0].mesh.face_writes[0].bytes;
-        assert_eq!(f32::from_ne_bytes(bytes[40..44].try_into().unwrap()), 3.);
+        // Texture layer changes ride the material table; painted faces are
+        // never restyled or rewritten.
+        assert!(update.geometry.is_empty());
+        let table = update.materials.as_ref().unwrap();
+        let params = table.get(cache.material_index(material).unwrap());
+        assert_eq!(params.texture_layer, 1);
         let mut pending = None;
         merge(&mut pending, update);
         cache.set_textures(BTreeMap::new(), Vec::new());
         merge(&mut pending, cache.sync(&doc).unwrap());
         assert!(pending.unwrap().textures.as_ref().unwrap().is_empty());
         assert!(cache.sync(&doc).unwrap().textures.is_none());
+    }
+
+    #[test]
+    fn material_edits_rewrite_one_table_record_without_touching_meshes() {
+        let mut doc = DocumentHistory::new();
+        doc.execute(Command::AddPolyline {
+            points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+            closed: true,
+        })
+        .unwrap();
+        let material = MaterialId(doc.to_data().next_id);
+        doc.organization(OrganizationCommand::CreateMaterial(Material {
+            name: "Paint".into(),
+            color: [255, 0, 0],
+            opacity: 1.,
+            texture: None,
+        }))
+        .unwrap();
+        doc.organization(OrganizationCommand::PaintFaces {
+            faces: doc.model().faces().keys().copied().collect(),
+            material: Some(material),
+        })
+        .unwrap();
+        let mut cache = SceneCache::default();
+        let initial = cache.sync(&doc).unwrap();
+        assert_eq!(initial.geometry.len(), 1);
+        let original_bytes = initial.geometry[0].mesh.face_writes[0].bytes.clone();
+        let index = cache.material_index(material).unwrap();
+        assert_eq!(index, 1);
+
+        doc.organization(OrganizationCommand::UpdateMaterial {
+            id: material,
+            material: Material {
+                name: "Paint".into(),
+                color: [0, 255, 0],
+                opacity: 0.5,
+                texture: None,
+            },
+        })
+        .unwrap();
+        let update = cache.sync(&doc).unwrap();
+        assert!(update.geometry.is_empty());
+        let params = update.materials.as_ref().unwrap().get(index);
+        let expected = cindral_core::srgb_to_linear_rgb([0, 255, 0]);
+        assert_eq!(params.color, [expected[0], expected[1], expected[2], 0.5]);
+
+        // Repainting a face still rewrites only that face's vertex range.
+        doc.organization(OrganizationCommand::CreateMaterial(Material {
+            name: "Other".into(),
+            color: [0, 0, 255],
+            opacity: 1.,
+            texture: None,
+        }))
+        .unwrap();
+        let repaint = cache.sync(&doc).unwrap();
+        assert!(repaint.geometry.is_empty());
+        let face = *doc.model().faces().keys().next().unwrap();
+        doc.organization(OrganizationCommand::PaintFaces {
+            faces: vec![face],
+            material: Some(MaterialId(material.0 + 1)),
+        })
+        .unwrap();
+        let repaint = cache.sync(&doc).unwrap();
+        assert_eq!(repaint.geometry.len(), 1);
+        assert!(!repaint.geometry[0].mesh.face_writes.is_empty());
+        assert_ne!(
+            repaint.geometry[0].mesh.face_writes[0].bytes,
+            original_bytes
+        );
     }
 }

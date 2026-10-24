@@ -62,12 +62,13 @@ pub struct InstanceData {
     pub model: [[f32; 4]; 4],
     /// Column-major inverse-transpose normal matrix for lighting.
     pub normal: [[f32; 4]; 4],
-    /// Inherited linear RGBA container material.
+    /// Inherited linear RGBA container material (kept in sync with the table
+    /// record; the shader prefers the material table).
     pub material: [f32; 4],
     /// Parameters:
     /// - `[0]`: 1.0 if inherited container material is enabled, 0.0 otherwise.
     /// - `[1]`: dim factor (1.0 for active context, 0.25 for outside/inactive context).
-    /// - `[2]`: texture array layer index (0.0 for white/untextured).
+    /// - `[2]`: GPU material table index of the inherited material (0 = none).
     /// - `[3]`: reserved for future use.
     pub parameters: [f32; 4],
 }
@@ -93,14 +94,14 @@ impl InstanceData {
         }
     }
 
-    /// Stores the texture array layer index in `parameters[2]`.
-    pub fn with_texture(mut self, layer: u32) -> Self {
-        self.parameters[2] = layer as f32;
+    /// Stores the inherited material's GPU table index in `parameters[2]`.
+    pub fn with_material(mut self, index: u32) -> Self {
+        self.parameters[2] = index as f32;
         self
     }
 
-    /// Returns the assigned texture array layer index.
-    pub fn texture_layer(&self) -> u32 {
+    /// Returns the inherited material's GPU table index (0 = none).
+    pub fn material_index(&self) -> u32 {
         self.parameters[2].max(0.0) as u32
     }
 }
@@ -134,6 +135,9 @@ pub struct SceneUpdate {
     pub removed: Vec<DefinitionId>,
     /// Optional texture array image data for layers 1..N (layer 0 is reserved for white).
     pub textures: Option<Arc<Vec<TexturePixels>>>,
+    /// Updated GPU material parameter table. Presence rewrites one small
+    /// texture and never touches geometry or instance buffers.
+    pub materials: Option<Arc<crate::materials::MaterialTable>>,
 }
 
 fn align_capacity(size: u64) -> u64 {
@@ -249,7 +253,12 @@ pub struct SceneRenderer {
     camera_bind_group: wgpu::BindGroup,
     texture_sampler: wgpu::Sampler,
     materials_texture: wgpu::Texture,
+    materials_view: wgpu::TextureView,
     default_texture_initialized: bool,
+    material_params_texture: wgpu::Texture,
+    material_params_view: wgpu::TextureView,
+    material_params_capacity: u32,
+    material_params_initialized: bool,
     opaque_face_pipeline: wgpu::RenderPipeline,
     transparent_face_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
@@ -277,6 +286,7 @@ fn camera_binding(
     materials: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
     shadow: &crate::shadow::ShadowMap,
+    material_params: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Scene camera/material/sun binding"),
@@ -305,6 +315,10 @@ fn camera_binding(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::Sampler(&shadow.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(material_params),
             },
         ],
     })
@@ -364,6 +378,32 @@ fn create_materials_texture_array(
         ..Default::default()
     });
 
+    (texture, view)
+}
+
+/// Creates the small `Rgba32Float` material parameter table texture.
+fn create_material_params_texture(
+    device: &wgpu::Device,
+    capacity: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Cindral material parameter table"),
+        size: wgpu::Extent3d {
+            width: crate::materials::MATERIAL_TEXELS,
+            height: capacity,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("Cindral material parameter table view"),
+        ..Default::default()
+    });
     (texture, view)
 }
 
@@ -434,6 +474,16 @@ impl SceneRenderer {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -594,6 +644,8 @@ impl SceneRenderer {
             ],
         };
 
+        let (material_params_texture, material_params_view) =
+            create_material_params_texture(device, 16);
         let mut shadow = crate::shadow::ShadowMap::new(
             device,
             face_vertex_layout.clone(),
@@ -601,6 +653,7 @@ impl SceneRenderer {
             instance_layout.clone(),
             &materials_view,
             &texture_sampler,
+            &material_params_view,
         );
         let camera_bind_group = camera_binding(
             device,
@@ -609,6 +662,7 @@ impl SceneRenderer {
             &materials_view,
             &texture_sampler,
             &shadow,
+            &material_params_view,
         );
         let scene_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -871,7 +925,12 @@ impl SceneRenderer {
             camera_bind_group,
             texture_sampler,
             materials_texture,
+            materials_view,
             default_texture_initialized: false,
+            material_params_texture,
+            material_params_view,
+            material_params_capacity: 16,
+            material_params_initialized: false,
             opaque_face_pipeline,
             transparent_face_pipeline,
             edge_pipeline,
@@ -972,8 +1031,12 @@ impl SceneRenderer {
             if changed {
                 let layers = prepare_preview_layers(textures);
                 let (texture, view) = create_materials_texture_array(device, queue, &layers);
-                self.shadow
-                    .set_materials(device, &view, &self.texture_sampler);
+                self.shadow.set_materials(
+                    device,
+                    &view,
+                    &self.texture_sampler,
+                    &self.material_params_view,
+                );
                 self.camera_bind_group = camera_binding(
                     device,
                     &self.camera_layout,
@@ -981,12 +1044,72 @@ impl SceneRenderer {
                     &view,
                     &self.texture_sampler,
                     &self.shadow,
+                    &self.material_params_view,
                 );
                 self.materials_texture = texture;
+                self.materials_view = view;
                 self.default_texture_initialized = true;
                 self.last_textures = Some(Arc::downgrade(textures));
             }
         }
+
+        if let Some(table) = &update.materials {
+            let needed = table.required_height().max(1);
+            if needed > self.material_params_capacity {
+                let capacity = needed
+                    .next_power_of_two()
+                    .min(crate::materials::MAX_MATERIALS as u32);
+                let (texture, view) = create_material_params_texture(device, capacity);
+                self.material_params_texture = texture;
+                self.material_params_view = view;
+                self.material_params_capacity = capacity;
+                let materials_view = self.materials_view.clone();
+                let params_view = self.material_params_view.clone();
+                self.shadow.set_materials(
+                    device,
+                    &materials_view,
+                    &self.texture_sampler,
+                    &params_view,
+                );
+                self.camera_bind_group = camera_binding(
+                    device,
+                    &self.camera_layout,
+                    &self.uniform,
+                    &materials_view,
+                    &self.texture_sampler,
+                    &self.shadow,
+                    &params_view,
+                );
+            }
+            self.write_material_params(queue, &table.upload_bytes(), needed);
+        } else if !self.material_params_initialized {
+            // Guarantee a valid default record even before the first table sync.
+            let table = crate::materials::MaterialTable::new();
+            self.write_material_params(queue, &table.upload_bytes(), table.required_height());
+        }
+    }
+
+    fn write_material_params(&mut self, queue: &wgpu::Queue, bytes: &[u8], rows: u32) {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.material_params_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(crate::materials::MATERIAL_TEXELS * 16),
+                rows_per_image: Some(self.material_params_capacity),
+            },
+            wgpu::Extent3d {
+                width: crate::materials::MATERIAL_TEXELS,
+                height: rows.min(self.material_params_capacity),
+                depth_or_array_layers: 1,
+            },
+        );
+        self.material_params_initialized = true;
     }
 
     /// Total capacity in bytes currently allocated across per-definition geometry and instance GPU buffers.
@@ -1147,13 +1270,15 @@ impl SceneRenderer {
                     dimension: Some(wgpu::TextureViewDimension::D2Array),
                     ..Default::default()
                 });
+            self.materials_view = view;
             self.camera_bind_group = camera_binding(
                 device,
                 &self.camera_layout,
                 &self.uniform,
-                &view,
+                &self.materials_view,
                 &self.texture_sampler,
                 &self.shadow,
+                &self.material_params_view,
             );
         }
         if !self.shadow.enabled || !self.shadow.dirty {
@@ -1736,25 +1861,27 @@ mod tests {
             batches: Some(vec![batch]),
             removed: vec![DefinitionId(99)],
             textures: None,
+            materials: None,
         };
         assert_eq!(custom_update.geometry.len(), 1);
         assert_eq!(custom_update.batches.as_ref().unwrap().len(), 1);
         assert_eq!(custom_update.removed, vec![DefinitionId(99)]);
         assert!(custom_update.textures.is_none());
+        assert!(custom_update.materials.is_none());
     }
 
     #[test]
-    fn instance_data_with_texture_layer() {
+    fn instance_data_with_material_index() {
         let inst =
-            InstanceData::new(Mat4::IDENTITY, Some([0.1, 0.2, 0.3, 1.0]), 1.0).with_texture(42);
+            InstanceData::new(Mat4::IDENTITY, Some([0.1, 0.2, 0.3, 1.0]), 1.0).with_material(42);
         assert_eq!(inst.parameters[0], 1.0); // inherited enabled
         assert_eq!(inst.parameters[1], 1.0); // dim factor
-        assert_eq!(inst.parameters[2], 42.0); // texture layer
-        assert_eq!(inst.texture_layer(), 42);
+        assert_eq!(inst.parameters[2], 42.0); // material table index
+        assert_eq!(inst.material_index(), 42);
 
         let default_inst = InstanceData::new(Mat4::IDENTITY, None, 0.5);
         assert_eq!(default_inst.parameters[2], 0.0);
-        assert_eq!(default_inst.texture_layer(), 0);
+        assert_eq!(default_inst.material_index(), 0);
     }
 }
 

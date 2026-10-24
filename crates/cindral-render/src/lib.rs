@@ -3,10 +3,12 @@
 pub mod camera;
 pub mod capture;
 pub mod grid;
+pub mod materials;
 pub mod mesh;
 pub mod scene;
 pub mod texture;
 
+pub use materials::{MaterialParams, MaterialTable, MATERIAL_TEXELS, MAX_MATERIALS};
 pub use mesh::{
     EdgeVertex, FaceStyle, FaceVertex, GeometryBuffers, MeshCache, MeshUpdate, ModelCallback,
     ModelRenderer, FACE_COLOR,

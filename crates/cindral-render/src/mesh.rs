@@ -22,27 +22,28 @@ pub const FACE_COLOR: [f32; 4] = [0.58, 0.63, 0.69, 1.0];
 /// Material style for a triangulated model face.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceStyle {
-    /// Flat linear RGBA display color.
+    /// Flat linear RGBA display color for the legacy vertex-baked path
+    /// (neutral default or per-face RGBA bytes); material records override it.
     pub color: [f32; 4],
     /// True when the face has an explicit material assignment overriding inherited container materials.
     pub explicit_material: bool,
-    /// Texture array layer index (0 = default white fallback).
-    pub texture_layer: u32,
+    /// GPU material table index (0 = no record: vertex-baked color path).
+    pub material_index: u32,
 }
 
 impl FaceStyle {
-    /// Creates a new face style with the default white texture layer (0).
+    /// Creates a new face style without a material table record.
     pub fn new(color: [f32; 4], explicit_material: bool) -> Self {
         Self {
             color,
             explicit_material,
-            texture_layer: 0,
+            material_index: 0,
         }
     }
 
-    /// Sets the texture array layer.
-    pub fn with_texture(mut self, texture_layer: u32) -> Self {
-        self.texture_layer = texture_layer;
+    /// Sets the GPU material table index.
+    pub fn with_material_index(mut self, material_index: u32) -> Self {
+        self.material_index = material_index;
         self
     }
 }
@@ -52,7 +53,7 @@ impl Default for FaceStyle {
         Self {
             color: FACE_COLOR,
             explicit_material: false,
-            texture_layer: 0,
+            material_index: 0,
         }
     }
 }
@@ -128,7 +129,7 @@ pub struct MeshUpdate {
 struct FaceSignature {
     color: [f32; 4],
     explicit_material: bool,
-    texture_layer: u32,
+    material_index: u32,
     normal: DVec3,
     distance: f64,
     outer: Vec<DVec3>,
@@ -568,7 +569,7 @@ fn default_face_style(_id: FaceId, face: &Face) -> FaceStyle {
             ]
         },
         explicit_material: face.material.is_some(),
-        texture_layer: 0,
+        material_index: 0,
     }
 }
 
@@ -617,7 +618,7 @@ fn build_face_signature_in_frame(
     Ok(FaceSignature {
         color: style.color,
         explicit_material: style.explicit_material,
-        texture_layer: style.texture_layer,
+        material_index: style.material_index,
         normal: face.plane.normal,
         distance: face.plane.distance - face.plane.normal.dot(offset),
         outer,
@@ -647,7 +648,7 @@ fn build_face_triangles_in_frame(
     };
     let normal_arr = normal.to_array();
     let packed_mat =
-        crate::texture::pack_face_material(style.texture_layer, style.explicit_material);
+        crate::texture::pack_face_material(style.material_index, style.explicit_material);
     let mut vertices = Vec::with_capacity(tris.len() * 3);
     for tri in tris {
         for p in tri {
@@ -2220,7 +2221,7 @@ mod tests {
         let custom_style = FaceStyle {
             color: [0.1, 0.2, 0.9, 0.8],
             explicit_material: true,
-            texture_layer: 0,
+            material_index: 0,
         };
         let (mut cache, init) =
             MeshCache::rebuild_styled(history.model(), &|_id, _f| custom_style).unwrap();
@@ -2242,7 +2243,7 @@ mod tests {
         let new_style = FaceStyle {
             color: [0.9, 0.1, 0.1, 1.0],
             explicit_material: false,
-            texture_layer: 0,
+            material_index: 0,
         };
         let delta = cache
             .update_styled(history.model(), &[face_id], &[], &|_id, _f| new_style)
@@ -2257,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn styled_rebuild_and_update_with_texture_layer() {
+    fn styled_rebuild_and_update_with_material_index() {
         let mut history = History::new();
         history
             .execute(Command::AddPolyline {
@@ -2276,7 +2277,7 @@ mod tests {
         let style_tex5 = FaceStyle {
             color: [0.5, 0.5, 0.5, 1.0],
             explicit_material: true,
-            texture_layer: 5,
+            material_index: 5,
         };
         let (mut cache, init) =
             MeshCache::rebuild_styled(history.model(), &|_id, _f| style_tex5).unwrap();
@@ -2289,7 +2290,7 @@ mod tests {
         let style_tex7 = FaceStyle {
             color: [0.5, 0.5, 0.5, 1.0],
             explicit_material: false,
-            texture_layer: 7,
+            material_index: 7,
         };
         let delta = cache
             .update_styled(history.model(), &[face_id], &[], &|_id, _f| style_tex7)

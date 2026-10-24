@@ -2070,20 +2070,9 @@ impl DocumentHistory {
         });
         self.redo.clear();
         self.normalize_context();
-        // Palette edits affect only faces actually referring to changed materials; inherited
-        // instance materials are handled by the transform/material instance batch.
-        for id in self.graph.definitions.keys().filter(|_| appearance) {
-            let assigned = self
-                .history(*id)
-                .model()
-                .faces()
-                .iter()
-                .filter_map(|(face, f)| f.material.map(|_| *face))
-                .collect::<BTreeSet<_>>();
-            if !assigned.is_empty() {
-                dirty.entry(*id).or_default().faces.extend(assigned);
-            }
-        }
+        // Palette edits reach the GPU through one material-table record; they
+        // no longer dirty painted faces. Inherited instance materials are
+        // handled by the transform/material instance batch.
         self.changed(dirty, true, appearance);
         Ok(true)
     }

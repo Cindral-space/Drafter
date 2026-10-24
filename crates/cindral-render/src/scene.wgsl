@@ -10,6 +10,15 @@ struct Camera {
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var t_materials: texture_2d_array<f32>;
 @group(0) @binding(2) var s_materials: sampler;
+@group(0) @binding(6) var t_params: texture_2d<f32>;
+
+fn load_material_mapping(index: u32) -> array<vec4<f32>, 3> {
+    return array<vec4<f32>, 3>(
+        textureLoad(t_params, vec2<i32>(0, i32(index)), 0),
+        textureLoad(t_params, vec2<i32>(1, i32(index)), 0),
+        textureLoad(t_params, vec2<i32>(2, i32(index)), 0),
+    );
+}
 
 struct Sun { matrix: mat4x4<f32>, direction: vec4<f32>, parameters: vec4<f32>, section: vec4<f32>, ground: vec4<f32> };
 @group(0) @binding(3) var<uniform> sun: Sun;
@@ -36,14 +45,11 @@ struct FaceOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) color: vec4<f32>,
-    @location(2) inherited_color: vec4<f32>,
-    @location(3) explicit_material: f32,
-    @location(4) inherited_enabled: f32,
-    @location(5) dim: f32,
-    @location(6) uv: vec2<f32>,
-    @location(7) tex_layer: f32,
-    @location(8) section_distance: f32,
-    @location(9) world: vec3<f32>,
+    @location(2) dim: f32,
+    @location(3) uv: vec2<f32>,
+    @location(4) tex_layer: f32,
+    @location(5) section_distance: f32,
+    @location(6) world: vec3<f32>,
 };
 
 @vertex
@@ -71,9 +77,6 @@ fn vs_face(
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         out.normal = vec3<f32>(0.0, 0.0, 1.0);
         out.color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        out.inherited_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        out.explicit_material = 0.0;
-        out.inherited_enabled = 0.0;
         out.dim = 0.0;
         out.uv = vec2<f32>(0.0, 0.0);
         out.tex_layer = 0.0;
@@ -92,33 +95,41 @@ fn vs_face(
     let transformed_normal = (normal_matrix * vec4<f32>(normal, 0.0)).xyz;
     out.normal = transformed_normal;
 
-    // Decode FaceVertex.material packed float: texture_layer * 2 + explicit_material_bit
+    // Decode FaceVertex.material packed float: material_index * 2 + explicit_bit.
+    // Index 0 keeps the vertex-baked legacy color path.
     let mat_int = u32(max(material, 0.0) + 0.5);
-    let face_layer = mat_int / 2u;
+    let index = mat_int / 2u;
     let explicit_bit = mat_int % 2u;
-    let explicit_material = f32(explicit_bit);
 
-    // Instance texture layer stored in inst_params.z (InstanceData.parameters[2])
-    let inst_layer = u32(inst_params.z + 0.5);
+    var resolved_color = color;
+    var active_layer: u32 = 0u;
+    var uv_scale = vec2<f32>(1.0);
+    var uv_rotation = 0.0;
+    var uv_flip = vec2<f32>(1.0, 1.0);
 
-    // Determine active texture layer per material hierarchy:
-    // 1. Explicit face material uses face texture layer.
-    // 2. Inherited container material uses instance texture layer if set, or face layer.
-    // 3. Otherwise face texture layer.
-    var active_layer: u32 = face_layer;
-    if explicit_bit > 0u {
-        active_layer = face_layer;
-    } else if inst_params.x > 0.5 {
-        if inst_layer > 0u {
-            active_layer = inst_layer;
-        } else {
-            active_layer = face_layer;
+    if explicit_bit > 0u && index > 0u {
+        let record = load_material_mapping(index);
+        resolved_color = record[0];
+        active_layer = u32(record[1].x + 0.5);
+        uv_scale = record[1].yz;
+        uv_rotation = record[1].w;
+        uv_flip = record[2].xy;
+    } else if explicit_bit == 0u && inst_params.x > 0.5 {
+        // Inherited container material from the table; face opacity still applies.
+        let inst_index = u32(inst_params.z + 0.5);
+        if inst_index > 0u {
+            let record = load_material_mapping(inst_index);
+            resolved_color = vec4<f32>(record[0].rgb, record[0].a * color.a);
+            active_layer = u32(record[1].x + 0.5);
+            uv_scale = record[1].yz;
+            uv_rotation = record[1].w;
+            uv_flip = record[2].xy;
         }
-    } else {
-        active_layer = face_layer;
     }
 
-    // Planar local UVs derived from position and dominant normal
+    // Planar local UVs derived from position and dominant normal, then the
+    // material mapping: flip, rotate about the mapping origin, scale to
+    // real-world texture size.
     let an = abs(normal);
     var uv: vec2<f32>;
     if an.x >= an.y && an.x >= an.z {
@@ -128,11 +139,12 @@ fn vs_face(
     } else {
         uv = position.xy;
     }
+    uv = uv * uv_flip;
+    let c = cos(uv_rotation);
+    let s = sin(uv_rotation);
+    uv = vec2<f32>(uv.x * c - uv.y * s, uv.x * s + uv.y * c) * uv_scale;
 
-    out.color = color;
-    out.inherited_color = inst_mat;
-    out.explicit_material = explicit_material;
-    out.inherited_enabled = inst_params.x;
+    out.color = resolved_color;
     out.dim = inst_params.y;
     out.uv = uv;
     out.tex_layer = f32(active_layer);
@@ -140,23 +152,8 @@ fn vs_face(
 }
 
 fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
-    var rgb: vec3<f32>;
-    var alpha: f32;
-
-    if in.explicit_material > 0.5 {
-        // Explicit face material wins over inherited container material
-        rgb = in.color.rgb;
-        alpha = in.color.a;
-    } else if in.inherited_enabled > 0.5 {
-        // Inherited container material is used
-        rgb = in.inherited_color.rgb;
-        // Opacity multiplies face and inherited opacity only when inherited is used
-        alpha = in.color.a * in.inherited_color.a;
-    } else {
-        // Default face color and opacity
-        rgb = in.color.rgb;
-        alpha = in.color.a;
-    }
+    var rgb: vec3<f32> = in.color.rgb;
+    var alpha: f32 = in.color.a;
 
     // Sample sRGB texture array with repeat sampler and clamp layer within array bounds
     let num_layers = textureNumLayers(t_materials);
@@ -164,7 +161,7 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
     let layer_idx = min(raw_layer, num_layers - 1u);
     let tex_sample = textureSampleLevel(t_materials, s_materials, in.uv, layer_idx, 0.0);
 
-    // Multiplies RGB/alpha into inherited/explicit material selection
+    // Multiplies RGB/alpha into the resolved material color
     if camera.style.x == 1.0 {
         rgb = rgb * tex_sample.rgb;
         alpha = alpha * tex_sample.a;

@@ -43,6 +43,7 @@ fn depth_binding(
     uniform: &wgpu::Buffer,
     view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
+    params: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Sun depth material binding"),
@@ -59,6 +60,10 @@ fn depth_binding(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(params),
             },
         ],
     })
@@ -102,6 +107,7 @@ impl ShadowMap {
         instance: wgpu::VertexBufferLayout<'_>,
         materials: &wgpu::TextureView,
         material_sampler: &wgpu::Sampler,
+        material_params: &wgpu::TextureView,
     ) -> Self {
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Sun uniform"),
@@ -139,10 +145,26 @@ impl ShadowMap {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
-        let depth_binding =
-            depth_binding(device, &depth_layout, &uniform, materials, material_sampler);
+        let depth_binding = depth_binding(
+            device,
+            &depth_layout,
+            &uniform,
+            materials,
+            material_sampler,
+            material_params,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("PCF comparison sampler"),
             compare: Some(wgpu::CompareFunction::LessEqual),
@@ -251,9 +273,16 @@ impl ShadowMap {
         device: &wgpu::Device,
         view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
+        params: &wgpu::TextureView,
     ) {
-        self.depth_binding =
-            depth_binding(device, &self.depth_layout, &self.uniform, view, sampler);
+        self.depth_binding = depth_binding(
+            device,
+            &self.depth_layout,
+            &self.uniform,
+            view,
+            sampler,
+            params,
+        );
         self.dirty = true;
     }
     pub fn configure(

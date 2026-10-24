@@ -203,23 +203,23 @@ pub fn planar_uv(position: [f32; 3], normal: [f32; 3]) -> [f32; 2] {
     }
 }
 
-/// Packs texture layer index and explicit material flag into `FaceVertex.material`.
+/// Packs a material table index and explicit material flag into `FaceVertex.material`.
 #[inline]
-pub fn pack_face_material(texture_layer: u32, explicit_material: bool) -> f32 {
+pub fn pack_face_material(material_index: u32, explicit_material: bool) -> f32 {
     let bit = if explicit_material { 1u32 } else { 0u32 };
-    (texture_layer
-        .min(MAX_TEXTURE_LAYERS as u32)
+    (material_index
+        .min(crate::materials::MAX_MATERIALS as u32 - 1)
         .saturating_mul(2)
         + bit) as f32
 }
 
-/// Decodes `FaceVertex.material` into `(texture_layer, explicit_material)`.
+/// Decodes `FaceVertex.material` into `(material_index, explicit_material)`.
 #[inline]
 pub fn unpack_face_material(material: f32) -> (u32, bool) {
     let val = (material + 0.5) as u32;
-    let layer = val / 2;
+    let index = val / 2;
     let explicit = !val.is_multiple_of(2);
-    (layer, explicit)
+    (index, explicit)
 }
 
 /// Prepares normalized 256x256 preview layers for GPU texture array creation.
