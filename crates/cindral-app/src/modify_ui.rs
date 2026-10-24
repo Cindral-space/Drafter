@@ -3,6 +3,7 @@ use super::*;
 use cindral_tools::{Hit, ModifyKind};
 impl DrafterApp {
     pub(crate) fn choose_modify(&mut self, kind: ModifyKind) {
+        self.pan_drag = None;
         self.shortcuts.navigation = None;
         self.cancel_section();
         self.cancel_modify();

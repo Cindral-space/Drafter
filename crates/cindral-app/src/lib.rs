@@ -11,6 +11,7 @@ mod dae_ui;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
+mod pan_ui;
 mod organization_ui;
 pub mod png_cli;
 pub mod png_export;
@@ -49,6 +50,7 @@ pub struct DrafterApp {
     presentation_serial: u64,
     section_ui: section_ui::SectionUi,
     camera: Camera,
+    pan_drag: Option<pan_ui::PanDrag>,
     modifying: bool,
     modify: ModifySession,
     selection: Selection,
@@ -95,6 +97,7 @@ impl Default for DrafterApp {
             presentation_serial: 0,
             section_ui: Default::default(),
             camera: Camera::default(),
+            pan_drag: None,
             modifying: false,
             modify: ModifySession::new(ModifyKind::Select),
             selection: Selection::default(),
@@ -170,6 +173,7 @@ impl DrafterApp {
             .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
     }
     fn set_tool(&mut self, kind: ToolKind) {
+        self.pan_drag = None;
         self.shortcuts.navigation = None;
         self.cancel_section();
         self.cancel_modify();
@@ -393,6 +397,8 @@ impl DrafterApp {
         if (self.modifying && self.modify.kind() != ModifyKind::Rotate)
             || !response.hovered()
             || navigating
+            || self.pan_drag.is_some()
+            || self.shortcuts.navigation.is_some()
         {
             return;
         }
@@ -442,22 +448,13 @@ impl DrafterApp {
 
     fn viewport_input(&mut self, response: &egui::Response) {
         if self.shortcuts.open || self.tape_resize.is_some() {
+            self.pan_drag = None;
             return;
         }
         let rect = response.rect;
         let aspect = rect.width() / rect.height().max(1.0);
         let drawing_drag =
             self.draw_drag.is_some() || response.drag_started_by(PointerButton::Primary);
-        if response.dragged_by(PointerButton::Middle) {
-            let (delta, shift) = response
-                .ctx
-                .input(|i| (i.pointer.delta(), i.modifiers.shift));
-            if shift {
-                self.camera.pan(Vec2::new(delta.x, delta.y), rect.height());
-            } else {
-                self.camera.orbit(Vec2::new(delta.x, delta.y));
-            }
-        }
         if self.capture_measurement_keys(response) {
             return;
         }
@@ -465,6 +462,14 @@ impl DrafterApp {
             return;
         }
         if self.shortcuts.open {
+            return;
+        }
+        if self.pan_input(response) {
+            return;
+        }
+        if response.dragged_by(PointerButton::Middle) {
+            let delta = response.ctx.input(|i| i.pointer.delta());
+            self.camera.orbit(Vec2::new(delta.x, delta.y));
             return;
         }
         if let Some(mode) = self.shortcuts.navigation {
@@ -476,9 +481,6 @@ impl DrafterApp {
                 if response.dragged_by(PointerButton::Primary) {
                     match mode {
                         shortcuts::Action::Orbit => self.camera.orbit(Vec2::new(delta.x, delta.y)),
-                        shortcuts::Action::Pan => {
-                            self.camera.pan(Vec2::new(delta.x, delta.y), rect.height())
-                        }
                         _ => self.camera.zoom(-delta.y, Vec2::ZERO, aspect),
                     }
                 }
@@ -758,6 +760,7 @@ impl DrafterApp {
                 let (rect, response) =
                     ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
                 if rect.width() <= 0. || rect.height() <= 0. {
+                    self.pan_drag = None;
                     return;
                 }
                 #[cfg(feature = "kernel-benchmark")]

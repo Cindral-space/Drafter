@@ -423,7 +423,8 @@ impl DrafterApp {
             match action {
                 Draw(k) => self.set_tool(k),
                 Modify(k) => self.choose_modify(k),
-                Orbit | Pan | Zoom => {
+                Pan => self.activate_pan(),
+                Orbit | Zoom => {
                     self.choose_modify(ModifyKind::Select);
                     self.shortcuts.navigation = Some(action);
                 }

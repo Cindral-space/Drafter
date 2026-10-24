@@ -304,12 +304,32 @@ impl Camera {
     ///
     /// Points on the target-depth view plane stay under the pointer.
     pub fn pan(&mut self, delta: Vec2, viewport_height: f32) {
-        if !delta.is_finite() || !viewport_height.is_finite() || viewport_height <= 0.0 {
+        self.pan_at_depth(delta, viewport_height, self.pan_depth(None));
+    }
+
+    /// View-axis depth of a picked world point; missing/behind/invalid hits use
+    /// the target plane. Clamp to the visible near plane and supported range.
+    pub fn pan_depth(&self, point: Option<Vec3>) -> f32 {
+        let cam = self.sanitized();
+        let depth = point.map(|p| (p - cam.eye()).dot(cam.basis().forward()));
+        depth.filter(|d| d.is_finite() && *d > 0.0)
+            .unwrap_or(cam.distance)
+            .clamp((cam.distance * NEAR_RATIO).max(MIN_DISTANCE), MAX_DISTANCE)
+    }
+
+    /// Pan at a fixed press-time view-axis depth. Orthographic scale depends
+    /// only on view size. This allocates nothing and changes only translation.
+    pub fn pan_at_depth(&mut self, delta: Vec2, viewport_height: f32, depth: f32) {
+        if !depth.is_finite() || !delta.is_finite() || !viewport_height.is_finite() || viewport_height <= 0.0 {
             return;
         }
         let mut cam = self.sanitized();
         let basis = cam.basis();
-        let units_per_pixel = 2.0 * half_height(cam.distance) / viewport_height;
+        let scale = match cam.projection {
+            Projection::Perspective => depth.clamp(MIN_DISTANCE, MAX_DISTANCE),
+            Projection::Orthographic => cam.distance,
+        };
+        let units_per_pixel = 2.0 * half_height(scale) / viewport_height;
         let target = cam.target + (basis.up * delta.y - basis.right * delta.x) * units_per_pixel;
         if !target.is_finite() || target.abs().max_element() > MAX_TARGET_COORDINATE {
             return;

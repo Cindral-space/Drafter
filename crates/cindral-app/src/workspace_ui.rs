@@ -167,6 +167,11 @@ impl DrafterApp {
                         });
                         ui.menu_button("Camera", |ui| {
                             ui.set_min_width(224.);
+                            if ui.add(egui::Button::new("Pan").shortcut_text(shortcuts::hint(shortcuts::Action::Pan))).clicked() {
+                                self.activate_pan();
+                                ui.close();
+                            }
+                            ui.separator();
                             menu_section(ui, "Projection");
                             ui.selectable_value(
                                 &mut self.camera.projection,
@@ -409,6 +414,10 @@ impl DrafterApp {
                                     self.extents(size.x / size.y.max(1.));
                                 }
                                 ui.separator();
+                                if ui.selectable_label(self.shortcuts.navigation == Some(shortcuts::Action::Pan), "Pan")
+                                    .on_hover_text("Pan (H) · Drag to pan the view.").clicked() {
+                                    self.activate_pan();
+                                }
                                 ui.label(
                                     RichText::new(self.active_tool_label())
                                         .strong()
@@ -518,6 +527,10 @@ impl DrafterApp {
     pub(crate) fn paint_tool_cursor(&self, ui: &egui::Ui, response: &egui::Response) {
         // Keep the system pointer outside the canvas and over other UI.
         if !response.hovered() && !(response.contains_pointer() && response.dragged()) {
+            return;
+        }
+        if self.pan_drag.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             return;
         }
         if self.shortcuts.navigation.is_some() {
@@ -823,7 +836,7 @@ impl DrafterApp {
                     });
                     ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let prompt = if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select"} else if self.modifying {
+                        let prompt = if self.shortcuts.navigation == Some(shortcuts::Action::Pan) {"Drag to pan the view."} else if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select"} else if self.modifying {
                             match self.modify.kind() {
                                 ModifyKind::Select => "Click to select · Shift to add · Drag a selection box",
                                 ModifyKind::Rotate => self.rotate_hint(),
