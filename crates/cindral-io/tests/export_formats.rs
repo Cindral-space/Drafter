@@ -729,3 +729,183 @@ fn unsupported_gltf_shear_fails_before_replacing_previous_export() {
     export_obj(&dir.path().join("shear.obj"), &bundle).unwrap();
     export_stl(&dir.path().join("shear.stl"), &bundle).unwrap();
 }
+
+#[test]
+fn material_mapping_scales_rotates_and_flips_exported_uvs() {
+    use cindral_core::{BulkFace, BulkGeometry, DefinitionData, Material, TextureMapping};
+    use std::collections::BTreeMap;
+
+    // One 4x4 m XY-plane face painted with a mapped texture.
+    let mut bundle = DraftBundle::default();
+    let (slot, asset) = make_test_png();
+    bundle.textures.insert(slot.clone(), asset);
+    bundle.document.next_id = 20;
+    bundle.document.materials.insert(
+        MaterialId(10),
+        Material {
+            name: "Wood".into(),
+            color: [150, 100, 60],
+            opacity: 1.,
+            texture: Some(slot.clone()),
+            texture_mapping: Some(TextureMapping {
+                width_m: 2.,
+                height_m: 1.,
+                rotation_deg: 90.,
+                flip_h: true,
+                flip_v: false,
+            }),
+        },
+    );
+    bundle.document.definitions.insert(
+        DefinitionId(0),
+        DefinitionData {
+            name: "Model".into(),
+            kind: DefinitionKind::Root,
+            geometry: BulkGeometry {
+                vertices: vec![
+                    DVec3::ZERO,
+                    DVec3::new(4., 0., 0.),
+                    DVec3::new(4., 4., 0.),
+                    DVec3::new(0., 4., 0.),
+                ],
+                faces: vec![BulkFace {
+                    outer: vec![0, 1, 2, 3],
+                    holes: Vec::new(),
+                    material: Some(MaterialId(10)),
+                    color: [160, 177, 193, 255],
+                }],
+                edges: Vec::new(),
+            }
+            .build(false, false)
+            .unwrap()
+            .to_data(),
+            instances: BTreeMap::new(),
+        },
+    );
+
+    // Hand-computed expectation: flip H then rotate 90° then scale by 1/2, 1.
+    // corners (0,0)(4,0)(4,4)(0,4) -> (0,0)(0,-4)(-2,-4)(-2,0)
+    let expected_min = [-2.0f32, -4.0];
+    let expected_max = [0.0f32, 0.0];
+    let extents = |uvs: &[[f32; 2]]| {
+        let mut min = [f32::INFINITY; 2];
+        let mut max = [f32::NEG_INFINITY; 2];
+        for uv in uvs {
+            for i in 0..2 {
+                min[i] = min[i].min(uv[i]);
+                max[i] = max[i].max(uv[i]);
+            }
+        }
+        (min, max)
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+
+    // OBJ: parse vt lines.
+    let obj = dir.path().join("mapped.obj");
+    export_obj(&obj, &bundle).unwrap();
+    let uvs: Vec<[f32; 2]> = std::fs::read_to_string(&obj)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.strip_prefix("vt "))
+        .map(|l| {
+            let mut it = l.split_whitespace();
+            [
+                it.next().unwrap().parse().unwrap(),
+                it.next().unwrap().parse().unwrap(),
+            ]
+        })
+        .collect();
+    assert!(!uvs.is_empty());
+    let (min, max) = extents(&uvs);
+    for i in 0..2 {
+        assert!(
+            (min[i] - expected_min[i]).abs() < 1e-4,
+            "obj min[{i}] {min:?}"
+        );
+        assert!(
+            (max[i] - expected_max[i]).abs() < 1e-4,
+            "obj max[{i}] {max:?}"
+        );
+    }
+
+    // glTF: TEXCOORD_0 accessor min/max are written by the exporter.
+    let gltf = dir.path().join("mapped.gltf");
+    export_gltf(&gltf, &bundle).unwrap();
+    let text = std::fs::read_to_string(&gltf).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut found = false;
+    for mesh in value["meshes"].as_array().unwrap() {
+        for prim in mesh["primitives"].as_array().unwrap() {
+            let texcoord = &prim["attributes"]["TEXCOORD_0"];
+            if !texcoord.is_null() {
+                let idx = texcoord.as_u64().unwrap() as usize;
+                let accessor = &value["accessors"][idx];
+                let min: Vec<f32> = accessor["min"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap() as f32)
+                    .collect();
+                let max: Vec<f32> = accessor["max"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap() as f32)
+                    .collect();
+                for i in 0..2 {
+                    assert!(
+                        (min[i] - expected_min[i]).abs() < 1e-4,
+                        "gltf min[{i}] {min:?}"
+                    );
+                    assert!(
+                        (max[i] - expected_max[i]).abs() < 1e-4,
+                        "gltf max[{i}] {max:?}"
+                    );
+                }
+                found = true;
+            }
+        }
+    }
+    assert!(found, "no TEXCOORD_0 in exported glTF");
+
+    // The same face exports through DAE with mapped TEXCOORDs.
+    let dae = dir.path().join("mapped.dae");
+    cindral_io::export_dae(&dae, &bundle, &Default::default(), &Default::default()).unwrap();
+    let dae_text = std::fs::read_to_string(&dae).unwrap();
+    assert!(dae_text.contains("semantic=\"TEXCOORD\""));
+    let uvs: Vec<[f64; 2]> = roxmltree::Document::parse(&dae_text)
+        .unwrap()
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("float_array") && n.attribute("id").is_some_and(|id| id.contains("-uv"))
+        })
+        .map(|n| {
+            n.text()
+                .unwrap()
+                .split_whitespace()
+                .map(|v| v.parse::<f64>().unwrap())
+                .collect::<Vec<f64>>()
+                .chunks(2)
+                .map(|c| [c[0], c[1]])
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(!uvs.is_empty(), "DAE export has no UV array");
+    let (min, max) = extents(
+        &uvs.iter()
+            .map(|u| [u[0] as f32, u[1] as f32])
+            .collect::<Vec<_>>(),
+    );
+    // DAE UVs are divided by the export unit scale (meters), so they match.
+    for i in 0..2 {
+        assert!(
+            (min[i] - expected_min[i]).abs() < 1e-4,
+            "dae min[{i}] {min:?}"
+        );
+        assert!(
+            (max[i] - expected_max[i]).abs() < 1e-4,
+            "dae max[{i}] {max:?}"
+        );
+    }
+}

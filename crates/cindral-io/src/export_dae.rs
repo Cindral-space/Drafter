@@ -199,6 +199,7 @@ struct Mesh {
 fn geometry(
     id: DefinitionId,
     model: &Model,
+    doc_materials: &BTreeMap<cindral_core::MaterialId, Material>,
     options: &DaeOptions,
     selection: Option<&DaeSelection>,
     control: &DaeControl,
@@ -274,7 +275,14 @@ fn geometry(
             .flatten()
         {
             let uv_index = uvs.len() / 2;
-            uvs.extend(uv(model.vertices()[vertex].position, face.plane.normal));
+            let mapping = face
+                .material
+                .and_then(|m| doc_materials.get(&m))
+                .and_then(|m| m.texture_mapping.as_ref());
+            uvs.extend(cindral_core::TextureMapping::map_uv(
+                uv(model.vertices()[vertex].position, face.plane.normal),
+                mapping,
+            ));
             corners.insert(indices[vertex], [indices[vertex], normal, uv_index]);
         }
         let symbol = face_symbol(face);
@@ -601,6 +609,7 @@ fn export_inner(
         let mesh = geometry(
             *id,
             model,
+            &doc.materials,
             options,
             if *id == root {
                 options.selection.as_ref()

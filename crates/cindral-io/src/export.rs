@@ -61,6 +61,8 @@ struct ResolvedMaterial {
     color: [f32; 3],
     opacity: f32,
     texture: Option<String>,
+    /// Real-world mapping to apply to planar UVs; `None` keeps 1 repeat/m.
+    texture_mapping: Option<cindral_core::TextureMapping>,
 }
 
 fn resolve_face_material(
@@ -90,6 +92,7 @@ fn resolve_face_material(
                 color: crate::srgb_floats(mat.color),
                 opacity,
                 texture: mat.texture.clone(),
+                texture_mapping: mat.texture_mapping,
             };
         }
     }
@@ -110,6 +113,7 @@ fn resolve_face_material(
         color: [r, g, b],
         opacity: a,
         texture: None,
+        texture_mapping: None,
     }
 }
 
@@ -268,9 +272,19 @@ pub fn export_obj(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
                     let mut p1 = occ.world.transform_point3(tri[1]);
                     let mut p2 = occ.world.transform_point3(tri[2]);
 
-                    let uv0 = planar_uv(tri[0], face.plane.normal);
-                    let mut uv1 = planar_uv(tri[1], face.plane.normal);
-                    let mut uv2 = planar_uv(tri[2], face.plane.normal);
+                    let mapping = res_mat.texture_mapping.as_ref();
+                    let uv0 = cindral_core::TextureMapping::map_uv(
+                        planar_uv(tri[0], face.plane.normal).map(f64::from),
+                        mapping,
+                    );
+                    let mut uv1 = cindral_core::TextureMapping::map_uv(
+                        planar_uv(tri[1], face.plane.normal).map(f64::from),
+                        mapping,
+                    );
+                    let mut uv2 = cindral_core::TextureMapping::map_uv(
+                        planar_uv(tri[2], face.plane.normal).map(f64::from),
+                        mapping,
+                    );
 
                     if (p1 - p0).cross(p2 - p0).dot(normal) < 0.0 {
                         std::mem::swap(&mut p1, &mut p2);
@@ -539,18 +553,31 @@ pub fn export_gltf(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
 
             // In definition local space, use face's explicit material or default color.
             let res_mat = resolve_face_material(face, None, history.materials());
+            let mapping = res_mat.texture_mapping;
             let entry = prim_map
                 .entry(res_mat.key.clone())
                 .or_insert_with(|| (res_mat, Vec::new()));
 
             for tri in tris {
-                let uv0 = planar_uv(tri[0], normal);
-                let uv1 = planar_uv(tri[1], normal);
-                let uv2 = planar_uv(tri[2], normal);
+                let mapping = mapping.as_ref();
+
+                let uv0 = cindral_core::TextureMapping::map_uv(
+                    planar_uv(tri[0], normal).map(f64::from),
+                    mapping,
+                );
+                let uv1 = cindral_core::TextureMapping::map_uv(
+                    planar_uv(tri[1], normal).map(f64::from),
+                    mapping,
+                );
+                let uv2 = cindral_core::TextureMapping::map_uv(
+                    planar_uv(tri[2], normal).map(f64::from),
+                    mapping,
+                );
 
                 let pts = [(tri[0], uv0), (tri[1], uv1), (tri[2], uv2)];
 
                 for (p, uv) in pts {
+                    let uv = [uv[0] as f32, uv[1] as f32];
                     let pos = [p.x as f32, p.y as f32, p.z as f32];
                     for i in 0..3 {
                         pos_min[i] = pos_min[i].min(pos[i]);
@@ -854,6 +881,7 @@ pub fn export_gltf(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
                             color: crate::srgb_floats(mat.color),
                             opacity: mat.opacity,
                             texture: mat.texture.clone(),
+                            texture_mapping: mat.texture_mapping,
                         }
                     } else {
                         prim.resolved_material.clone()

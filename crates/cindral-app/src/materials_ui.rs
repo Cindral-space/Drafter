@@ -476,8 +476,16 @@ impl DrafterApp {
                 digits, mapping.width_m, digits, mapping.height_m
             )
         };
-        let mut width_text = size_text(&mapping).split(" × ").next().unwrap_or("").to_string();
-        let mut height_text = size_text(&mapping).split(" × ").nth(1).unwrap_or("").to_string();
+        let mut width_text = size_text(&mapping)
+            .split(" × ")
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let mut height_text = size_text(&mapping)
+            .split(" × ")
+            .nth(1)
+            .unwrap_or("")
+            .to_string();
 
         ui.add_space(2.);
         let size = ui.add(

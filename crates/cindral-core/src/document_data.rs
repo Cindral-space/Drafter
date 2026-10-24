@@ -174,6 +174,26 @@ impl TextureMapping {
             ..Self::default()
         }
     }
+
+    /// Applies this mapping to a raw planar UV (meters): flip, rotate about
+    /// the mapping origin, then scale to one repeat per width/height. The
+    /// transform matches the vertex shader exactly; `None` returns `uv`.
+    pub fn map_uv(uv: [f64; 2], mapping: Option<&Self>) -> [f64; 2] {
+        let Some(mapping) = mapping else {
+            return uv;
+        };
+        let mut uv = [
+            uv[0] * if mapping.flip_h { -1. } else { 1. },
+            uv[1] * if mapping.flip_v { -1. } else { 1. },
+        ];
+        let radians = f64::from(mapping.rotation_deg) * std::f64::consts::TAU / 360.;
+        let (sin, cos) = radians.sin_cos();
+        uv = [uv[0] * cos - uv[1] * sin, uv[0] * sin + uv[1] * cos];
+        [
+            uv[0] / mapping.width_m.max(1e-6),
+            uv[1] / mapping.height_m.max(1e-6),
+        ]
+    }
 }
 
 /// Material values; texture loading is intentionally deferred to M6.
