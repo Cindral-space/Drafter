@@ -547,6 +547,7 @@ dependencies = [
  "cindral-tools",
  "eframe",
  "glam",
+ "image",
  "png",
  "rfd",
  "serde",
