@@ -167,7 +167,13 @@ impl DrafterApp {
                         });
                         ui.menu_button("Camera", |ui| {
                             ui.set_min_width(224.);
-                            if ui.add(egui::Button::new("Pan").shortcut_text(shortcuts::hint(shortcuts::Action::Pan))).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new("Pan")
+                                        .shortcut_text(shortcuts::hint(shortcuts::Action::Pan)),
+                                )
+                                .clicked()
+                            {
                                 self.activate_pan();
                                 ui.close();
                             }
@@ -414,8 +420,19 @@ impl DrafterApp {
                                     self.extents(size.x / size.y.max(1.));
                                 }
                                 ui.separator();
-                                if ui.selectable_label(self.shortcuts.navigation == Some(shortcuts::Action::Pan), "Pan")
-                                    .on_hover_text(shortcuts::tooltip(shortcuts::MAP.iter().find(|e| e.action == shortcuts::Action::Pan).unwrap())).clicked() {
+                                if ui
+                                    .selectable_label(
+                                        self.shortcuts.navigation == Some(shortcuts::Action::Pan),
+                                        "Pan",
+                                    )
+                                    .on_hover_text(shortcuts::tooltip(
+                                        shortcuts::MAP
+                                            .iter()
+                                            .find(|e| e.action == shortcuts::Action::Pan)
+                                            .unwrap(),
+                                    ))
+                                    .clicked()
+                                {
                                     self.activate_pan();
                                 }
                                 ui.label(

@@ -11,8 +11,10 @@ mod dae_ui;
 mod files_ui;
 mod measurements_ui;
 mod modify_ui;
-mod pan_ui;
 mod organization_ui;
+#[cfg(feature = "kernel-benchmark")]
+pub mod pan_benchmark;
+mod pan_ui;
 pub mod png_cli;
 pub mod png_export;
 pub mod png_job;
@@ -20,8 +22,6 @@ mod png_ui;
 mod presentation_ui;
 #[cfg(feature = "kernel-benchmark")]
 pub mod real_file_benchmark;
-#[cfg(feature = "kernel-benchmark")]
-pub mod pan_benchmark;
 #[cfg(feature = "kernel-benchmark")]
 mod real_file_gpu;
 mod rotate_ui;
@@ -457,7 +457,10 @@ impl DrafterApp {
         let aspect = rect.width() / rect.height().max(1.0);
         let drawing_drag =
             self.draw_drag.is_some() || response.drag_started_by(PointerButton::Primary);
-        if self.pan_drag.is_none() && self.capture_measurement_keys(response) {
+        let temporary_pan = response
+            .ctx
+            .input(|i| i.pointer.button_down(PointerButton::Middle) && i.modifiers.shift);
+        if self.pan_drag.is_none() && !temporary_pan && self.capture_measurement_keys(response) {
             return;
         }
         if self.route_shortcuts(response) {

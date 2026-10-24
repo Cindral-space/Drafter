@@ -39,6 +39,16 @@ minimum move budget; under 16 ms is the preferred target.
 WGPU_BACKEND=gl cargo run --release -p cindral-app --features kernel-benchmark --example pan_benchmark -- /path/to/private/model.skp
 ```
 
+Measured on the private bedroom SKP (loaded headlessly), Radeon Vega 11 / Mesa GL:
+
+| Shadows | Moves | Mean frame | Worst frame | Press frame |
+| --- | ---: | ---: | ---: | ---: |
+| Off | 200 | 2.231 ms | 3.766 ms | 2.568 ms |
+| On | 200 | 3.261 ms | 5.155 ms | 4.062 ms |
+
+Both runs meet the preferred 16 ms budget; these are local measurements, not a
+cross-platform guarantee. No hardware touchpad or reference-app trial was performed.
+
 ## Questions for the user
 
 1. [verify] In real SketchUp or SketchUp for Web, begin an unfinished Line, press H, pan, then choose Line again: is the unfinished line cancelled or resumed? Cindral cancels it.

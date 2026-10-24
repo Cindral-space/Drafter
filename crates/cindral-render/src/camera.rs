@@ -312,7 +312,8 @@ impl Camera {
     pub fn pan_depth(&self, point: Option<Vec3>) -> f32 {
         let cam = self.sanitized();
         let depth = point.map(|p| (p - cam.eye()).dot(cam.basis().forward()));
-        depth.filter(|d| d.is_finite() && *d > 0.0)
+        depth
+            .filter(|d| d.is_finite() && *d > 0.0)
             .unwrap_or(cam.distance)
             .clamp((cam.distance * NEAR_RATIO).max(MIN_DISTANCE), MAX_DISTANCE)
     }
@@ -320,7 +321,11 @@ impl Camera {
     /// Pan at a fixed press-time view-axis depth. Orthographic scale depends
     /// only on view size. This allocates nothing and changes only translation.
     pub fn pan_at_depth(&mut self, delta: Vec2, viewport_height: f32, depth: f32) {
-        if !depth.is_finite() || !delta.is_finite() || !viewport_height.is_finite() || viewport_height <= 0.0 {
+        if !depth.is_finite()
+            || !delta.is_finite()
+            || !viewport_height.is_finite()
+            || viewport_height <= 0.0
+        {
             return;
         }
         let mut cam = self.sanitized();

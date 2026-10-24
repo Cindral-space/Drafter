@@ -82,7 +82,11 @@ impl Gpu {
         self.allow_shadows = true;
     }
     pub(super) fn pan_metrics(&self) -> (u64, u64) {
-        let renderer = self.renderer.callback_resources.get::<cindral_render::scene::SceneRenderer>().unwrap();
+        let renderer = self
+            .renderer
+            .callback_resources
+            .get::<cindral_render::scene::SceneRenderer>()
+            .unwrap();
         (renderer.shadow_renders(), renderer.allocated_bytes())
     }
     pub(super) fn draw(
@@ -135,15 +139,15 @@ impl Gpu {
             self.renderer.free_texture(&id);
         }
         if !self.allow_shadows {
-        assert_eq!(
-            self.renderer
-                .callback_resources
-                .get::<cindral_render::scene::SceneRenderer>()
-                .unwrap()
-                .shadow_renders(),
-            0,
-            "shadows are disabled throughout this replay"
-        );
+            assert_eq!(
+                self.renderer
+                    .callback_resources
+                    .get::<cindral_render::scene::SceneRenderer>()
+                    .unwrap()
+                    .shadow_renders(),
+                0,
+                "shadows are disabled throughout this replay"
+            );
         }
     }
 }
