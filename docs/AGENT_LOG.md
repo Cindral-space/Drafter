@@ -620,3 +620,8 @@
 
 - Replaced the recovery row’s Delete permanently text with the user-requested frameless × beside Recover, keeping a 28×28 px minimum target and the explicit permanent-deletion tooltip. The Inspector header × continues to dismiss the panel. Updated current README/file-format guidance and the UI review. Existing deletion handling is unchanged; no user snapshots were accessed.
 - Formatting, diff checks and strict workspace all-target/all-feature Clippy pass. One WGPU_BACKEND=gl cargo test --workspace --all-features --no-fail-fast run passes: **512 passed, 0 failed, 43 ignored, 54 targets**. No new tests for this label/style-only change; existing recovery interaction coverage runs in the workspace suite. No benchmark/performance claim, dependency, native app restart or remote push. No bulk work to delegate; OpenCode remained disabled. Preserved the pre-existing .gitignore change. Native-window visual verification was not performed.
+
+### Open vs Import item 1 — collision policy — 2026-10-24
+
+- Append merges tags by name without changing destination visibility and merges identical named materials. Different materials and component definitions receive available numbered suffixes. The transaction returns four collision counters for the UI report; existing graph deltas retain one-entry undo/redo.
+- `cargo check -p cindral-core` passes. Collision/leak regression execution and workspace completion checks follow. Existing .gitignore edit preserved; OpenCode remains disabled.

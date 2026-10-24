@@ -2096,6 +2096,11 @@ impl DocumentHistory {
     /// Append validated imported definitions/geometry to the active context as one undo entry.
     /// Intended for an import worker operating on a cloned history. Existing undo/redo is retained.
     pub fn append_import(&mut self, data: DocumentData) -> Result<(), KernelError> {
+        self.append_import_report(data).map(|_| ())
+    }
+    /// Append atomically and return collision counts (merged tags/materials, renamed materials/definitions).
+    pub fn append_import_report(&mut self, data: DocumentData) -> Result<[usize; 4], KernelError> {
+        let mut counts = [0; 4];
         if self.geometry_preview.is_some()
             || self.instance_preview.is_some()
             || self.organization_preview.is_some()
@@ -2117,23 +2122,33 @@ impl DocumentHistory {
             .filter(|id| **id != DefinitionId(0))
             .map(|id| (*id, DefinitionId(alloc())))
             .collect();
-        let materials: BTreeMap<_, _> = imported
-            .graph
-            .materials
-            .keys()
-            .map(|id| (*id, MaterialId(alloc())))
-            .collect();
-        let tags: BTreeMap<_, _> = imported
-            .graph
-            .tags
-            .keys()
-            .map(|id| (*id, TagId(alloc())))
-            .collect();
-        for (id, m) in &imported.graph.materials {
-            after.materials.insert(materials[id], m.clone());
+        let mut materials = BTreeMap::new();
+        for (id, material) in &imported.graph.materials {
+            if let Some((existing, _)) = after.materials.iter().find(|(_, m)| *m == material) {
+                materials.insert(*id, *existing);
+                counts[1] += 1;
+            } else {
+                let mut material = material.clone();
+                let name = unique_import_name(&material.name, after.materials.values().map(|m| m.name.as_str()));
+                counts[2] += usize::from(name != material.name);
+                material.name = name;
+                let target = MaterialId(after.next_id);
+                after.next_id += 1;
+                materials.insert(*id, target);
+                after.materials.insert(target, material);
+            }
         }
-        for (id, t) in &imported.graph.tags {
-            after.tags.insert(tags[id], t.clone());
+        let mut tags = BTreeMap::new();
+        for (id, tag) in &imported.graph.tags {
+            if let Some((existing, _)) = after.tags.iter().find(|(_, t)| t.name == tag.name) {
+                tags.insert(*id, *existing);
+                counts[0] += 1;
+            } else {
+                let target = TagId(after.next_id);
+                after.next_id += 1;
+                tags.insert(*id, target);
+                after.tags.insert(target, tag.clone());
+            }
         }
         let mut created = BTreeMap::new();
         let active = self.active_definition();
@@ -2144,6 +2159,11 @@ impl DocumentHistory {
                 definitions[id]
             };
             let mut info = info.clone();
+            if *id != DefinitionId(0) {
+                let name = unique_import_name(&info.name, after.definitions.values().map(|d| d.name.as_str()));
+                counts[3] += usize::from(name != info.name);
+                info.name = name;
+            }
             for node in info.instances.values_mut() {
                 node.id = InstanceId(after.next_id);
                 after.next_id += 1;
@@ -2260,6 +2280,13 @@ impl DocumentHistory {
         self.undo.push(DocumentEntry::Organization { delta, steps });
         self.redo.clear();
         self.changed(dirty, true, true);
-        Ok(())
+        Ok(counts)
     }
+}
+
+fn unique_import_name<'a>(name: &str, existing: impl Iterator<Item = &'a str>) -> String {
+    let names: BTreeSet<_> = existing.collect();
+    if !names.contains(name) { return name.to_owned(); }
+    for suffix in 2.. { let candidate = format!("{name} ({suffix})"); if !names.contains(candidate.as_str()) { return candidate; } }
+    unreachable!()
 }
