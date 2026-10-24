@@ -11,7 +11,7 @@ use std::{
     },
 };
 /// Source coordinate convention.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum UpAxis {
     /// X up.
     X,
@@ -530,20 +530,30 @@ pub fn import_file(
     options: &ImportOptions,
     control: &ImportControl,
 ) -> Result<ImportResult> {
+    import_file_with_basis(path, options, control, None, None)
+}
+/// Import with optional source units and up-axis overrides.
+pub fn import_file_with_basis(
+    path: &Path, options: &ImportOptions, control: &ImportControl,
+    meters_per_unit: Option<f64>, up_axis: Option<UpAxis>,
+) -> Result<ImportResult> {
     control.check()?;
-    let scene = match path
+    let mut scene = match path
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
     {
+        "cdraft" => scene_from_bundle(crate::load_draft(path)?),
         "gltf" | "glb" => crate::import_gltf(path, control)?,
         "dae" => crate::import_dae(path, control)?,
         "obj" => crate::import_obj_scene(path, control)?,
         "skp" => crate::import_skp(path, control)?,
         _ => return Err(IoError::Invalid("unsupported import format".into())),
     };
+    if let Some(unit) = meters_per_unit { scene.meters_per_unit = unit; }
+    if let Some(axis) = up_axis { scene.up_axis = axis; }
     if path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))

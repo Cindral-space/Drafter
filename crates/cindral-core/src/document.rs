@@ -2095,6 +2095,11 @@ impl DocumentHistory {
 impl DocumentHistory {
     /// Append validated imported definitions/geometry to the active context as one undo entry.
     /// Intended for an import worker operating on a cloned history. Existing undo/redo is retained.
+    /// Whether an uncommitted document operation owns provisional state.
+    pub fn has_active_preview(&self) -> bool {
+        self.geometry_preview.is_some() || self.instance_preview.is_some() || self.organization_preview.is_some()
+    }
+    /// Append incoming values as one undo entry without changing existing named resources.
     pub fn append_import(&mut self, data: DocumentData) -> Result<(), KernelError> {
         self.append_import_report(data).map(|_| ())
     }

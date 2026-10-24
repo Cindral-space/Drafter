@@ -306,6 +306,7 @@ impl DrafterApp {
                         });
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if self.files.import_summary.is_some() && ui.link("Import report").clicked() { self.files.import_report_open = true; }
                             let state = self.document_save_label();
                             ui.label(RichText::new(state).size(11.).color(
                                 if state == "Modified" {

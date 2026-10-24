@@ -279,6 +279,7 @@ impl DrafterApp {
         match result {
             Ok(true) => {
                 self.tool.cancel();
+                if let Err(e) = self.reconcile_import_textures() { self.error = Some(e.to_string()); }
                 self.snap = None;
                 self.refresh_mesh();
             }
