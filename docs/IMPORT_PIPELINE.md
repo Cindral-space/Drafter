@@ -48,12 +48,8 @@ For a chord confined to one convex face, the edit cavity follows loose wires and
 collects adjacent face boundaries without walking the complete sheet perimeter.
 Other edits retain exterior-boundary traversal so remote loops close correctly.
 
-File > Import appends to the current editing context and retains previous history.
-Parsing, conversion, append validation, texture decoding and initial CPU mesh caches
-run in a worker. UI installation consumes the prepared caches and schedules GPU
-updates. Cancellation discards even completed channel results. New/Open and a changed
-document revision invalidate pending results so an import cannot overwrite intervening
-edits. Source snapshot cloning and GPU uploads remain foreground work.
+File > Import adds to the current model root. The Open vs Import section below
+defines prompts, atomic application and document lifetime handling.
 
 The File > Import OBJ path also emits an intermediate scene without constructing a
 runtime history first; historical `import_obj`/`import_obj_str` bundle APIs retain
@@ -112,3 +108,34 @@ an asynchronous replacement worker, promoting the explicit source model containe
 to root while retaining component instances. File > Import appends and may wrap
 the source once. Both retain a read-only source note and `.cdraft` save.
 See [the reader contract and limitations](SKP_IMPORT.md).
+
+## Open vs Import
+
+The app has one document. **File > Open** works on the chosen file as its own
+document: unsaved changes require Save, Discard or Cancel before replacement.
+Native `.cdraft` files open with fresh history. Opening `.skp`, `.dae`, `.glb`,
+`.gltf` or `.obj` converts to a new unsaved document; Save As writes `.cdraft`
+and never writes back to the source.
+
+**File > Import** first offers Add into current model or Open as new document,
+plus source units/up-axis, cleanup and component/loose options. Choices are retained
+for the app session. The initial default adds one component at the model origin,
+selects it and frames it if outside the view. Add keeps the current document name
+and file target. Open as new document follows the same unsaved-changes prompt as Open.
+Both routes accept all six extensions above.
+
+Parsing/conversion runs in a worker; editing may continue. A finished import waits
+until tools finish or are cancelled, showing “Import ready, applying...”. Append
+uses the latest model and installs one atomic undo entry. A closed/replaced document
+or a changed Save As target discards pending work with a message. Edits during an
+Open conversion discard its replacement result rather than lose those edits.
+Failure/cancellation leaves model and history unchanged. UI append validation and
+combined CPU render-cache construction remain foreground work.
+
+Tags merge by name without changing existing visibility. Materials merge when name,
+color, opacity and texture content match; otherwise incoming names receive numbered
+suffixes. Definitions receive unique numbered names. Existing records remain unchanged.
+Undo removes added geometry, definitions, tags, materials and texture assets; redo
+restores them. Unused source texture assets are omitted. Completion identifies the
+current model or new document and provides an Import report link with merge/rename
+counts, warnings and omissions.
