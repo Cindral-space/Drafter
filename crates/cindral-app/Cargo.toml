@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 cindral-render = { path = "../cindral-render" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 eframe = { version = "0.33.3", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 glam = "0.30"
 tracing = "0.1"
