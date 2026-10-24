@@ -85,6 +85,7 @@ fn prepare_import(
     })
 }
 pub(crate) struct ImportJob {
+    save_epoch: u64,
     pub(crate) replace_document: bool,
     pub(crate) generation: u64,
     pub(crate) revision: u64,
@@ -115,6 +116,7 @@ pub(crate) struct FileState {
     close_approved: bool,
     recovered_from: Option<PathBuf>,
     status: String,
+    import_save_epoch: u64,
     pending_open: Option<PathBuf>,
     import_dialog: Option<PathBuf>,
     import_new_document: bool,
@@ -231,6 +233,7 @@ impl Default for FileState {
             close_approved: false,
             recovered_from: None,
             status: "Untitled draft".into(),
+            import_save_epoch: 0,
             pending_open: None,
             import_dialog: None,
             import_new_document: false,
@@ -368,6 +371,7 @@ impl DrafterApp {
         self.open_path_confirmed(path)
     }
     fn open_path_confirmed(&mut self, path: &Path) -> cindral_io::Result<()> {
+        let discarded_import = self.files.import_job.is_some();
         self.cancel_import();
         if path
             .extension()
@@ -387,7 +391,11 @@ impl DrafterApp {
         self.cancel_modify();
         self.tool.cancel();
         self.backup_current()?;
-        self.apply_file(bundle, Some(path.to_owned()))
+        self.apply_file(bundle, Some(path.to_owned()))?;
+        if discarded_import {
+            self.files.status.push_str(" · pending import discarded");
+        }
+        Ok(())
     }
     /// Atomically save committed values; any active drag is cancelled before writing.
     pub fn save_path(&mut self, path: &Path) -> cindral_io::Result<()> {
@@ -407,7 +415,7 @@ impl DrafterApp {
         self.files.checked_save_revision = Some(self.file_revision());
         self.files.modified = false;
         if self.files.path.as_deref() != Some(path) {
-            self.files.generation = self.files.generation.wrapping_add(1);
+            self.files.import_save_epoch = self.files.import_save_epoch.wrapping_add(1);
         }
         self.files.path = Some(path.to_owned());
         self.files.last_revision = Some(self.file_revision());
@@ -427,6 +435,7 @@ impl DrafterApp {
     fn do_file_action(&mut self, action: Action) -> cindral_io::Result<()> {
         match action {
             Action::New => {
+                let discarded_import = self.files.import_job.is_some();
                 self.cancel_import();
                 self.cancel_modify();
                 self.tool.cancel();
@@ -436,12 +445,20 @@ impl DrafterApp {
                 self.reset_file_target(None);
                 self.sync_file_textures()?;
                 self.files.fit = true;
-                self.files.status = "New draft".into();
+                self.files.status = if discarded_import {
+                    "New draft · pending import discarded"
+                } else {
+                    "New draft"
+                }
+                .into();
             }
             Action::Open => {
                 self.cancel_import();
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Supported documents", &["cdraft", "skp", "dae", "gltf", "glb", "obj"])
+                    .add_filter(
+                        "Supported documents",
+                        &["cdraft", "skp", "dae", "gltf", "glb", "obj"],
+                    )
                     .add_filter("SketchUp (*.skp)", &["skp"])
                     .pick_file()
                 {
@@ -468,7 +485,7 @@ impl DrafterApp {
             Action::Import => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter(
-                        "Supported 3D Models (*.skp, *.gltf, *.glb, *.dae, *.obj)",
+                        "Supported documents (*.cdraft, *.skp, *.gltf, *.glb, *.dae, *.obj)",
                         &["cdraft", "skp", "gltf", "glb", "dae", "obj"],
                     )
                     .add_filter("SketchUp (*.skp)", &["skp"])
@@ -1003,14 +1020,21 @@ impl DrafterApp {
         let spawned = std::thread::Builder::new()
             .name("cindral-import".into())
             .spawn(move || {
-                let res = cindral_io::import_file_with_basis(&thread_path, &thread_options, &thread_control, unit, axis)
-                    .and_then(|result| prepare_import(result, &thread_control));
+                let res = cindral_io::import_file_with_basis(
+                    &thread_path,
+                    &thread_options,
+                    &thread_control,
+                    unit,
+                    axis,
+                )
+                .and_then(|result| prepare_import(result, &thread_control));
                 let _ = sender.send(res);
             });
         match spawned {
             Ok(_) => {
                 self.files.import_job = Some(ImportJob {
                     replace_document,
+                    save_epoch: self.files.import_save_epoch,
                     generation: self.files.generation,
                     revision,
                     path,
@@ -1030,6 +1054,14 @@ impl DrafterApp {
         &mut self,
         prepared: PreparedImport,
         path: &Path,
+    ) -> cindral_io::Result<()> {
+        self.install_import_result(prepared, path, true)
+    }
+    fn install_import_result(
+        &mut self,
+        prepared: PreparedImport,
+        path: &Path,
+        replace: bool,
     ) -> cindral_io::Result<()> {
         let PreparedImport {
             result,
@@ -1054,9 +1086,16 @@ impl DrafterApp {
         scene_cache::merge(&mut self.pending, update);
         self.organization = Default::default();
         self.selection.clear();
-        self.guide_cache.clear();
-        self.guide_definition = cindral_core::DefinitionId(0);
-        self.modify.replace_guides(Vec::new());
+        if replace {
+            self.guide_cache.clear();
+            self.guide_definition = cindral_core::DefinitionId(0);
+            self.modify.replace_guides(Vec::new());
+        }
+        self.modify.cancel();
+        self.rotate = Default::default();
+        self.measurements.reset();
+        self.tool.cancel();
+        self.refresh_mesh();
         self.last_tape = None;
         self.files.fit = true;
         self.files.offer = false;
@@ -1078,20 +1117,35 @@ impl DrafterApp {
         Ok(())
     }
     fn import_operation_active(&self) -> bool {
-        self.modify.active() || self.tool.anchor().is_some() || self.organization.drag.is_some()
-            || self.draw_press.is_some() || self.modify_press.is_some()
-            || self.history.has_active_preview() || self.section_cursor_active()
+        self.modify.active()
+            || self.tool.anchor().is_some()
+            || self.organization.drag.is_some()
+            || self.draw_press.is_some()
+            || self.modify_press.is_some()
+            || self.history.has_active_preview()
+            || self.section_cursor_active()
     }
     pub(crate) fn import_tick(&mut self, ctx: &egui::Context) {
-        let Some(job) = self.files.import_job.take() else { return; };
-        if job.control.is_cancelled() || job.cancelled || job.generation != self.files.generation
-            || (job.replace_document && job.revision != self.history.revision()) {
+        let Some(job) = self.files.import_job.take() else {
+            return;
+        };
+        if job.control.is_cancelled()
+            || job.cancelled
+            || job.generation != self.files.generation
+            || job.save_epoch != self.files.import_save_epoch
+            || (job.replace_document && job.revision != self.history.revision())
+        {
             job.control.cancel();
             self.files.ready_import = None;
             self.files.status = "Import discarded: document closed, replaced or saved under another name (or edited during Open)".into();
             return;
         }
-        let result = self.files.ready_import.take().map(|p| Ok(Ok(p))).unwrap_or_else(|| job.receiver.try_recv());
+        let result = self
+            .files
+            .ready_import
+            .take()
+            .map(|p| Ok(Ok(p)))
+            .unwrap_or_else(|| job.receiver.try_recv());
         match result {
             Ok(Ok(prepared)) if self.import_operation_active() => {
                 self.files.ready_import = Some(prepared);
@@ -1101,87 +1155,202 @@ impl DrafterApp {
             }
             Ok(Ok(mut prepared)) => {
                 let result = if job.replace_document {
-                    History::from_data(prepared.result.history.to_data()).map_err(cindral_io::IoError::from).and_then(|history| {
-                        prepared.result.history = history;
-                        self.backup_current()?;
-                        self.reset_file_target(None);
-                        self.apply_import_result(prepared, &job.path)
-                    })
-                } else { self.append_import_result(prepared, &job.path) };
-                if let Err(e) = result { self.error = Some(format!("Import failed: {e}")); self.files.status = "Import failed".into(); }
+                    History::from_data(prepared.result.history.to_data())
+                        .map_err(cindral_io::IoError::from)
+                        .and_then(|history| {
+                            prepared.result.history = history;
+                            self.backup_current()?;
+                            self.reset_file_target(None);
+                            self.apply_import_result(prepared, &job.path)
+                        })
+                } else {
+                    self.append_import_result(prepared, &job.path)
+                };
+                if let Err(e) = result {
+                    self.error = Some(format!("Import failed: {e}"));
+                    self.files.status = "Import failed".into();
+                }
             }
-            Ok(Err(e)) => { self.error = Some(format!("Import failed: {e}")); self.files.status = "Import failed".into(); }
-            Err(mpsc::TryRecvError::Empty) => { self.files.import_job = Some(job); ctx.request_repaint(); }
-            Err(mpsc::TryRecvError::Disconnected) => { self.error = Some("Import worker stopped unexpectedly".into()); self.files.status = "Import failed".into(); }
+            Ok(Err(e)) => {
+                self.error = Some(format!("Import failed: {e}"));
+                self.files.status = "Import failed".into();
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.files.import_job = Some(job);
+                ctx.request_repaint();
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.error = Some("Import worker stopped unexpectedly".into());
+                self.files.status = "Import failed".into();
+            }
         }
     }
-    fn append_import_result(&mut self, prepared: PreparedImport, path: &Path) -> cindral_io::Result<()> {
+    fn append_import_result(
+        &mut self,
+        prepared: PreparedImport,
+        path: &Path,
+    ) -> cindral_io::Result<()> {
         let mut result = prepared.result;
         // Resolve texture identity by encoded content before comparing materials.
         let mut incoming = result.history.to_data();
         let mut assets = self.files.textures.clone();
         let mut remap = BTreeMap::new();
         for (key, asset) in &result.textures {
-            let target = if let Some((key, _)) = assets.iter().find(|(_, old)| *old == asset) { key.clone() }
-            else {
-                let mut target = key.clone(); let mut suffix = 2;
-                while assets.contains_key(&target) { target = format!("{key} ({suffix})"); suffix += 1; }
-                assets.insert(target.clone(), asset.clone()); target
+            let target = if let Some((key, _)) = assets.iter().find(|(_, old)| *old == asset) {
+                key.clone()
+            } else {
+                let mut target = key.clone();
+                let mut suffix = 2;
+                while assets.contains_key(&target) {
+                    target = format!("{key} ({suffix})");
+                    suffix += 1;
+                }
+                assets.insert(target.clone(), asset.clone());
+                target
             };
             remap.insert(key.clone(), target);
         }
         for material in incoming.materials.values_mut() {
-            if let Some(key) = &material.texture { material.texture = remap.get(key).cloned().or_else(|| Some(key.clone())); }
+            if let Some(key) = &material.texture {
+                material.texture = remap.get(key).cloned().or_else(|| Some(key.clone()));
+            }
         }
-        let used: std::collections::BTreeSet<_> = incoming.materials.values().filter_map(|m| m.texture.as_ref()).collect();
-        result.textures = assets.into_iter().filter(|(key, _)| used.contains(key) && !self.files.textures.contains_key(key)).collect();
+        let used: std::collections::BTreeSet<_> = incoming
+            .materials
+            .values()
+            .filter_map(|m| m.texture.as_ref())
+            .collect();
+        result.textures = assets
+            .into_iter()
+            .filter(|(key, _)| used.contains(key) && !self.files.textures.contains_key(key))
+            .collect();
         let mut history = self.history.clone();
         history.enter(Vec::new())?;
         let active = history.active_definition();
-        let before: std::collections::BTreeSet<_> = history.instances(active).ok_or(cindral_core::KernelError::MissingEntity)?.keys().copied().collect();
+        let before: std::collections::BTreeSet<_> = history
+            .instances(active)
+            .ok_or(cindral_core::KernelError::MissingEntity)?
+            .keys()
+            .copied()
+            .collect();
         let counts = history.append_import_report(incoming)?;
-        let selected = history.instances(active).ok_or(cindral_core::KernelError::MissingEntity)?.keys().find(|id| !before.contains(id)).copied();
+        let selected = history
+            .instances(active)
+            .ok_or(cindral_core::KernelError::MissingEntity)?
+            .keys()
+            .find(|id| !before.contains(id))
+            .copied();
         let mut textures = self.files.textures.clone();
         for (key, asset) in &result.textures {
-            if textures.get(key).is_some_and(|old| old != asset) { return Err(cindral_io::IoError::Invalid("texture slot collision".into())); }
+            if textures.get(key).is_some_and(|old| old != asset) {
+                return Err(cindral_io::IoError::Invalid(
+                    "texture slot collision".into(),
+                ));
+            }
             textures.insert(key.clone(), asset.clone());
         }
-        let assets: BTreeMap<_, _> = result.textures.iter().filter(|(key, _)| !self.files.textures.contains_key(*key)).map(|(k, v)| (k.clone(), v.clone())).collect();
+        let assets: BTreeMap<_, _> = result
+            .textures
+            .iter()
+            .filter(|(key, _)| !self.files.textures.contains_key(*key))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         result.history = history;
         result.textures = textures;
-        result.report.notes.push(format!("Current model: merged {} tags / {} materials; renamed {} materials / {} definitions", counts[0], counts[1], counts[2], counts[3]));
+        result.report.notes.push(format!(
+            "Current model: merged {} tags / {} materials; renamed {} materials / {} definitions",
+            counts[0], counts[1], counts[2], counts[3]
+        ));
         let prepared = prepare_import(result, &ImportControl::default())?;
-        let count = prepared.result.history.instances(active).ok_or(cindral_core::KernelError::MissingEntity)?.keys().filter(|id| !before.contains(id)).count();
-        let count = if count == 0 { prepared.result.report.faces + prepared.result.report.edges } else { count };
-        self.apply_import_result(prepared, path)?;
+        let count = prepared
+            .result
+            .history
+            .instances(active)
+            .ok_or(cindral_core::KernelError::MissingEntity)?
+            .keys()
+            .filter(|id| !before.contains(id))
+            .count();
+        let count = if count == 0 {
+            prepared.result.report.faces + prepared.result.report.edges
+        } else {
+            count
+        };
+        self.install_import_result(prepared, path, false)?;
         self.files.import_assets.extend(assets);
         if let Some(id) = selected {
-            let mut path = self.history.context().to_vec(); path.push(id);
+            let mut path = self.history.context().to_vec();
+            path.push(id);
             self.organization.selected = Some(path.clone());
             self.frame_import_if_outside(&path);
         }
         self.files.fit = false;
-        self.files.status = format!("Added {count} objects from {} into current model", path.display());
+        self.files.status = format!(
+            "Added {count} objects from {} into current model",
+            path.display()
+        );
         Ok(())
     }
     fn frame_import_if_outside(&mut self, path: &[cindral_core::InstanceId]) {
-        let Some((min, max)) = self.selected_world_bounds(path) else { return; };
+        let Some((min, max)) = self.selected_world_bounds(path) else {
+            return;
+        };
         let aspect = self.png.viewport[0].max(1) as f32 / self.png.viewport[1].max(1) as f32;
         let vp = self.camera.view_projection(aspect);
         let mut outside = false;
-        for x in [min.x, max.x] { for y in [min.y, max.y] { for z in [min.z, max.z] {
-            let p = vp * DVec3::new(x,y,z).as_vec3().extend(1.);
-            outside |= p.w <= 0. || p.x.abs() > p.w || p.y.abs() > p.w || p.z < 0. || p.z > p.w;
-        } } }
-        if outside { self.camera.zoom_extents(min.as_vec3(), max.as_vec3(), aspect); }
+        for x in [min.x, max.x] {
+            for y in [min.y, max.y] {
+                for z in [min.z, max.z] {
+                    let p = vp * DVec3::new(x, y, z).as_vec3().extend(1.);
+                    outside |=
+                        p.w <= 0. || p.x.abs() > p.w || p.y.abs() > p.w || p.z < 0. || p.z > p.w;
+                }
+            }
+        }
+        if outside {
+            self.camera
+                .zoom_extents(min.as_vec3(), max.as_vec3(), aspect);
+        }
     }
     pub(crate) fn reconcile_import_textures(&mut self) -> cindral_io::Result<()> {
-        let keys: std::collections::BTreeSet<_> = self.history.materials().values().filter_map(|m| m.texture.as_ref()).collect();
+        let keys: std::collections::BTreeSet<_> = self
+            .history
+            .materials()
+            .values()
+            .filter_map(|m| m.texture.as_ref())
+            .collect();
         for (key, asset) in &self.files.import_assets {
-            if keys.contains(key) { self.files.textures.insert(key.clone(), asset.clone()); }
-            else { self.files.textures.remove(key); }
+            if keys.contains(key) {
+                self.files.textures.insert(key.clone(), asset.clone());
+            } else {
+                self.files.textures.remove(key);
+            }
         }
         self.sync_file_textures()
+    }
+    fn resolve_open_choice(&mut self, choice: u8) {
+        let Some(path) = self.files.pending_open.clone() else {
+            return;
+        };
+        if choice == 2 {
+            self.files.pending_open = None;
+            return;
+        }
+        let result = if choice == 0 {
+            self.do_file_action(Action::Save)
+        } else {
+            Ok(())
+        };
+        self.refresh_save_state();
+        match result {
+            Err(e) => self.error = Some(e.to_string()),
+            Ok(()) if choice == 1 || !self.has_unsaved_values() => {
+                self.files.pending_open = None;
+                if let Err(e) = self.open_path_confirmed(&path) {
+                    self.error = Some(e.to_string());
+                }
+            }
+            _ => {}
+        }
     }
     fn import_options_window(&mut self, ctx: &egui::Context) {
         if let Some(path) = self.files.pending_open.clone() {
@@ -1190,50 +1359,96 @@ impl DrafterApp {
                 ui.heading("Save changes before opening?");
                 ui.label(format!("Open {} as its own document", path.display()));
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() { choice = Some(0); }
-                    if ui.button("Discard").clicked() { choice = Some(1); }
-                    if ui.button("Cancel").clicked() { choice = Some(2); }
+                    if ui.button("Save").clicked() {
+                        choice = Some(0);
+                    }
+                    if ui.button("Discard").clicked() {
+                        choice = Some(1);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        choice = Some(2);
+                    }
                 });
             });
             if let Some(choice) = choice {
-                if choice == 2 { self.files.pending_open = None; }
-                else {
-                    let result = if choice == 0 { self.do_file_action(Action::Save) } else { Ok(()) };
-                    self.refresh_save_state();
-                    match result {
-                        Err(e) => self.error = Some(e.to_string()),
-                        Ok(()) if choice == 1 || !self.has_unsaved_values() => {
-                            self.files.pending_open = None;
-                            if let Err(e) = self.open_path_confirmed(&path) { self.error = Some(e.to_string()); }
-                        }
-                        _ => {}
-                    }
-                }
+                self.resolve_open_choice(choice);
             }
         }
         if let Some(path) = self.files.import_dialog.clone() {
-            let mut start = false; let mut cancel = false;
+            let mut start = false;
+            let mut cancel = false;
             egui::Modal::new(egui::Id::new("import-options")).show(ctx, |ui| {
-                ui.heading("Import options"); ui.label(path.display().to_string());
-                ui.radio_value(&mut self.files.import_new_document, false, "Add into current model");
-                ui.radio_value(&mut self.files.import_new_document, true, "Open as new document");
-                ui.checkbox(&mut self.files.import_options.as_component, "As one component (otherwise loose geometry)");
-                ui.checkbox(&mut self.files.import_options.merge_coplanar, "Merge coplanar faces");
-                ui.checkbox(&mut self.files.import_options.soften_coplanar, "Soften coplanar edges");
-                egui::ComboBox::from_label("Source units").selected_text(self.files.import_unit.map_or("From file".into(), |v| format!("{v} meters/unit"))).show_ui(ui, |ui| {
-                    for (label, value) in [("From file", None), ("Meters", Some(1.)), ("Centimeters", Some(0.01)), ("Millimeters", Some(0.001)), ("Inches", Some(0.0254)), ("Feet", Some(0.3048))] { ui.selectable_value(&mut self.files.import_unit, value, label); }
+                ui.heading("Import options");
+                ui.label(path.display().to_string());
+                ui.radio_value(
+                    &mut self.files.import_new_document,
+                    false,
+                    "Add into current model",
+                );
+                ui.radio_value(
+                    &mut self.files.import_new_document,
+                    true,
+                    "Open as new document",
+                );
+                ui.checkbox(
+                    &mut self.files.import_options.as_component,
+                    "As one component (otherwise loose geometry)",
+                );
+                ui.checkbox(
+                    &mut self.files.import_options.merge_coplanar,
+                    "Merge coplanar faces",
+                );
+                ui.checkbox(
+                    &mut self.files.import_options.soften_coplanar,
+                    "Soften coplanar edges",
+                );
+                egui::ComboBox::from_label("Source units")
+                    .selected_text(
+                        self.files
+                            .import_unit
+                            .map_or("From file".into(), |v| format!("{v} meters/unit")),
+                    )
+                    .show_ui(ui, |ui| {
+                        for (label, value) in [
+                            ("From file", None),
+                            ("Meters", Some(1.)),
+                            ("Centimeters", Some(0.01)),
+                            ("Millimeters", Some(0.001)),
+                            ("Inches", Some(0.0254)),
+                            ("Feet", Some(0.3048)),
+                        ] {
+                            ui.selectable_value(&mut self.files.import_unit, value, label);
+                        }
+                    });
+                egui::ComboBox::from_label("Up axis")
+                    .selected_text(format!("{:?}", self.files.import_axis))
+                    .show_ui(ui, |ui| {
+                        for (label, axis) in [
+                            ("From file", None),
+                            ("X", Some(cindral_io::UpAxis::X)),
+                            ("Y", Some(cindral_io::UpAxis::Y)),
+                            ("Z", Some(cindral_io::UpAxis::Z)),
+                        ] {
+                            ui.selectable_value(&mut self.files.import_axis, axis, label);
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    start = ui.button("Continue").clicked();
+                    cancel = ui.button("Cancel").clicked();
                 });
-                egui::ComboBox::from_label("Up axis").selected_text(format!("{:?}", self.files.import_axis)).show_ui(ui, |ui| {
-                    for (label, axis) in [("From file", None), ("X", Some(cindral_io::UpAxis::X)), ("Y", Some(cindral_io::UpAxis::Y)), ("Z", Some(cindral_io::UpAxis::Z))] { ui.selectable_value(&mut self.files.import_axis, axis, label); }
-                });
-                ui.horizontal(|ui| { start = ui.button("Continue").clicked(); cancel = ui.button("Cancel").clicked(); });
             });
-            if cancel { self.files.import_dialog = None; }
+            if cancel {
+                self.files.import_dialog = None;
+            }
             if start {
                 self.files.import_dialog = None;
                 if self.files.import_new_document {
-                    if let Err(e) = self.open_path(&path) { self.error = Some(e.to_string()); }
-                } else { self.start_import(path, self.files.import_options.clone()); }
+                    if let Err(e) = self.open_path(&path) {
+                        self.error = Some(e.to_string());
+                    }
+                } else {
+                    self.start_import(path, self.files.import_options.clone());
+                }
             }
         }
     }
@@ -1254,7 +1469,11 @@ impl DrafterApp {
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
                     ui.set_min_width(280.0);
-                    ui.label(format!("Importing {file_name}…"));
+                    if self.files.ready_import.is_some() {
+                        ui.label("Import ready, applying...");
+                    } else {
+                        ui.label(format!("Importing {file_name}…"));
+                    }
                     ui.add_space(4.0);
                     ui.add(egui::ProgressBar::new(progress).show_percentage());
                     ui.add_space(8.0);
@@ -1265,7 +1484,12 @@ impl DrafterApp {
             if cancel {
                 self.cancel_import();
             }
-        } else if let Some(summary) = self.files.import_summary.as_ref().filter(|_| self.files.import_report_open) {
+        } else if let Some(summary) = self
+            .files
+            .import_summary
+            .as_ref()
+            .filter(|_| self.files.import_report_open)
+        {
             let mut open = true;
             let mut dismiss = false;
             egui::Window::new("Import Summary")
@@ -1996,12 +2220,296 @@ mod tests {
         .unwrap()
     }
 
+    fn queue_import(
+        editor: &mut DrafterApp,
+        path: &str,
+        result: cindral_io::Result<PreparedImport>,
+    ) {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(result).unwrap();
+        editor.files.import_job = Some(ImportJob {
+            save_epoch: editor.files.import_save_epoch,
+            replace_document: false,
+            generation: editor.files.generation,
+            revision: editor.history.revision(),
+            path: path.into(),
+            control: ImportControl::default(),
+            cancelled: false,
+            receiver,
+        });
+    }
+    fn resource_import() -> PreparedImport {
+        use cindral_io::{ImportedDefinition, ImportedInstance, ImportedScene};
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0, 255])
+                .unwrap();
+        }
+        let (key, asset) = cindral_io::texture_from_bytes(encoded).unwrap();
+        let scene = ImportedScene {
+            definitions: vec![ImportedDefinition {
+                name: "Part".into(),
+                geometry: cindral_core::BulkGeometry {
+                    vertices: vec![DVec3::ZERO, DVec3::X, DVec3::Y],
+                    faces: vec![cindral_core::BulkFace {
+                        outer: vec![0, 1, 2],
+                        material: Some(cindral_core::MaterialId(1)),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+            roots: vec![ImportedInstance {
+                tag: Some(0),
+                ..Default::default()
+            }],
+            tags: vec![cindral_core::Tag {
+                name: "Layer".into(),
+                visible: true,
+            }],
+            materials: vec![cindral_core::Material {
+                name: "Paint".into(),
+                color: [1., 0., 0.],
+                opacity: 1.,
+                texture: Some(key.clone()),
+            }],
+            textures: BTreeMap::from([(key, asset)]),
+            ..Default::default()
+        };
+        prepare_import(
+            cindral_io::convert_scene(scene, &ImportOptions::default(), &ImportControl::default())
+                .unwrap(),
+            &ImportControl::default(),
+        )
+        .unwrap()
+    }
+    #[test]
+    fn import_waits_for_tool_then_keeps_intervening_edits_identity_and_one_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let path = directory.path().join("working.cdraft");
+        editor.save_path(&path).unwrap();
+        queue_import(&mut editor, "source.obj", Ok(resource_import()));
+        editor
+            .execute(Command::AddEdge {
+                start: DVec3::splat(10.),
+                end: DVec3::splat(10.) + DVec3::X,
+            })
+            .unwrap();
+        editor.tool.click(DVec3::ZERO).unwrap();
+        let before = editor.file_values();
+        let depth = editor.history.undo_depth();
+        editor.import_tick(&egui::Context::default());
+        assert!(editor.files.import_job.is_some());
+        assert_eq!(editor.files.status, "Import ready, applying...");
+        assert_eq!(editor.file_values(), before);
+        editor.tool.cancel();
+        editor.import_tick(&egui::Context::default());
+        assert_eq!(editor.files.path.as_ref(), Some(&path));
+        assert_eq!(editor.history.undo_depth(), depth + 1);
+        assert!(editor.organization.selected.is_some());
+        assert_eq!(
+            editor
+                .history
+                .instance(editor.organization.selected.as_ref().unwrap())
+                .unwrap()
+                .transform,
+            glam::DMat4::IDENTITY
+        );
+        let after = editor.file_values();
+        assert!(after.document.definitions.len() > before.document.definitions.len());
+        assert_eq!(after.document.tags.len(), before.document.tags.len() + 1);
+        assert_eq!(
+            after.document.materials.len(),
+            before.document.materials.len() + 1
+        );
+        assert_eq!(after.textures.len(), before.textures.len() + 1);
+        editor.history_step(false);
+        let undone = editor.file_values();
+        assert_eq!(undone.document.definitions, before.document.definitions);
+        assert_eq!(undone.document.tags, before.document.tags);
+        assert_eq!(undone.document.materials, before.document.materials);
+        assert_eq!(undone.textures, before.textures);
+        editor.history_step(true);
+        assert_eq!(editor.file_values(), after);
+        assert!(editor.files.status.contains("into current model"));
+    }
+    #[test]
+    fn import_waits_for_geometry_preview_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let before = editor.file_values();
+        let depth = editor.history.undo_depth();
+        queue_import(&mut editor, "source.obj", Ok(resource_import()));
+        editor
+            .preview(Command::AddEdge {
+                start: DVec3::splat(10.),
+                end: DVec3::splat(10.) + DVec3::X,
+            })
+            .unwrap();
+        editor.import_tick(&egui::Context::default());
+        assert!(editor.files.ready_import.is_some());
+        assert_eq!(editor.history.undo_depth(), depth);
+        editor.cancel_preview().unwrap();
+        assert_eq!(editor.file_values(), before);
+        editor.import_tick(&egui::Context::default());
+        assert!(editor.files.import_job.is_none());
+        assert_eq!(editor.history.undo_depth(), depth + 1);
+    }
+    #[test]
+    fn app_import_merges_texture_content_materials_and_tags_without_changing_existing() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        editor
+            .append_import_result(resource_import(), Path::new("first.obj"))
+            .unwrap();
+        let before = editor.file_values();
+        let mut second = resource_import();
+        let asset = second.result.textures.pop_first().unwrap().1;
+        second
+            .result
+            .textures
+            .insert("different-source-slot".into(), asset);
+        let mut data = second.result.history.to_data();
+        for material in data.materials.values_mut() {
+            material.texture = Some("different-source-slot".into());
+        }
+        second.result.history = History::from_import_data(data).unwrap();
+        editor
+            .append_import_result(second, Path::new("second.obj"))
+            .unwrap();
+        assert_eq!(editor.history.materials(), &before.document.materials);
+        assert_eq!(editor.history.tags(), &before.document.tags);
+        assert_eq!(editor.files.textures, before.textures);
+        assert!(editor
+            .files
+            .import_summary
+            .as_ref()
+            .unwrap()
+            .notes
+            .iter()
+            .any(|n| n.contains("merged 1 tags / 1 materials")));
+        editor.history_step(false);
+        assert_eq!(
+            editor.file_values().document.definitions,
+            before.document.definitions
+        );
+        assert_eq!(editor.files.textures, before.textures);
+    }
+    #[test]
+    fn import_failure_cancellation_and_changed_target_leave_values_and_history_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        for mode in 0..6 {
+            queue_import(
+                &mut editor,
+                "source.obj",
+                if mode == 0 {
+                    Err(cindral_io::IoError::Invalid("bad source".into()))
+                } else {
+                    Ok(resource_import())
+                },
+            );
+            if mode == 1 {
+                editor.cancel_import();
+            }
+            if mode == 2 {
+                editor
+                    .save_path(&directory.path().join("different.cdraft"))
+                    .unwrap();
+            }
+            if mode == 3 {
+                editor.do_file_action(Action::New).unwrap();
+            }
+            if mode == 4 {
+                editor.apply_file(DraftBundle::default(), None).unwrap();
+            }
+            if mode == 5 {
+                editor.files.import_job.as_mut().unwrap().replace_document = true;
+                editor
+                    .execute(Command::AddEdge {
+                        start: DVec3::ZERO,
+                        end: DVec3::X,
+                    })
+                    .unwrap();
+            }
+            let before = editor.file_values();
+            let depth = editor.history.undo_depth();
+            let redo = editor.history.redo_depth();
+            editor.import_tick(&egui::Context::default());
+            assert_eq!(editor.file_values(), before);
+            assert_eq!(editor.history.undo_depth(), depth);
+            assert_eq!(editor.history.redo_depth(), redo);
+            assert!(editor.files.import_job.is_none());
+        }
+    }
+    #[test]
+    fn open_unsaved_requires_save_discard_or_cancel() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        let target = directory.path().join("target.cdraft");
+        cindral_io::save_draft(&target, &DraftBundle::default()).unwrap();
+        let before = editor.file_values();
+        editor.open_path(&target).unwrap();
+        assert!(editor.files.pending_open.is_some());
+        assert_eq!(editor.file_values(), before);
+        editor.resolve_open_choice(2);
+        assert!(editor.files.pending_open.is_none());
+        assert_eq!(editor.file_values(), before);
+        editor.open_path(&target).unwrap();
+        editor.resolve_open_choice(1);
+        assert_eq!(editor.files.path.as_ref(), Some(&target));
+        assert_eq!(editor.history.undo_depth(), 0);
+        let current = directory.path().join("current.cdraft");
+        editor.save_path(&current).unwrap();
+        editor
+            .execute(Command::AddEdge {
+                start: DVec3::ZERO,
+                end: DVec3::X,
+            })
+            .unwrap();
+        let expected = editor.file_values();
+        editor.open_path(&target).unwrap();
+        editor.resolve_open_choice(0);
+        assert_eq!(cindral_io::load_draft(&current).unwrap(), expected);
+        assert_eq!(editor.files.path.as_ref(), Some(&target));
+    }
+    #[test]
+    fn open_routes_every_foreign_extension_to_replacement_and_native_to_fresh_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut editor = app(directory.path());
+        for extension in ["skp", "dae", "glb", "gltf", "obj"] {
+            let path = directory.path().join(format!("source.{extension}"));
+            editor.open_path_confirmed(&path).unwrap();
+            assert!(editor.files.import_job.as_ref().unwrap().replace_document);
+            editor.cancel_import();
+        }
+        for extension in ["cdraft", "skp", "dae", "glb", "gltf", "obj"] {
+            let identity = editor.files.path.clone();
+            queue_import(
+                &mut editor,
+                &format!("source.{extension}"),
+                Ok(resource_import()),
+            );
+            editor.import_tick(&egui::Context::default());
+            assert_eq!(editor.files.path, identity);
+        }
+    }
+
     #[test]
     fn import_cancellation_discards_completed_result() {
         let directory = tempfile::tempdir().unwrap();
         let mut editor = app(directory.path());
         let (sender, receiver) = mpsc::channel();
         editor.files.import_job = Some(ImportJob {
+            save_epoch: editor.files.import_save_epoch,
             replace_document: false,
             generation: editor.files.generation,
             revision: editor.history.revision(),
@@ -2030,6 +2538,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         let path = PathBuf::from("model.dae");
         editor.files.import_job = Some(ImportJob {
+            save_epoch: editor.files.import_save_epoch,
             replace_document: false,
             generation: editor.files.generation,
             revision: editor.history.revision(),
@@ -2074,6 +2583,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         sender.send(Ok(test_import_result())).unwrap();
         editor.files.import_job = Some(ImportJob {
+            save_epoch: editor.files.import_save_epoch,
             replace_document: true,
             generation: editor.files.generation,
             revision: editor.history.revision(),
@@ -2145,6 +2655,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         let old_gen = editor.files.generation;
         let job = ImportJob {
+            save_epoch: editor.files.import_save_epoch,
             replace_document: false,
             generation: old_gen,
             revision: editor.history.revision(),
@@ -2161,6 +2672,7 @@ mod tests {
 
         let (_s2, r2) = mpsc::channel();
         let stale_job = ImportJob {
+            save_epoch: editor.files.import_save_epoch,
             replace_document: false,
             generation: old_gen,
             revision: editor.history.revision(),

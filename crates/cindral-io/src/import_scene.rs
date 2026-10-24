@@ -534,8 +534,11 @@ pub fn import_file(
 }
 /// Import with optional source units and up-axis overrides.
 pub fn import_file_with_basis(
-    path: &Path, options: &ImportOptions, control: &ImportControl,
-    meters_per_unit: Option<f64>, up_axis: Option<UpAxis>,
+    path: &Path,
+    options: &ImportOptions,
+    control: &ImportControl,
+    meters_per_unit: Option<f64>,
+    up_axis: Option<UpAxis>,
 ) -> Result<ImportResult> {
     control.check()?;
     let mut scene = match path
@@ -552,8 +555,12 @@ pub fn import_file_with_basis(
         "skp" => crate::import_skp(path, control)?,
         _ => return Err(IoError::Invalid("unsupported import format".into())),
     };
-    if let Some(unit) = meters_per_unit { scene.meters_per_unit = unit; }
-    if let Some(axis) = up_axis { scene.up_axis = axis; }
+    if let Some(unit) = meters_per_unit {
+        scene.meters_per_unit = unit;
+    }
+    if let Some(axis) = up_axis {
+        scene.up_axis = axis;
+    }
     if path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("skp"))

@@ -231,31 +231,15 @@ Use **File > Export > Image (PNG)…** to save the current view at a chosen size
 
 ## Open vs Import
 
-The app has one document. **File > Open** works on the chosen file as its own
-document: unsaved changes require Save, Discard or Cancel before replacement.
-Native `.cdraft` files open with fresh history. Opening `.skp`, `.dae`, `.glb`,
-`.gltf` or `.obj` converts to a new unsaved document; Save As writes `.cdraft`
-and never writes back to the source.
+The app has one document. File > Open asks Save, Discard or Cancel for unsaved
+changes, then replaces it. Native drafts open with fresh history. Opening SKP,
+DAE, GLB/glTF or OBJ creates a new unsaved document; Save As writes .cdraft and
+never writes back to the source.
 
-**File > Import** first offers Add into current model or Open as new document,
-plus source units/up-axis, cleanup and component/loose options. Choices are retained
-for the app session. The initial default adds one component at the model origin,
-selects it and frames it if outside the view. Add keeps the current document name
-and file target. Open as new document follows the same unsaved-changes prompt as Open.
-Both routes accept all six extensions above.
-
-Parsing/conversion runs in a worker; editing may continue. A finished import waits
-until tools finish or are cancelled, showing “Import ready, applying...”. Append
-uses the latest model and installs one atomic undo entry. A closed/replaced document
-or a changed Save As target discards pending work with a message. Edits during an
-Open conversion discard its replacement result rather than lose those edits.
-Failure/cancellation leaves model and history unchanged. UI append validation and
-combined CPU render-cache construction remain foreground work.
-
-Tags merge by name without changing existing visibility. Materials merge when name,
-color, opacity and texture content match; otherwise incoming names receive numbered
-suffixes. Definitions receive unique numbered names. Existing records remain unchanged.
-Undo removes added geometry, definitions, tags, materials and texture assets; redo
-restores them. Unused source texture assets are omitted. Completion identifies the
-current model or new document and provides an Import report link with merge/rename
-counts, warnings and omissions.
+File > Import shows destination and import options first. Add into current model
+is the initial default: one component at model origin, selected after import,
+with the current file name retained and one undo entry including resources.
+Open as new document follows Open's prompt. Imports wait for tools to finish,
+retain intervening edits, and discard results after a document/Save As target
+change. The Import report shows collisions, warnings and omissions. Options are
+remembered for the app session. See [the full contract](docs/IMPORT_PIPELINE.md#open-vs-import).

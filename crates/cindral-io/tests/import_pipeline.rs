@@ -101,3 +101,64 @@ fn obj_pipeline_uses_cleanup_without_restoring_diagonal_edges() {
     assert_eq!(imported.report.faces, 1);
     assert_eq!(imported.report.edges, 4);
 }
+
+#[test]
+fn file_dispatch_native_and_interchange_and_source_basis_override() {
+    let directory = tempfile::tempdir().unwrap();
+    let native = directory.path().join("source.cdraft");
+    let converted = convert_scene(
+        scene(),
+        &ImportOptions::default(),
+        &ImportControl::default(),
+    )
+    .unwrap();
+    save_draft(
+        &native,
+        &DraftBundle {
+            document: converted.history.to_data(),
+            textures: converted.textures,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let original = std::fs::read(&native).unwrap();
+    let imported = import_file(
+        &native,
+        &ImportOptions::default(),
+        &ImportControl::default(),
+    )
+    .unwrap();
+    assert!(imported.report.faces > 0);
+    assert_eq!(std::fs::read(&native).unwrap(), original);
+    for name in ["i1-seed.gltf", "i1-seed.glb", "i1-sample.dae"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
+        assert!(
+            import_file(&path, &ImportOptions::default(), &ImportControl::default())
+                .unwrap()
+                .report
+                .faces
+                > 0
+        );
+    }
+    let obj = directory.path().join("source.obj");
+    std::fs::write(&obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+    let result = import_file_with_basis(
+        &obj,
+        &ImportOptions::default(),
+        &ImportControl::default(),
+        Some(0.01),
+        Some(UpAxis::Z),
+    )
+    .unwrap();
+    let bounds = result
+        .history
+        .occurrences()
+        .unwrap()
+        .iter()
+        .filter_map(|o| result.history.definition_model(o.definition)?.bounds())
+        .find(|(_, max)| max.x > 0.)
+        .unwrap();
+    assert!((bounds.1.x - 0.01).abs() < 1e-9);
+}

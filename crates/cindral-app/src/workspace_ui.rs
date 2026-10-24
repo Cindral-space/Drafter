@@ -306,7 +306,11 @@ impl DrafterApp {
                         });
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if self.files.import_summary.is_some() && ui.link("Import report").clicked() { self.files.import_report_open = true; }
+                            if self.files.import_summary.is_some()
+                                && ui.link("Import report").clicked()
+                            {
+                                self.files.import_report_open = true;
+                            }
                             let state = self.document_save_label();
                             ui.label(RichText::new(state).size(11.).color(
                                 if state == "Modified" {
@@ -840,7 +844,7 @@ impl DrafterApp {
                     });
                 });
             });
-            if self.error.is_some() || self.axis_lock.is_some() {
+            if self.error.is_some() || self.axis_lock.is_some() || self.files.import_summary.is_some() {
             ui.horizontal(|ui| {
                 if let Some(error) = self.error.clone() {
                     if ui.small_button("Dismiss").clicked() { self.error = None; }
