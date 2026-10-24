@@ -358,3 +358,105 @@ fn splitting_and_healing_painted_faces_preserves_material_and_history() {
     doc.undo().unwrap();
     assert_eq!(doc.model(), &painted);
 }
+
+#[test]
+fn live_material_preview_records_one_undo_entry() {
+    let mut doc = DocumentHistory::new();
+    square(&mut doc, 2.);
+    doc.organization(OrganizationCommand::CreateMaterial(Material {
+        name: "Paint".into(),
+        color: [255, 0, 0],
+        opacity: 1.,
+        texture: None,
+    }))
+    .unwrap();
+    let id = *doc.materials().keys().next().unwrap();
+    let original = doc.materials()[&id].clone();
+    let depth = doc.undo_depth();
+    for opacity in [0.9, 0.7, 0.5] {
+        doc.material_preview(
+            id,
+            Material {
+                opacity,
+                ..original.clone()
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(doc.undo_depth(), depth);
+    assert_eq!(doc.materials()[&id].opacity, 0.5);
+    let edited = doc.materials()[&id].clone();
+    doc.finish_material_edit(id, original.clone(), edited.clone())
+        .unwrap();
+    assert_eq!(doc.undo_depth(), depth + 1);
+    assert_eq!(doc.materials()[&id], edited);
+    doc.undo().unwrap();
+    assert_eq!(doc.materials()[&id], original);
+    doc.redo().unwrap();
+    assert_eq!(doc.materials()[&id], edited);
+}
+
+#[test]
+fn replace_material_repaints_faces_and_instances_atomically() {
+    let mut doc = DocumentHistory::new();
+    square(&mut doc, 2.);
+    let mut make = |name: &str| {
+        doc.organization(OrganizationCommand::CreateMaterial(Material {
+            name: name.into(),
+            color: [10, 20, 30],
+            opacity: 1.,
+            texture: None,
+        }))
+        .unwrap();
+        *doc.materials().keys().next_back().unwrap()
+    };
+    let red = make("Red");
+    let blue = make("Blue");
+    doc.organization(OrganizationCommand::Create {
+        kind: DefinitionKind::Component,
+        name: "Part".into(),
+        vertices: doc.model().vertices().keys().copied().collect(),
+    })
+    .unwrap();
+    let instance = *doc.instances(DefinitionId(0)).unwrap().keys().next().unwrap();
+    doc.organization(OrganizationCommand::PaintInstance {
+        path: vec![instance],
+        material: Some(red),
+    })
+    .unwrap();
+    doc.organization(OrganizationCommand::PaintFaces {
+        faces: doc.model().faces().keys().copied().collect(),
+        material: Some(red),
+    })
+    .unwrap();
+    let depth = doc.undo_depth();
+    doc.organization(OrganizationCommand::ReplaceMaterial {
+        from: red,
+        to: Some(blue),
+    })
+    .unwrap();
+    assert_eq!(doc.undo_depth(), depth + 1);
+    assert!(doc.model().faces().values().all(|f| f.material == Some(blue)));
+    assert_eq!(
+        doc.instances(DefinitionId(0)).unwrap()[&instance].material,
+        Some(blue)
+    );
+    doc.undo().unwrap();
+    assert!(doc.model().faces().values().all(|f| f.material == Some(red)));
+    assert_eq!(
+        doc.instances(DefinitionId(0)).unwrap()[&instance].material,
+        Some(red)
+    );
+    doc.redo().unwrap();
+    doc.organization(OrganizationCommand::ReplaceMaterial {
+        from: blue,
+        to: None,
+    })
+    .unwrap();
+    assert!(doc.model().faces().values().all(|f| f.material.is_none()));
+    assert_eq!(
+        doc.instances(DefinitionId(0)).unwrap()[&instance].material,
+        None
+    );
+    assert!(doc.materials().contains_key(&blue));
+}

@@ -159,6 +159,13 @@ pub enum OrganizationCommand {
     },
     /// Remove a material and clear all references.
     DeleteMaterial(MaterialId),
+    /// Repoint every reference from one material to another in one undo step.
+    ReplaceMaterial {
+        /// Material whose faces and containers are repainted.
+        from: MaterialId,
+        /// Replacement material; `None` reverts references to the default.
+        to: Option<MaterialId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2008,6 +2015,41 @@ impl DocumentHistory {
                     }
                 }
             }
+            OrganizationCommand::ReplaceMaterial { from, to } => {
+                if !after.materials.contains_key(&from) {
+                    return Err(KernelError::MissingEntity);
+                }
+                if let Some(target) = to {
+                    if !after.materials.contains_key(&target) {
+                        return Err(KernelError::MissingEntity);
+                    }
+                }
+                for d in after.definitions.values_mut() {
+                    for node in d.instances.values_mut() {
+                        if node.material == Some(from) {
+                            node.material = to;
+                        }
+                    }
+                }
+                for def in after.definitions.keys() {
+                    let faces = self
+                        .history(*def)
+                        .model()
+                        .faces()
+                        .iter()
+                        .filter_map(|(face, f)| (f.material == Some(from)).then_some(*face))
+                        .collect::<Vec<_>>();
+                    if !faces.is_empty() {
+                        commands.push((
+                            *def,
+                            Command::SetFaceMaterial {
+                                faces,
+                                material: to,
+                            },
+                        ));
+                    }
+                }
+            }
             OrganizationCommand::PaintFaces { .. } => {
                 return Err(invalid("unreachable face material dispatch"))
             }
@@ -2075,6 +2117,40 @@ impl DocumentHistory {
         // handled by the transform/material instance batch.
         self.changed(dirty, true, appearance);
         Ok(true)
+    }
+    /// Apply a transient material edit without recording history.
+    ///
+    /// Slider drags and keystrokes preview live through the material table;
+    /// [`Self::finish_material_edit`] records exactly one undo entry on
+    /// release.
+    pub fn material_preview(&mut self, id: MaterialId, material: Material) -> Result<(), KernelError> {
+        self.cancel_preview()?;
+        validate_material(&material)?;
+        if !self.graph.materials.contains_key(&id) {
+            return Err(KernelError::MissingEntity);
+        }
+        self.graph.materials.insert(id, material);
+        self.changed(BTreeMap::new(), false, true);
+        Ok(())
+    }
+    /// Record one undo entry covering a finished live material edit.
+    ///
+    /// `original` is the pre-drag value; the current previewed value must be
+    /// `edited`. The silent restore keeps the change invisible, so the
+    /// committed command produces one history entry with the correct inverse.
+    pub fn finish_material_edit(
+        &mut self,
+        id: MaterialId,
+        original: Material,
+        edited: Material,
+    ) -> Result<bool, KernelError> {
+        validate_material(&original)?;
+        validate_material(&edited)?;
+        if !self.graph.materials.contains_key(&id) {
+            return Err(KernelError::MissingEntity);
+        }
+        self.graph.materials.insert(id, original);
+        self.organization(OrganizationCommand::UpdateMaterial { id, material: edited })
     }
 }
 

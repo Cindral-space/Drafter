@@ -57,6 +57,10 @@ pub struct Options {
     pub context: Vec<cindral_core::InstanceId>,
     /// Last chosen directory (never embedded in the image).
     pub folder: PathBuf,
+    /// Recently used material colors (display sRGB bytes), newest first.
+    pub recent_colors: Vec<[u8; 3]>,
+    /// Material-library folders scanned for user image collections.
+    pub library_folders: Vec<String>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -69,10 +73,18 @@ impl Default for Options {
             match_window: true,
             context: Vec::new(),
             folder: PathBuf::new(),
+            recent_colors: Vec::new(),
+            library_folders: Vec::new(),
         }
     }
 }
 impl Options {
+    /// Records a used color: deduplicates, newest first, capped at 12.
+    pub fn push_recent_color(&mut self, color: [u8; 3]) {
+        self.recent_colors.retain(|c| *c != color);
+        self.recent_colors.insert(0, color);
+        self.recent_colors.truncate(12);
+    }
     /// Conservative peak estimate: GPU color/depth, padded readback and CPU copy,
     /// final pixels/encoder, upload geometry headroom, plus 128 MiB textures/shadows/headroom.
     pub fn estimate(&self, geometry_bytes: u64) -> Result<([u32; 2], u64), String> {
