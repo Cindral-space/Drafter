@@ -142,6 +142,7 @@ fn test_obj_export_with_mtl_and_textures() {
             color: [179, 128, 77],
             opacity: 0.85,
             texture: Some(tex_key.clone()),
+            texture_mapping: None,
         },
     );
 
@@ -222,6 +223,7 @@ fn test_gltf_schema_accessors_and_root_conversion() {
             color: [51, 102, 230],
             opacity: 0.5,
             texture: Some(tex_key.clone()),
+            texture_mapping: None,
         },
     );
 
@@ -664,6 +666,7 @@ fn explicit_face_color_overrides_container_material_in_every_color_format() {
         color: [0, 0, 255],
         opacity: 0.5,
         texture: None,
+        texture_mapping: None,
     }))
     .unwrap();
     h.organization(OrganizationCommand::PaintInstance {

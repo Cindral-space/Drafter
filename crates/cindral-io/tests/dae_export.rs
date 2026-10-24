@@ -55,6 +55,7 @@ fn fixture() -> DraftBundle {
             color: [51, 102, 153],
             opacity: 0.4,
             texture: None,
+            texture_mapping: None,
         },
     );
     b.document.definitions.insert(

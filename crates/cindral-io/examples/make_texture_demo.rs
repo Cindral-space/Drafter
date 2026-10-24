@@ -36,6 +36,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         color: [255, 255, 255],
         opacity: 1.,
         texture: Some(key.clone()),
+        texture_mapping: None,
     }))?;
     let faces = h.model().faces().keys().copied().collect::<Vec<_>>();
     for face in faces {

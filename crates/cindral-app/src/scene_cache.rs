@@ -81,6 +81,22 @@ impl SceneCache {
         let mut indices = BTreeMap::new();
         for (id, material) in doc.materials() {
             let linear = cindral_core::srgb_to_linear_rgb(material.color);
+            // Missing mapping keeps the original planar look: one repeat per
+            // meter, no rotation, no flip (uv_scale 1,1 with rotation 0).
+            let (uv_scale, rotation, flip) = match material.texture_mapping {
+                Some(mapping) => (
+                    [
+                        1. / mapping.width_m.max(1e-6) as f32,
+                        1. / mapping.height_m.max(1e-6) as f32,
+                    ],
+                    mapping.rotation_deg * std::f32::consts::TAU / 360.,
+                    [
+                        if mapping.flip_h { -1. } else { 1. },
+                        if mapping.flip_v { -1. } else { 1. },
+                    ],
+                ),
+                None => ([1., 1.], 0., [1., 1.]),
+            };
             let index = table.push(MaterialParams {
                 color: [linear[0], linear[1], linear[2], material.opacity],
                 texture_layer: material
@@ -89,9 +105,9 @@ impl SceneCache {
                     .and_then(|key| self.texture_layers.get(key))
                     .copied()
                     .unwrap_or_default(),
-                uv_scale: [1., 1.],
-                rotation: 0.,
-                flip: [1., 1.],
+                uv_scale,
+                rotation,
+                flip,
             });
             indices.insert(*id, index);
         }
@@ -301,6 +317,9 @@ pub(crate) fn merge(pending: &mut Option<Arc<SceneUpdate>>, mut next: SceneUpdat
         if next.textures.is_some() {
             previous.textures = next.textures;
         }
+        if next.materials.is_some() {
+            previous.materials = next.materials;
+        }
         if next.batches.is_some() {
             previous.batches = next.batches;
         }
@@ -460,6 +479,7 @@ mod tests {
             color: [255, 255, 255],
             opacity: 1.,
             texture: Some("asset".into()),
+            texture_mapping: None,
         }))
         .unwrap();
         doc.organization(OrganizationCommand::PaintFaces {
@@ -511,6 +531,7 @@ mod tests {
             color: [255, 0, 0],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         }))
         .unwrap();
         doc.organization(OrganizationCommand::PaintFaces {
@@ -532,6 +553,7 @@ mod tests {
                 color: [0, 255, 0],
                 opacity: 0.5,
                 texture: None,
+                texture_mapping: None,
             },
         })
         .unwrap();
@@ -547,6 +569,7 @@ mod tests {
             color: [0, 0, 255],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         }))
         .unwrap();
         let repaint = cache.sync(&doc).unwrap();

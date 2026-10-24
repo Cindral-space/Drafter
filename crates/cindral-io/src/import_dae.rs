@@ -599,6 +599,7 @@ fn parse_library_materials(
                 color: crate::srgb_bytes(effect_desc.color),
                 opacity: effect_desc.opacity,
                 texture: texture_slot,
+                texture_mapping: None,
             });
             if !mat_id.is_empty() {
                 id_map.insert(mat_id.to_string(), idx);

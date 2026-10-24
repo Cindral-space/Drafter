@@ -44,6 +44,7 @@ fn textured_component_export_import_preserves_placed_surface_area_and_assets() {
         color: [77, 128, 179],
         opacity: 0.75,
         texture: Some(key.clone()),
+        texture_mapping: None,
     }))
     .unwrap();
     h.organization(OrganizationCommand::PaintInstance {

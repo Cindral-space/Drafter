@@ -99,8 +99,10 @@ fn migrate(mut manifest: Manifest) -> Result<Manifest> {
     }
     // Document schema 2 moved material colors to sRGB bytes; schema-1 linear
     // float colors already upgraded themselves during deserialization, so the
-    // stored rendered look is unchanged. Anything else is not a known schema.
-    if manifest.document.schema_version == 1 {
+    // stored rendered look is unchanged. Schema 3 adds optional per-material
+    // texture mapping; a missing mapping preserves the pre-schema-3 look, so
+    // schema-1/2 documents only re-stamp their version field.
+    if manifest.document.schema_version <= 2 {
         manifest.document.schema_version = cindral_core::SCHEMA_VERSION;
     }
     if manifest.coordinates != Coordinates::default() {
@@ -425,6 +427,97 @@ mod tests {
         let output = dir.path().join("resaved.cdraft");
         save_draft(&output, &bundle).unwrap();
         assert_eq!(load_draft(&output).unwrap(), bundle);
+    }
+    #[test]
+    fn schema2_textured_material_keeps_its_on_screen_look_through_schema3() {
+        // A schema-2 document with a textured material and no mapping field:
+        // after migration the mapping must stay None so the pre-schema-3
+        // one-repeat-per-meter planar look is unchanged.
+        #[derive(serde::Serialize)]
+        struct Schema2Material {
+            name: String,
+            color: [u8; 3],
+            opacity: f32,
+            texture: Option<String>,
+        }
+        #[derive(serde::Serialize)]
+        struct Schema2Document {
+            schema_version: u32,
+            next_id: u64,
+            root: cindral_core::DefinitionId,
+            definitions: std::collections::BTreeMap<
+                cindral_core::DefinitionId,
+                cindral_core::DefinitionData,
+            >,
+            tags: std::collections::BTreeMap<cindral_core::TagId, cindral_core::Tag>,
+            materials: std::collections::BTreeMap<cindral_core::MaterialId, Schema2Material>,
+        }
+        #[derive(serde::Serialize)]
+        struct Schema2Manifest<'a> {
+            archive_version: u32,
+            coordinates: Coordinates,
+            document: &'a Schema2Document,
+            presentation: &'a cindral_core::Presentation,
+            textures: Vec<AssetRecord>,
+        }
+        let base = DraftBundle::default();
+        let legacy = Schema2Manifest {
+            archive_version: ARCHIVE_VERSION,
+            coordinates: Coordinates::default(),
+            presentation: &base.presentation,
+            textures: Vec::new(),
+            document: &Schema2Document {
+                schema_version: 2,
+                next_id: 8,
+                root: cindral_core::DefinitionId(0),
+                definitions: base.document.definitions.clone(),
+                tags: base.document.tags.clone(),
+                materials: std::collections::BTreeMap::from([(
+                    cindral_core::MaterialId(7),
+                    Schema2Material {
+                        name: "Wood floor".into(),
+                        color: [179, 128, 77],
+                        opacity: 1.,
+                        texture: Some("slot".into()),
+                    },
+                )]),
+            },
+        };
+        let text = ron::ser::to_string(&legacy).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("schema2.cdraft");
+        {
+            let mut zip = ZipWriter::new(File::create(&path).unwrap());
+            zip.start_file("manifest.ron", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        let bundle = load_draft(&path).unwrap();
+        assert_eq!(bundle.document.schema_version, cindral_core::SCHEMA_VERSION);
+        let material = &bundle.document.materials[&cindral_core::MaterialId(7)];
+        assert_eq!(material.texture_mapping, None);
+        // Saving keeps no mapping and reloads identically.
+        let output = dir.path().join("resaved.cdraft");
+        save_draft(&output, &bundle).unwrap();
+        assert_eq!(load_draft(&output).unwrap(), bundle);
+        // A mapping that is present survives the round trip unchanged.
+        let mut mapped = bundle;
+        mapped
+            .document
+            .materials
+            .get_mut(&cindral_core::MaterialId(7))
+            .unwrap()
+            .texture_mapping = Some(cindral_core::TextureMapping {
+            width_m: 0.6,
+            height_m: 0.4,
+            rotation_deg: 22.5,
+            flip_h: true,
+            flip_v: false,
+        });
+        let output = dir.path().join("mapped.cdraft");
+        save_draft(&output, &mapped).unwrap();
+        assert_eq!(load_draft(&output).unwrap(), mapped);
     }
     #[test]
     fn autosave_recovery_and_invalid_archives() {

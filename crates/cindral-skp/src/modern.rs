@@ -755,6 +755,7 @@ fn load_materials(
             color: rgb,
             opacity,
             texture,
+            texture_mapping: None,
         });
     }
     by_name

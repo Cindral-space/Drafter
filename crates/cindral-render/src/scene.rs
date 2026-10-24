@@ -324,21 +324,40 @@ fn camera_binding(
     })
 }
 
+/// Working memory target for the texture array (inside the 256 MiB budget).
+const TEXTURE_ARRAY_TARGET_BYTES: u64 = 192 * 1024 * 1024;
+/// Layer edge classes, largest first; the first class fitting the target wins.
+const TEXTURE_ARRAY_EDGES: [u32; 3] = [1024, 512, 256];
+
+/// Layer edge length for `n` assets under the texture budget (TEXTURE_DESIGN.md).
+pub fn texture_array_edge(asset_count: usize) -> u32 {
+    let layers = (asset_count + 1) as u64; // + white fallback
+    TEXTURE_ARRAY_EDGES
+        .iter()
+        .copied()
+        .find(|&edge| {
+            TexturePixels::array_memory_bytes(layers as u32, edge) <= TEXTURE_ARRAY_TARGET_BYTES
+        })
+        .unwrap_or(256)
+}
+
 fn create_materials_texture_array(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layers: &[TexturePixels],
 ) -> (wgpu::Texture, wgpu::TextureView) {
+    let edge = texture_array_edge(layers.len());
     // OpenGL needs an actual array allocation even for the white-only table.
     let layer_count = (layers.len() as u32).max(2);
+    let mip_levels = edge.trailing_zeros() + 1;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Cindral scene materials texture array"),
         size: wgpu::Extent3d {
-            width: PREVIEW_SIZE,
-            height: PREVIEW_SIZE,
+            width: edge,
+            height: edge,
             depth_or_array_layers: layer_count,
         },
-        mip_level_count: 1,
+        mip_level_count: mip_levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -347,29 +366,39 @@ fn create_materials_texture_array(
     });
 
     for (layer_idx, layer) in layers.iter().enumerate() {
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: layer_idx as u32,
+        // Layer pixels may be any size (previews are 256); normalize to the
+        // array edge so UV space maps onto the full layer.
+        let base = if layer.width == edge && layer.height == edge {
+            layer.clone()
+        } else {
+            layer.resample(edge, edge)
+        };
+        let chain = base.mip_chain();
+        for (mip_level, level) in chain.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip_level as u32,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer_idx as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
                 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &layer.rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(PREVIEW_SIZE * 4),
-                rows_per_image: Some(PREVIEW_SIZE),
-            },
-            wgpu::Extent3d {
-                width: PREVIEW_SIZE,
-                height: PREVIEW_SIZE,
-                depth_or_array_layers: 1,
-            },
-        );
+                &level.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(level.width * 4),
+                    rows_per_image: Some(level.height),
+                },
+                wgpu::Extent3d {
+                    width: level.width,
+                    height: level.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
     }
 
     let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -489,24 +518,31 @@ impl SceneRenderer {
             ],
         });
 
+        // All backends and devices support anisotropic filtering (wgpu 27);
+        // clamp to 16 so grazing-angle sampling stays bounded.
         let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Cindral scene texture sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
+            anisotropy_clamp: 16,
             ..Default::default()
         });
 
+        // Placeholder array sized to the default class; the first real
+        // texture update replaces it with the asset-count-sized allocation.
+        let placeholder_edge = texture_array_edge(0);
         let materials_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Cindral scene materials texture array"),
             size: wgpu::Extent3d {
-                width: PREVIEW_SIZE,
-                height: PREVIEW_SIZE,
+                width: placeholder_edge,
+                height: placeholder_edge,
                 depth_or_array_layers: 2,
             },
-            mip_level_count: 1,
+            mip_level_count: placeholder_edge.trailing_zeros() + 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -968,26 +1004,31 @@ impl SceneRenderer {
     ) {
         let _phase = cindral_core::profile::Scope::new(5);
         if !self.default_texture_initialized {
-            let white_preview = TexturePixels::default_white_preview();
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.materials_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &white_preview.rgba,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(PREVIEW_SIZE * 4),
-                    rows_per_image: Some(PREVIEW_SIZE),
-                },
-                wgpu::Extent3d {
-                    width: PREVIEW_SIZE,
-                    height: PREVIEW_SIZE,
-                    depth_or_array_layers: 1,
-                },
-            );
+            let edge = texture_array_edge(0);
+            let white = TexturePixels::white(edge, edge);
+            let mip_levels = edge.trailing_zeros() + 1;
+            for mip_level in 0..mip_levels {
+                let w = edge >> mip_level;
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &self.materials_texture,
+                        mip_level,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &white.rgba,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(w * 4),
+                        rows_per_image: Some(w),
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: w,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
             self.default_texture_initialized = true;
         }
 

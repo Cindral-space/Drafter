@@ -159,7 +159,7 @@ fn compute_face_shading(in: FaceOutput) -> vec4<f32> {
     let num_layers = textureNumLayers(t_materials);
     let raw_layer = u32(in.tex_layer + 0.5);
     let layer_idx = min(raw_layer, num_layers - 1u);
-    let tex_sample = textureSampleLevel(t_materials, s_materials, in.uv, layer_idx, 0.0);
+    let tex_sample = textureSample(t_materials, s_materials, in.uv, layer_idx);
 
     // Multiplies RGB/alpha into the resolved material color
     if camera.style.x == 1.0 {

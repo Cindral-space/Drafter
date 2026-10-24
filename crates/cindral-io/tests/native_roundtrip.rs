@@ -78,6 +78,7 @@ fn populated() -> DraftBundle {
         color: [51, 128, 204],
         opacity: 0.7,
         texture: Some(key.clone()),
+        texture_mapping: None,
     }))
     .unwrap();
     let material = *doc.materials().keys().next().unwrap();

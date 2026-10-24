@@ -3,7 +3,7 @@ use crate::{Edge, EdgeId, Face, FaceId, KernelError, Model, Vertex, VertexId};
 use glam::DMat4;
 use std::collections::BTreeMap;
 /// Current native document schema, before M6 container encoding/migrations.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 macro_rules! id {
     ($name:ident,$doc:literal) => {
         #[doc=$doc]
@@ -124,6 +124,58 @@ pub struct Tag {
     /// Whether tagged instances are visible.
     pub visible: bool,
 }
+/// Real-world texture mapping. `None` (and schema-2 files) preserve the
+/// original planar look: one repeat per meter, no rotation, no flip.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TextureMapping {
+    /// Texture width in meters.
+    pub width_m: f64,
+    /// Texture height in meters.
+    pub height_m: f64,
+    /// Rotation in degrees about the mapping origin; negative allowed.
+    pub rotation_deg: f32,
+    /// Mirror the texture horizontally.
+    pub flip_h: bool,
+    /// Mirror the texture vertically.
+    pub flip_v: bool,
+}
+
+impl Default for TextureMapping {
+    fn default() -> Self {
+        Self {
+            width_m: 1.,
+            height_m: 1.,
+            rotation_deg: 0.,
+            flip_h: false,
+            flip_v: false,
+        }
+    }
+}
+
+impl TextureMapping {
+    /// Sensible default size for a newly imported image: physical size at
+    /// 96 DPI, falling back to one meter wide (aspect preserved) for tiny
+    /// images whose DPI size would be unusably small.
+    pub fn from_pixels(width: u32, height: u32) -> Self {
+        const DPI: f64 = 96.;
+        let width_m = f64::from(width) / DPI * 0.0254;
+        let height_m = f64::from(height) / DPI * 0.0254;
+        if width_m < 0.05 || height_m < 0.05 {
+            let aspect = f64::from(height).max(1.) / f64::from(width).max(1.);
+            return Self {
+                width_m: 1.,
+                height_m: aspect,
+                ..Self::default()
+            };
+        }
+        Self {
+            width_m,
+            height_m,
+            ..Self::default()
+        }
+    }
+}
+
 /// Material values; texture loading is intentionally deferred to M6.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Material {
@@ -138,6 +190,10 @@ pub struct Material {
     pub opacity: f32,
     /// Optional document-relative texture reference.
     pub texture: Option<String>,
+    /// Real-world texture mapping; schema 3. `None` keeps the pre-schema-3
+    /// one-repeat-per-meter planar look.
+    #[serde(default)]
+    pub texture_mapping: Option<TextureMapping>,
 }
 
 /// Deserializes material color as current sRGB bytes or schema-1 linear floats.

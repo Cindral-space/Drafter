@@ -2294,6 +2294,7 @@ mod tests {
                 color: [255, 0, 0],
                 opacity: 1.,
                 texture: Some(key.clone()),
+                texture_mapping: None,
             }],
             textures: BTreeMap::from([(key, asset)]),
             ..Default::default()

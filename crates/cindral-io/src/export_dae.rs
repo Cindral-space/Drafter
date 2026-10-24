@@ -635,6 +635,7 @@ fn export_inner(
             color: [160, 177, 193],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         },
     );
     for (id, m) in &doc.materials {
@@ -650,6 +651,7 @@ fn export_inner(
                         color: [face.color[0], face.color[1], face.color[2]],
                         opacity: face.color[3] as f32 / 255.,
                         texture: None,
+                        texture_mapping: None,
                     });
             }
         }

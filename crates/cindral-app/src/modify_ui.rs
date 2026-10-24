@@ -1943,6 +1943,7 @@ mod utility_parity_tests {
                         color: [200, 60, 40],
                         opacity: 1.,
                         texture: None,
+                        texture_mapping: None,
                     },
                 ));
                 app.organization.material = app.history.materials().keys().next_back().copied();
@@ -2106,6 +2107,7 @@ mod utility_parity_tests {
                 color: [10, 120, 220],
                 opacity: 1.,
                 texture: None,
+                texture_mapping: None,
             },
         ));
         let material = app.history.materials().keys().next_back().copied().unwrap();

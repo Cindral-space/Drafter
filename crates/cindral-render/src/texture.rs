@@ -120,6 +120,32 @@ impl TexturePixels {
     pub fn resample(&self, target_w: u32, target_h: u32) -> Self {
         resample_bilinear(self, target_w, target_h)
     }
+
+    /// Full power-of-two mip chain: `[self]`, then each level half the edge,
+    /// down to 1x1. Premultiplied-free RGBA8; count is `log2(max_edge) + 1`.
+    pub fn mip_chain(&self) -> Vec<Self> {
+        let mut chain = vec![self.clone()];
+        loop {
+            let level = chain.last().unwrap();
+            if level.width == 1 && level.height == 1 {
+                return chain;
+            }
+            let w = (level.width / 2).max(1);
+            let h = (level.height / 2).max(1);
+            chain.push(resample_bilinear(level, w, h));
+        }
+    }
+
+    /// GPU memory estimate in bytes for a `layers`-layer array of `edge`
+    /// square sRGB layers with a full mip chain (×4/3).
+    pub fn array_memory_bytes(layers: u32, edge: u32) -> u64 {
+        let mip_factor = 4.0f64 / 3.0;
+        (u64::from(layers)
+            .saturating_mul(u64::from(edge))
+            .saturating_mul(u64::from(edge))
+            .saturating_mul(4) as f64
+            * mip_factor) as u64
+    }
 }
 
 /// Resamples an RGBA8 image to `(target_w, target_h)` using bilinear area interpolation.

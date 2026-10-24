@@ -619,6 +619,7 @@ fn import_obj_internal(text: &str, base_dir: Option<&Path>) -> Result<DraftBundl
                         color: crate::srgb_bytes(mat_def.color),
                         opacity: mat_def.opacity,
                         texture: mat_def.texture,
+                        texture_mapping: None,
                     };
                     material_name_to_id.insert(mat_name.clone(), mat_id);
                     document_materials.insert(mat_id, material);

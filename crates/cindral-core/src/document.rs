@@ -387,6 +387,20 @@ fn validate_material(m: &Material) -> Result<(), KernelError> {
     {
         return Err(invalid("invalid material opacity or texture slot"));
     }
+    if let Some(mapping) = &m.texture_mapping {
+        let valid = m.texture.is_some()
+            && mapping.width_m.is_finite()
+            && mapping.height_m.is_finite()
+            && (0.001..=10_000.).contains(&mapping.width_m)
+            && (0.001..=10_000.).contains(&mapping.height_m)
+            && mapping.rotation_deg.is_finite()
+            && mapping.rotation_deg.abs() <= 360.;
+        if !valid {
+            return Err(invalid(
+                "texture mapping requires a texture, finite size in 0.001..10000 m and rotation within ±360°",
+            ));
+        }
+    }
     Ok(())
 }
 

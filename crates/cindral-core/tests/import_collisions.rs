@@ -17,6 +17,7 @@ fn source() -> DocumentData {
             color: [255, 0, 0],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         },
     );
     let mut definition = data.definitions[&DefinitionId(0)].clone();

@@ -1915,6 +1915,7 @@ fn build_scene(ar: &Ar, st: &Progress, version: &str, failure: Option<&Fail>) ->
             color: [m.rgba[0], m.rgba[1], m.rgba[2]],
             opacity,
             texture,
+            texture_mapping: None,
         });
     }
     for &s in &st.layers {

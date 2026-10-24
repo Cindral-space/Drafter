@@ -62,6 +62,8 @@ pub(crate) struct MaterialsUi {
     pub(crate) rows_built: usize,
     library_tiles: BTreeMap<String, egui::TextureHandle>,
     pub(crate) eyedropper: bool,
+    /// Lock-aspect toggle for the texture size editor (on by default).
+    pub(crate) lock_aspect: bool,
     pub(crate) library: crate::materials_library::LibraryCache,
     library_restored: bool,
 }
@@ -84,6 +86,7 @@ impl Default for MaterialsUi {
             rows_built: 0,
             library_tiles: BTreeMap::new(),
             eyedropper: false,
+            lock_aspect: true,
             library: crate::materials_library::LibraryCache::new(Vec::new()),
             library_restored: false,
         }
@@ -448,8 +451,192 @@ impl DrafterApp {
             }
         });
 
+        self.texture_mapping_editor(ui, id, &material);
         self.recent_colors_row(ui);
         let _ = material;
+    }
+
+    /// Real-world texture size, rotation and flip for the edited material.
+    ///
+    /// Sizes accept the shared measurements parser (`60cm`, `2'`, `1/2"`);
+    /// changes preview live through the material table with one undo entry.
+    fn texture_mapping_editor(&mut self, ui: &mut egui::Ui, id: MaterialId, material: &Material) {
+        if material.texture.is_none() {
+            return;
+        }
+        ui.label(RichText::new("Texture mapping").small().weak());
+        let settings = self.presentation.measurements;
+        let mapping = material.texture_mapping.unwrap_or_default();
+        let aspect = mapping.width_m / mapping.height_m.max(1e-9);
+        let mut lock_aspect = self.materials.lock_aspect;
+        let size_text = |mapping: &cindral_core::TextureMapping| {
+            let digits = usize::from(settings.precision).clamp(1, 6);
+            format!(
+                "{:.*} × {:.*}",
+                digits, mapping.width_m, digits, mapping.height_m
+            )
+        };
+        let mut width_text = size_text(&mapping).split(" × ").next().unwrap_or("").to_string();
+        let mut height_text = size_text(&mapping).split(" × ").nth(1).unwrap_or("").to_string();
+
+        ui.add_space(2.);
+        let size = ui.add(
+            egui::TextEdit::singleline(&mut width_text)
+                .desired_width(64.)
+                .font(egui::TextStyle::Monospace),
+        );
+        ui.label("×");
+        let height = ui.add(
+            egui::TextEdit::singleline(&mut height_text)
+                .desired_width(64.)
+                .font(egui::TextStyle::Monospace),
+        );
+        let lock = ui
+            .selectable_label(lock_aspect, "🔗")
+            .on_hover_text("Lock aspect ratio: editing one side scales the other");
+        if lock.clicked() {
+            self.materials.lock_aspect = !lock_aspect;
+            lock_aspect = self.materials.lock_aspect;
+        }
+        if size.changed() || height.changed() {
+            let parsed = |text: &str| cindral_tools::parse_length(text);
+            let width = parsed(&width_text);
+            let height_value = parsed(&height_text);
+            let (new_w, new_h) = match (width, height_value) {
+                (Ok(w), Ok(h)) => {
+                    if lock_aspect && size.changed() && !height.changed() {
+                        (w, w / aspect.max(1e-9))
+                    } else if lock_aspect {
+                        (h * aspect.max(1e-9), h)
+                    } else {
+                        (w, h)
+                    }
+                }
+                (Ok(w), Err(_)) if height_text.trim().is_empty() => (
+                    w,
+                    if lock_aspect {
+                        w / aspect.max(1e-9)
+                    } else {
+                        mapping.height_m
+                    },
+                ),
+                (Err(_), Ok(h)) if width_text.trim().is_empty() => (
+                    if lock_aspect {
+                        h * aspect.max(1e-9)
+                    } else {
+                        mapping.width_m
+                    },
+                    h,
+                ),
+                _ => return,
+            };
+            let updated = cindral_core::TextureMapping {
+                width_m: new_w,
+                height_m: new_h,
+                ..mapping
+            };
+            self.apply_mapping_edit(id, material, updated);
+        }
+
+        let mut rotation = mapping.rotation_deg;
+        let rot = ui.add(
+            egui::Slider::new(&mut rotation, -360.0..=360.0)
+                .text("Rotation °")
+                .step_by(1.),
+        );
+        if rot.changed() {
+            self.apply_mapping_edit(
+                id,
+                material,
+                cindral_core::TextureMapping {
+                    rotation_deg: rotation,
+                    ..mapping
+                },
+            );
+        }
+        let flip_h = ui
+            .selectable_label(mapping.flip_h, "Flip H")
+            .on_hover_text("Mirror the texture horizontally");
+        if flip_h.clicked() {
+            self.apply_mapping_edit(
+                id,
+                material,
+                cindral_core::TextureMapping {
+                    flip_h: !mapping.flip_h,
+                    ..mapping
+                },
+            );
+        }
+        let flip_v = ui
+            .selectable_label(mapping.flip_v, "Flip V")
+            .on_hover_text("Mirror the texture vertically");
+        if flip_v.clicked() {
+            self.apply_mapping_edit(
+                id,
+                material,
+                cindral_core::TextureMapping {
+                    flip_v: !mapping.flip_v,
+                    ..mapping
+                },
+            );
+        }
+        if ui
+            .button("Reset to image size")
+            .on_hover_text(format!(
+                "Physical size at 96 DPI (currently {} m × {} m)",
+                size_text(&cindral_core::TextureMapping::from_pixels(
+                    self.material_texture_size(material).0,
+                    self.material_texture_size(material).1,
+                )),
+                size_text(&cindral_core::TextureMapping::from_pixels(
+                    self.material_texture_size(material).0,
+                    self.material_texture_size(material).1,
+                ))
+                .split(" × ")
+                .nth(1)
+                .unwrap_or("?")
+            ))
+            .clicked()
+        {
+            let (w, h) = self.material_texture_size(material);
+            self.apply_mapping_edit(
+                id,
+                material,
+                cindral_core::TextureMapping::from_pixels(w, h),
+            );
+        }
+    }
+
+    /// Decoded pixel size of a material's texture (0,0 when unavailable).
+    fn material_texture_size(&self, material: &Material) -> (u32, u32) {
+        material
+            .texture
+            .as_ref()
+            .and_then(|key| self.files.textures.get(key))
+            .and_then(|asset| {
+                cindral_io::decode_texture(asset)
+                    .ok()
+                    .map(|t| (t.width, t.height))
+            })
+            .unwrap_or((0, 0))
+    }
+
+    /// Apply one live mapping edit: preview now, commit on interaction end.
+    fn apply_mapping_edit(
+        &mut self,
+        id: MaterialId,
+        original: &Material,
+        mapping: cindral_core::TextureMapping,
+    ) {
+        if self.materials.drag_original.is_none() {
+            self.materials.drag_original = Some((id, original.clone()));
+        }
+        let edited = Material {
+            texture_mapping: Some(mapping),
+            ..original.clone()
+        };
+        let _ = self.history.material_preview(id, edited);
+        self.materials.editing_widgets = true;
     }
 
     fn recent_colors_row(&mut self, ui: &mut egui::Ui) {
@@ -763,6 +950,7 @@ impl DrafterApp {
             color: srgb,
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         };
         self.org_command(Org::CreateMaterial(material));
         self.select_last_material();
@@ -781,6 +969,7 @@ impl DrafterApp {
             color: pattern.srgb,
             opacity: 1.,
             texture: Some(format!("builtin:{}", pattern.name)),
+            texture_mapping: None,
         };
         self.org_command(Org::CreateMaterial(material));
         self.select_last_material();
@@ -804,6 +993,7 @@ impl DrafterApp {
                 color: [255, 255, 255],
                 opacity: 1.,
                 texture: Some(key),
+                texture_mapping: None,
             };
             self.org_command(Org::CreateMaterial(material));
             if self.error.is_none() {
@@ -1330,6 +1520,7 @@ mod tests {
                 color,
                 opacity: 1.,
                 texture: None,
+                texture_mapping: None,
             }));
         }
         app.organization.material = app.history.materials().keys().next_back().copied();
@@ -1519,6 +1710,7 @@ mod tests {
                     color: [(i % 255) as u8, 60, 120],
                     opacity: 1.,
                     texture: None,
+                    texture_mapping: None,
                 },
             );
         }

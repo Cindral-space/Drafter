@@ -40,6 +40,7 @@ fn app_with_painted_20k_faces() -> (DrafterApp, MaterialId, MaterialId) {
             color: [180, 60, 40],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         },
     );
     data.materials.insert(
@@ -49,6 +50,7 @@ fn app_with_painted_20k_faces() -> (DrafterApp, MaterialId, MaterialId) {
             color: [40, 90, 200],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         },
     );
     let definition = data.root;
@@ -69,6 +71,7 @@ fn app_with_5000_materials() -> DrafterApp {
         data.materials.insert(
             MaterialId(1_000_000 + i),
             Material {
+                texture_mapping: None,
                 name: format!("Material {i:04}"),
                 color: [(i % 255) as u8, 90, 140],
                 opacity: 1.,

@@ -56,6 +56,7 @@ fn exported_gltf_preserves_faces_shared_instances_bounds_and_assets() {
         color: [51, 102, 204],
         opacity: 0.5,
         texture: Some(slot.clone()),
+        texture_mapping: None,
     }))
     .unwrap();
     let material = *h.materials().keys().next().unwrap();

@@ -295,6 +295,7 @@ fn seed_organization(
         color: [217, 102, 31],
         opacity: 1.,
         texture: None,
+        texture_mapping: None,
     }))?;
     let amber = *app
         .document()
@@ -311,6 +312,7 @@ fn seed_organization(
         color: [26, 153, 204],
         opacity: 0.4,
         texture: Some("glass-slot".into()),
+        texture_mapping: None,
     }))?;
     let glass = *app
         .document()

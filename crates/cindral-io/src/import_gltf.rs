@@ -987,6 +987,7 @@ fn parse_materials_and_textures(
             color: cindral_core::linear_rgb_to_srgb(color),
             opacity,
             texture,
+            texture_mapping: None,
         });
     }
 

@@ -105,6 +105,7 @@ mod tests {
                 color: [1, 2, 3],
                 opacity: 1.,
                 texture: None,
+                texture_mapping: None,
             },
         ))
         .unwrap();
@@ -144,6 +145,7 @@ mod tests {
                 color: [1, 2, 3],
                 opacity: 1.,
                 texture: None,
+                texture_mapping: None,
             },
         ))
         .unwrap();

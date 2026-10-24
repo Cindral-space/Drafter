@@ -219,6 +219,7 @@ fn tags_materials_and_versioned_data_are_separate_from_runtime_state() {
         color: [51, 128, 229],
         opacity: 0.4,
         texture: Some("textures/glass.png".into()),
+        texture_mapping: None,
     }))
     .unwrap();
     let material = *doc.materials().keys().next().unwrap();
@@ -315,6 +316,7 @@ fn splitting_and_healing_painted_faces_preserves_material_and_history() {
         color: [51, 102, 153],
         opacity: 0.7,
         texture: None,
+        texture_mapping: None,
     }))
     .unwrap();
     let material = *doc.materials().keys().next().unwrap();
@@ -368,6 +370,7 @@ fn live_material_preview_records_one_undo_entry() {
         color: [255, 0, 0],
         opacity: 1.,
         texture: None,
+        texture_mapping: None,
     }))
     .unwrap();
     let id = *doc.materials().keys().next().unwrap();
@@ -406,6 +409,7 @@ fn replace_material_repaints_faces_and_instances_atomically() {
             color: [10, 20, 30],
             opacity: 1.,
             texture: None,
+            texture_mapping: None,
         }))
         .unwrap();
         *doc.materials().keys().next_back().unwrap()
