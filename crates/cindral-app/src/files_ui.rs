@@ -3019,12 +3019,7 @@ mod tests {
                 .lines()
             {
                 if let Some(value) = line.strip_prefix("VmHWM:") {
-                    return value
-                        .split_whitespace()
-                        .next()
-                        .unwrap()
-                        .parse()
-                        .unwrap();
+                    return value.split_whitespace().next().unwrap().parse().unwrap();
                 }
             }
             0
