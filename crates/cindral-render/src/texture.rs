@@ -274,60 +274,83 @@ impl Premultiplied {
     /// Box-filter resize: each destination texel averages exactly the source
     /// window it covers (weights per overlapping source texel). Upscaling
     /// windows narrower than one texel fall back to the nearest texel.
+    /// Destination rows are independent, so large resamples spread rows
+    /// across scoped threads.
     fn box_resize(&self, tw: u32, th: u32) -> Premultiplied {
-        let sw = self.width as f32;
-        let sh = self.height as f32;
         let mut out = vec![0.0f32; (tw as usize) * (th as usize) * 4];
-        for y in 0..th {
-            let ya = y as f32 * sh / th as f32;
-            let yb = (y + 1) as f32 * sh / th as f32;
-            for x in 0..tw {
-                let xa = x as f32 * sw / tw as f32;
-                let xb = (x + 1) as f32 * sw / tw as f32;
-                let x0 = xa.floor() as u32;
-                let x1 = xb.ceil().min(sw) as u32;
-                let y0 = ya.floor() as u32;
-                let y1 = yb.ceil().min(sh) as u32;
-                let mut acc = [0.0f32; 4];
-                let mut weight = 0.0f32;
-                for sy in y0..y1 {
-                    let wy =
-                        (yb - sy as f32).clamp(0.0, 1.0) * (sy as f32 + 1.0 - ya).clamp(0.0, 1.0);
-                    if wy <= 0.0 {
-                        continue;
+        let row = tw as usize * 4;
+        let workers = row_workers(th, row);
+        std::thread::scope(|scope| {
+            let mut cursor = &mut out[..];
+            let mut y = 0u32;
+            for _ in 0..workers {
+                let rows = row_chunk(th, workers);
+                let rows = rows.min(th - y);
+                let take = rows as usize * row;
+                let (head, tail) = cursor.split_at_mut(take);
+                cursor = tail;
+                let (y0, y1) = (y, y + rows);
+                y = y1;
+                scope.spawn(move || {
+                    for yy in y0..y1 {
+                        self.box_row(yy, tw, th, &mut head[((yy - y0) as usize) * row..][..row]);
                     }
-                    for sx in x0..x1 {
-                        let wx = (xb - sx as f32).clamp(0.0, 1.0)
-                            * (sx as f32 + 1.0 - xa).clamp(0.0, 1.0);
-                        if wx <= 0.0 {
-                            continue;
-                        }
-                        let sample = self.sample(sx.min(self.width - 1), sy.min(self.height - 1));
-                        let w = wx * wy;
-                        for c in 0..4 {
-                            acc[c] += sample[c] * w;
-                        }
-                        weight += w;
-                    }
-                }
-                let idx = ((y as usize * tw as usize) + x as usize) * 4;
-                if weight > 0.0 {
-                    for c in 0..4 {
-                        out[idx + c] = acc[c] / weight;
-                    }
-                } else {
-                    // Upscale gap: nearest source texel at the window center.
-                    let sx = ((x as f32 + 0.5) * sw / tw as f32) as u32;
-                    let sy = ((y as f32 + 0.5) * sh / th as f32) as u32;
-                    let sample = self.sample(sx.min(self.width - 1), sy.min(self.height - 1));
-                    out[idx..idx + 4].copy_from_slice(&sample);
-                }
+                });
             }
-        }
+        });
         Premultiplied {
             width: tw,
             height: th,
             texels: out,
+        }
+    }
+
+    /// One destination row of [`Premultiplied::box_resize`].
+    fn box_row(&self, y: u32, tw: u32, th: u32, out_row: &mut [f32]) {
+        let sw = self.width as f32;
+        let sh = self.height as f32;
+        let ya = y as f32 * sh / th as f32;
+        let yb = (y + 1) as f32 * sh / th as f32;
+        for x in 0..tw {
+            let xa = x as f32 * sw / tw as f32;
+            let xb = (x + 1) as f32 * sw / tw as f32;
+            let x0 = xa.floor() as u32;
+            let x1 = xb.ceil().min(sw) as u32;
+            let y0 = ya.floor() as u32;
+            let y1 = yb.ceil().min(sh) as u32;
+            let mut acc = [0.0f32; 4];
+            let mut weight = 0.0f32;
+            for sy in y0..y1 {
+                let wy = (yb - sy as f32).clamp(0.0, 1.0) * (sy as f32 + 1.0 - ya).clamp(0.0, 1.0);
+                if wy <= 0.0 {
+                    continue;
+                }
+                for sx in x0..x1 {
+                    let wx =
+                        (xb - sx as f32).clamp(0.0, 1.0) * (sx as f32 + 1.0 - xa).clamp(0.0, 1.0);
+                    if wx <= 0.0 {
+                        continue;
+                    }
+                    let sample = self.sample(sx.min(self.width - 1), sy.min(self.height - 1));
+                    let w = wx * wy;
+                    for c in 0..4 {
+                        acc[c] += sample[c] * w;
+                    }
+                    weight += w;
+                }
+            }
+            let idx = (x as usize) * 4;
+            if weight > 0.0 {
+                for c in 0..4 {
+                    out_row[idx + c] = acc[c] / weight;
+                }
+            } else {
+                // Upscale gap: nearest source texel at the window center.
+                let sx = ((x as f32 + 0.5) * sw / tw as f32) as u32;
+                let sy = ((y as f32 + 0.5) * sh / th as f32) as u32;
+                let sample = self.sample(sx.min(self.width - 1), sy.min(self.height - 1));
+                out_row[idx..idx + 4].copy_from_slice(&sample);
+            }
         }
     }
 
@@ -344,39 +367,81 @@ impl Premultiplied {
 }
 
 /// One axis of the Catmull-Rom filter; `along_x` selects the source axis.
+/// Destination rows are independent, so large passes spread rows across
+/// scoped threads.
 fn cr_pass(src: &Premultiplied, tw: u32, th: u32, along_x: bool) -> Premultiplied {
     let n_src = if along_x { src.width } else { src.height };
     let n_dst = if along_x { tw } else { th };
     let ratio = n_src as f32 / n_dst as f32;
-    let mut out = vec![0.0f32; (tw as usize) * (th as usize) * 4];
-    for b in 0..(if along_x { th } else { tw }) {
-        for a in 0..n_dst {
-            let center = (a as f32 + 0.5) * ratio - 0.5;
+    let row = tw as usize * 4;
+    let mut out = vec![0.0f32; th as usize * row];
+    let workers = row_workers(th, row);
+    std::thread::scope(|scope| {
+        let mut cursor = &mut out[..];
+        let mut y = 0u32;
+        for _ in 0..workers {
+            let chunk = row_chunk(th, workers).min(th - y);
+            let take = chunk as usize * row;
+            let (head, tail) = cursor.split_at_mut(take);
+            cursor = tail;
+            let (y0, y1) = (y, y + chunk);
+            y = y1;
+            scope.spawn(move || {
+                let pass = CrPass {
+                    src,
+                    along_x,
+                    ratio,
+                    n_src,
+                };
+                for yy in y0..y1 {
+                    pass.row(yy, tw, &mut head[((yy - y0) as usize) * row..][..row]);
+                }
+            });
+        }
+    });
+    Premultiplied {
+        width: tw,
+        height: th,
+        texels: out,
+    }
+}
+
+/// Catmull-Rom pass parameters plus the destination-row kernel.
+struct CrPass<'a> {
+    src: &'a Premultiplied,
+    along_x: bool,
+    /// Filter position along the source axis: output X when `along_x`,
+    /// output Y otherwise.
+    ratio: f32,
+    n_src: u32,
+}
+
+impl CrPass<'_> {
+    /// Computes one destination row of the pass. The vertical pass filters
+    /// each texel independently in Y, so destination rows stay independent
+    /// and contiguous in both orientations.
+    fn row(&self, y: u32, tw: u32, out_row: &mut [f32]) {
+        for x in 0..tw {
+            let center = ((if self.along_x { x } else { y }) as f32 + 0.5) * self.ratio - 0.5;
             let base = center.floor();
             let frac = center - base;
             let base = base as i32;
             let w = cr_weights(frac);
             let mut acc = [0.0f32; 4];
             for (k, weight) in w.iter().enumerate() {
-                let i = (base + k as i32 - 1).clamp(0, n_src as i32 - 1) as u32;
-                let sample = if along_x {
-                    src.sample(i, b)
+                let i = (base + k as i32 - 1).clamp(0, self.n_src as i32 - 1) as u32;
+                let sample = if self.along_x {
+                    self.src.sample(i, y)
                 } else {
-                    src.sample(b, i)
+                    self.src.sample(x, i)
                 };
                 for c in 0..4 {
                     acc[c] += sample[c] * weight;
                 }
             }
-            let (x, y) = if along_x { (a, b) } else { (b, a) };
-            let idx = ((y as usize * tw as usize) + x as usize) * 4;
-            out[idx..idx + 4].copy_from_slice(&acc);
+            let idx = (x as usize) * 4;
+            out_row[idx..idx + 4].copy_from_slice(&acc);
         }
-    }
-    Premultiplied {
-        width: tw,
-        height: th,
-        texels: out,
     }
 }
 
@@ -390,6 +455,21 @@ fn cr_weights(f: f32) -> [f32; 4] {
         -1.5 * f3 + 2.0 * f2 + 0.5 * f,
         0.5 * f3 - 0.5 * f2,
     ]
+}
+
+/// Number of worker threads for a row-parallel pass; single-threaded below a
+/// useful work threshold (rows or bytes too small to amortize spawning).
+fn row_workers(rows: u32, row_bytes: usize) -> u32 {
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1);
+    let useful = (rows as usize * row_bytes) / (64 * 1024);
+    available.min(useful.max(1) as u32).clamp(1, available)
+}
+
+/// Rows per worker, roughly even; callers clamp to the remaining rows.
+fn row_chunk(rows: u32, workers: u32) -> u32 {
+    rows.div_ceil(workers.max(1))
 }
 
 /// Resamples a decoded source directly to the square array edge.

@@ -3005,4 +3005,55 @@ mod tests {
             &boundary[..3]
         );
     }
+
+    /// Peak process RSS while loading many 4096x4096 textures through the
+    /// production decode path. Documents the one-asset-at-a-time decode
+    /// contract: the peak grows by the prepared mip layers plus ONE decoded
+    /// frame, never by all decoded assets at once. Slow; run explicitly.
+    #[test]
+    #[ignore = "slow: decodes 167 large textures; run explicitly for memory numbers"]
+    fn peak_rss_while_loading_many_large_textures() {
+        fn peak_rss_kib() -> u64 {
+            for line in std::fs::read_to_string("/proc/self/status")
+                .unwrap()
+                .lines()
+            {
+                if let Some(value) = line.strip_prefix("VmHWM:") {
+                    return value
+                        .split_whitespace()
+                        .next()
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                }
+            }
+            0
+        }
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(4096, 4096, image::Rgba([120, 90, 60, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        for count in [40usize, 127] {
+            let assets: BTreeMap<String, TextureAsset> = (0..count)
+                .map(|i| {
+                    (
+                        format!("t{i:03}.png"),
+                        TextureAsset {
+                            mime: "image/png".into(),
+                            bytes: png.clone(),
+                        },
+                    )
+                })
+                .collect();
+            let before = peak_rss_kib();
+            let data = build_texture_data(&assets).unwrap();
+            let after = peak_rss_kib();
+            println!(
+                "{count} textures: edge {}, peak RSS delta {} MiB (expected ~prepared layers + one 64 MiB decode)",
+                data.1.edge,
+                (after - before) / 1024
+            );
+            assert_eq!(data.1.layers.len(), count + 1);
+        }
+    }
 }
