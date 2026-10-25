@@ -243,3 +243,18 @@ Open as new document follows Open's prompt. Imports wait for tools to finish,
 retain intervening edits, and discard results after a document/Save As target
 change. The Import report shows collisions, warnings and omissions. Options are
 remembered for the app session. See [the full contract](docs/IMPORT_PIPELINE.md#open-vs-import).
+
+## Materials and painting
+
+The **Materials** inspector tab manages the document palette: swatch, name and
+usage count per material, with search, sort, rename/duplicate/delete/select-
+faces/replace/purge (all undoable), a live HSV/hex color editor, builtin colors
+and tileable patterns, and folder import with thumbnails. Material colors are
+stored as display sRGB bytes, so the picker and the viewport agree. The Paint
+Bucket paints materials: click paints, Ctrl fills connected faces, Shift
+replaces a material, Ctrl+Shift replaces inside one object, and Alt+click (or
+the panel's Eyedropper button, useful on Linux where Alt is grabbed by the
+window manager) samples without painting. Textured materials support
+real-world size, rotation and flips; PNG/JPEG import is capped at 8192 px,
+32 MiB encoded and 256 MiB decoded, with SHA-256 deduplication and 127 assets
+per document. See [MATERIALS.md](docs/MATERIALS.md) for the full contract.
