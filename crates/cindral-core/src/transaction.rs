@@ -729,8 +729,10 @@ pub(crate) fn contains_face(model: &Model, face: &Face, point: DVec3) -> Result<
 }
 
 fn convex_chord(model: &Model, face: &Face, start: DVec3, end: DVec3) -> bool {
+    // Merged import regions stay within the bulk ring cap; convexity is checked
+    // exactly in O(ring), so merged faces keep the confined-chord fast path.
     if !face.holes.is_empty()
-        || !(3..=64).contains(&face.outer.len())
+        || !(3..=crate::bulk::MAX_MERGED_RING).contains(&face.outer.len())
         || face.plane.signed_distance(start).abs() > crate::TOLERANCE
         || face.plane.signed_distance(end).abs() > crate::TOLERANCE
     {

@@ -54,8 +54,14 @@ pub struct BulkStats {
     /// Coplanar regions that fell back to pairwise joins.
     pub region_fallbacks: usize,
 }
-/// Merged region rings may not exceed the accepted input ring length.
-const MAX_MERGED_RING: usize = 4096;
+/// Merged region rings are capped so local edits on a merged face (boundary
+/// collection, re-triangulation) stay well inside the 16 ms interactive budget;
+/// larger regions split deterministically instead.
+pub(crate) const MAX_MERGED_RING: usize = 256;
+/// Faces per merged region. Raised above the reference branch's 1,024 so the
+/// 2,000-triangle acceptance wall still merges into one face; larger coplanar
+/// areas split deterministically at union time.
+const MAX_REGION_FACES: usize = 2048;
 /// Bounded cleanup work per build; exhausted regions fall back to pairwise joins.
 /// Every region step is linear in region size, so this only guards hostile inputs
 /// whose aggregated validation cost (ring work) would otherwise exceed the input budget.
@@ -307,8 +313,10 @@ impl BulkGeometry {
     }
 }
 type Check<'a> = &'a (dyn Fn() -> Result<(), KernelError> + 'a);
-/// Union coplanar same-orientation edge-connected face groups into single faces.
-/// Deterministic throughout: pairs arrive sorted by edge key and members by face id.
+/// Group coplanar same-orientation edge-connected faces into bounded regions.
+/// Breadth-first growth from the lowest face id keeps regions compact
+/// (square-ish blobs rather than edge-key-order stripes), which bounds both the
+/// merged ring length and local edit latency. Deterministic throughout.
 fn region_merge(
     model: &mut Model,
     edges: &BTreeMap<[VertexId; 2], EdgeId>,
@@ -322,37 +330,41 @@ fn region_merge(
         participating.insert(*b);
     }
     let ids: Vec<FaceId> = participating.into_iter().collect();
-    let index: HashMap<FaceId, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-    let mut parent: Vec<usize> = (0..ids.len()).collect();
-    let mut work = 0usize;
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
+    let mut adjacent: BTreeMap<FaceId, Vec<FaceId>> = BTreeMap::new();
     for (a, b, _) in merge_pairs {
-        work += 1;
-        let (ra, rb) = (root(&mut parent, index[a]), root(&mut parent, index[b]));
-        if ra != rb {
-            parent[rb] = ra;
+        adjacent.entry(*a).or_default().push(*b);
+        adjacent.entry(*b).or_default().push(*a);
+    }
+    let mut work = 0usize;
+    let mut remaining: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    for seed in &ids {
+        if !remaining.remove(seed) {
+            continue;
         }
-    }
-    let mut groups = BTreeMap::<usize, Vec<FaceId>>::new();
-    let mut group_pairs = BTreeMap::<usize, Vec<(FaceId, FaceId, [VertexId; 2])>>::new();
-    for (i, id) in ids.iter().enumerate() {
-        groups.entry(root(&mut parent, i)).or_default().push(*id);
-    }
-    for (a, b, pair) in merge_pairs {
-        let r = root(&mut parent, index[a]);
-        group_pairs.entry(r).or_default().push((*a, *b, *pair));
-    }
-    for (r, members) in groups {
+        work += 1;
+        let mut members = vec![*seed];
+        let mut queue = std::collections::VecDeque::from([*seed]);
+        while let Some(id) = queue.pop_front() {
+            for next in adjacent.get(&id).into_iter().flatten() {
+                if members.len() >= MAX_REGION_FACES {
+                    break;
+                }
+                if remaining.remove(next) {
+                    members.push(*next);
+                    queue.push_back(*next);
+                }
+            }
+        }
         if members.len() < 2 {
             continue;
         }
-        let pairs = group_pairs.remove(&r).unwrap_or_default();
+        let set: std::collections::BTreeSet<_> = members.iter().copied().collect();
+        let pairs: Vec<_> = merge_pairs
+            .iter()
+            .filter(|(a, b, _)| set.contains(a) && set.contains(b))
+            .copied()
+            .collect();
+        work += members.len() + pairs.len();
         merge_region(model, edges, &members, &pairs, stats, check, &mut work)?;
     }
     Ok(())

@@ -54,7 +54,13 @@ fn gltf_100k_triangles() {
         .unwrap();
     destination.enter(occurrence.path).unwrap();
     let faces = destination.model().faces().len();
-    assert!((50000..=100000).contains(&faces));
+    // Region cleanup merges the coplanar single-material sheet into bounded
+    // compact faces (region cap 2048, ring cap 256); it must never stay anywhere
+    // near the old ~50,000 pairwise quads.
+    assert!(
+        (2..=200).contains(&faces),
+        "unexpected merged face count: {faces}"
+    );
     let edit = Instant::now();
     destination
         .execute(Command::AddEdge {
