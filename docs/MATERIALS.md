@@ -35,14 +35,17 @@ channels are already sRGB and pass through unchanged.
 
 The panel lives in the right inspector (Model / Appearance / Materials tabs).
 It shows one row per material with a color swatch, name and usage count
-(number of faces using it). Rows are virtualized — only visible rows are
-built — so a 5,000-material palette stays responsive.
+(painted faces in every definition plus material-carrying instances). Rows
+are virtualized — only visible rows are built — so a 5,000-material palette
+stays responsive.
 
 - **Search** filters by name; **Sort** switches between name and usage count.
 - **Actions** per material (with one-entry undo): Rename, Duplicate, Delete
   (faces fall back to the default material), Select Faces (selects every
-  face using it), Replace (repaint all its faces with another material),
-  Purge (delete unused materials in one command).
+  user of the material: its faces in the active context, instances that
+  carry it, and instances of definitions whose faces use it), Replace
+  (repaint all its faces with another material), Purge (delete unused
+  materials in one command).
 - **Editor**: HSV/hex color editing with live viewport preview while a
   slider is dragged; the committed edit is exactly one history entry on
   release. A 12-entry recent-colors row persists between sessions.
@@ -50,7 +53,8 @@ built — so a 5,000-material palette stays responsive.
   patterns generated on demand (patterns are never embedded in files; they
   are regenerated on load). Folder import scans a chosen directory
   off the UI thread, shows 64 px thumbnails, caps the scan at 2,000 files
-  and remembers the folder list.
+  and remembers the folder list. Known limit: the folder thumbnail strip is
+  not virtualized — one thumbnail widget per scan entry is built per frame.
 - **Texture import** loads a user-chosen PNG/JPEG file into the document
   store (see limits below) and assigns it to the material.
 
@@ -63,7 +67,7 @@ was removed).
 | --- | --- |
 | Click | Paint the clicked face (or the clicked group/component instance). |
 | Click on selected object | Paint the whole selection. |
-| Ctrl + click | Fill the clicked face plus all connected adjacent faces. |
+| Ctrl + click | Fill the clicked face plus all connected adjacent faces sharing the clicked face's material. |
 | Shift + click | Replace every face using the clicked face's current material. |
 | Ctrl + Shift + click | Replace the material only inside the clicked object. |
 | Alt + click | Sample the clicked face's material into the active slot; never mutates. |
@@ -75,8 +79,9 @@ was removed).
 - **Hover outline** previews the fill extent before clicking (face, connected
   region, or same-material region per modifier). Regions beyond 256 faces
   show the object's bounding box instead of per-face outlines.
-- The **active material** is shown as a cursor swatch, and the status bar
-  hint reflects the current modifier.
+- The **active material** is shown in a header swatch next to the tool
+  options (it is not attached to the pointer), and the status bar hint
+  reflects the current modifier.
 
 ## Texture size, rotation and flip
 
@@ -98,7 +103,11 @@ consumers.
   5 cm on an edge fall back to 1 m wide with the aspect preserved.
 - The size editor has a **lock-aspect toggle** (on by default): editing one
   dimension scales the other to preserve the image aspect; unlock to set
-  independent width/height.
+  independent width/height. Size text edits preview valid values live and
+  commit **one** undo entry on Enter or focus loss (Escape reverts); zero,
+  negative or incomplete values never reach the document. Rotation commits
+  one entry per drag; the flip toggles and "Reset to image size" commit one
+  entry per click.
 - A material without a mapping (`None`, the pre-schema-3 state and schema-2
   files) keeps the original planar look: one repeat per meter, no rotation,
   no flip.
@@ -112,7 +121,10 @@ Per image, enforced at import with clear rejection messages:
 - **Dimensions**: ≤ 8192 × 8192 px.
 - **Decoded size**: ≤ 256 MiB (e.g. 8192² RGBA).
 - **Dedup**: assets are content-addressed by SHA-256; importing the same
-  image twice stores one asset.
+  image twice stores one asset. De-duplication merges on a full hash
+  collision (two different images with the same digest would share one
+  slot); this is accepted as practically impossible rather than guarded
+  against.
 - **Count**: a document holds at most 127 texture assets (slot 0 is the
   white fallback).
 
@@ -146,6 +158,35 @@ length `L` adapts to the document (never per-size-class arrays):
   toggles touch uniforms only (asserted by regression).
 
 Rationale and rejected alternatives: [TEXTURE_DESIGN.md](TEXTURE_DESIGN.md).
+
+## Measured performance
+
+All numbers are release-mode runs of the real private file
+`SKP/mybedroom.skp` (207 faces) on AMD Radeon Vega 11 / Mesa GL
+(`WGPU_BACKEND=gl`), warmup excluding one-time pipeline creation; they are
+editor-responsiveness figures, not frame-rate guarantees for arbitrary
+documents.
+
+- **Color tick** and **texture-size tick**: 60 sequential edits through the
+  live editor path (material-table preview + scene sync + a *full* UI+GPU
+  frame — egui tessellation, draw and GPU completion). Reported as *worst*
+  and, for color ticks, *mean* over the 60 frames; target < 16 ms. Review
+  run (2026-10-25): color worst **8.10 ms** / mean 5.30 ms; size worst
+  **9.95 ms**. Re-measure after the mapping-editor fix (same machine):
+  color worst 8.19 ms / mean 3.09 ms, size worst 4.07 ms — the size figure
+  depends heavily on background GPU state; both runs are inside the target.
+- **Paint-all** and **undo + repaint**: CPU-side command + mesh-sync cost
+  only (no full-frame render), target < 100 ms each. Review run: **0.839 ms**
+  and **1.25 ms**.
+- **Texture upload** (one-time per texture change): CPU decode of a
+  generated 4096² PNG + resample to the 1024² array edge + premultiplied
+  mip chain + layer sync — measured **714.8 ms** on the re-run above
+  (605–616 ms in the previous session; run-to-run variance, one-time cost
+  on the worker thread for imports).
+- **GPU resident copy**: reported by `gpu.allocated_bytes()` as a constant
+  ~1.44 MiB on Mesa GL because wgpu's counter does not include GL texture
+  storage; the analytic array bytes for one 4096² asset are the 2-layer
+  1024² array with mips ≈ 11.2 MiB (see [TEXTURE_DESIGN.md](TEXTURE_DESIGN.md)).
 
 ## File schema versions and migrations
 
