@@ -31,6 +31,8 @@ Width and height are required positive integers. AA is `off`, `medium` (default)
 
 The native archive does not store the live unsaved viewport camera. Without `--scene`, CLI uses the default camera fitted to document bounds; desktop export uses the actual current camera. This is one scene at a time, not batch export. No visible window is created. A suitable headless wgpu adapter is required; GL backends may require the platform display server. Missing adapter/device fails with a clear error. `WGPU_BACKEND=gl` selects the local Vega 11 GL path for measurements.
 
+**Color change (2026-10-25, bug fix):** the CLI previously stored the linear capture values un-encoded, so CLI output looked washed out compared with the desktop export; it now applies the same sRGB encode the desktop app's sRGB framebuffer uses, and a GPU regression test asserts the CLI and the desktop export job match for the same scene. Images exported with the old CLI will need re-exporting to match the viewport.
+
 ## Validation and release measurements
 
 Formatting and strict workspace/all-target/all-feature Clippy pass. The full all-feature workspace suite passes **460 tests, zero failures, 45 ignored workloads**. Nine targeted PNG tests cover size/memory, framing, row/alpha/color behavior, settings, atomic output/overwrite/Unicode metadata, failure and concurrent cancellation. Real GPU checks cover cube pixels/dimensions, transparent corners, section/shadow differences, saved-scene CLI style and production viewport callback agreement in gamma and sRGB framebuffers (tolerance two byte levels). Readback row padding/orientation also has a render-crate unit test. GPU tests skip only when an adapter/device cannot be obtained.

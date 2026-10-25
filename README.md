@@ -227,7 +227,7 @@ This independent exporter follows the public COLLADA specification. Cindral Draf
 
 ## Exporting images
 
-Use **File > Export > Image (PNG)…** to save the current view at a chosen size with its styles, materials, sections and shadows. Transparent backgrounds and Off/Medium/High antialiasing are available. The dialog explains framing and shared-memory limits. For headless single-scene CLI export and limitations, see [PNG export](docs/PNG_EXPORT.md).
+Use **File > Export > Image (PNG)…** to save the current view at a chosen size with its styles, materials, sections and shadows. Transparent backgrounds and Off/Medium/High antialiasing are available. The dialog explains framing and shared-memory limits. Headless `--export-png` output matches the desktop export (it applies the same sRGB encode; CLI colors changed in 2026-10-25 as a bug fix). For the CLI and limitations, see [PNG export](docs/PNG_EXPORT.md).
 
 ## Open vs Import
 

@@ -38,7 +38,7 @@ fn main() -> Result<(), String> {
         None,
         &path,
         &options,
-        false,
+        true, // same sRGB-surface emulation as the CLI and GUI export
         "benchmark.cdraft",
         false,
         &Control::default(),

@@ -62,13 +62,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     options.estimate(0)?;
     let bundle = cindral_io::load_draft(&input).map_err(|e| e.to_string())?;
     let name = input.file_name().unwrap_or_default().to_string_lossy();
+    // The offscreen capture is linear; the CLI has no surface format to query,
+    // so emulate the desktop app's sRGB surface (what GUI export writes).
     png_job::export(
         bundle,
         None,
         scene.as_deref(),
         &output,
         &options,
-        false,
+        true,
         &name,
         force,
         &Control::default(),

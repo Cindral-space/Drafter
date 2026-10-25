@@ -373,11 +373,26 @@ mod tests {
         .unwrap();
         let mut decoded = vec![0; 64 * 64 * 4];
         reader.next_frame(&mut decoded).unwrap();
-        let selected = image(saved, &o, Some("Wire"));
+        // The CLI applies the desktop sRGB-surface encode, so compare with
+        // the same production path; the linear render must differ.
+        let selected = render(
+            saved,
+            Some(camera()),
+            Some("Wire"),
+            &o,
+            true,
+            &Control::default(),
+        )
+        .unwrap();
         assert_eq!(selected.rgba, decoded);
         let mut wire = bundle.clone();
         wire.presentation.style = scene.style;
-        assert_eq!(selected.rgba, image(wire, &o, None).rgba);
+        assert_eq!(
+            selected.rgba,
+            render(wire, Some(camera()), None, &o, true, &Control::default())
+                .unwrap()
+                .rgba
+        );
         assert_ne!(selected.rgba, baseline.rgba);
         // A real egui/wgpu callback composites the same camera/size into the window format.
         app.presentation = bundle.presentation.clone();
@@ -493,6 +508,70 @@ mod tests {
                     .zip(&baseline.rgba)
                     .all(|(&a, &b)| a.abs_diff(b) <= 2),
                 "{color:?}: viewport/export differ"
+            );
+        }
+    }
+
+    /// The CLI export (--export-png) and the desktop GUI export job must
+    /// produce the same pixels for the same scene: both emulate the sRGB
+    /// surface the viewport composites with (the CLI fix for washed-out
+    /// colors; the offscreen capture is always linear). Skipped without a
+    /// headless GPU adapter.
+    #[test]
+    fn cli_export_matches_gui_export_job() {
+        for color in [[128u8, 128, 128], [30, 200, 90]] {
+            let bundle = material_cube(color);
+            let o = options();
+            let dir = tempfile::tempdir().unwrap();
+            // The CLI has no camera flag: it fits the default camera, so the
+            // GUI leg must use the same camera-less path for the comparison.
+            let gui = match export(
+                bundle.clone(),
+                None,
+                None,
+                &dir.path().join("gui.png"),
+                &o,
+                true,
+                "parity.cdraft",
+                false,
+                &Control::default(),
+            ) {
+                Ok(image) => image,
+                Err(e) if adapter_unavailable(&e) => {
+                    eprintln!("SKIP PNG GPU checks: {e}");
+                    return;
+                }
+                Err(e) => panic!("{e}"),
+            };
+            let dir = tempfile::tempdir().unwrap();
+            let input = dir.path().join("parity.cdraft");
+            let output = dir.path().join("cli.png");
+            cindral_io::save_draft(&input, &bundle).unwrap();
+            crate::png_cli::run([
+                std::ffi::OsString::from("--export-png"),
+                input.into_os_string(),
+                output.clone().into_os_string(),
+                "--width".into(),
+                "64".into(),
+                "--height".into(),
+                "64".into(),
+                "--aa".into(),
+                "off".into(),
+            ])
+            .unwrap();
+            let mut reader = png::Decoder::new(std::io::BufReader::new(
+                std::fs::File::open(output).unwrap(),
+            ))
+            .read_info()
+            .unwrap();
+            let mut decoded = vec![0; 64 * 64 * 4];
+            reader.next_frame(&mut decoded).unwrap();
+            assert!(
+                decoded
+                    .iter()
+                    .zip(&gui.rgba)
+                    .all(|(&a, &b)| a.abs_diff(b) <= 2),
+                "{color:?}: CLI export differs from GUI export job"
             );
         }
     }
