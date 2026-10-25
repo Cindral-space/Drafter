@@ -296,10 +296,13 @@ pub fn export_obj(path: &Path, bundle: &DraftBundle) -> Result<ExportSummary> {
                     writeln!(w, "v {:.6} {:.6} {:.6}", p1.x, p1.y, p1.z)?;
                     writeln!(w, "v {:.6} {:.6} {:.6}", p2.x, p2.y, p2.z)?;
 
-                    // Write 3 UVs
-                    writeln!(w, "vt {:.6} {:.6}", uv0[0], uv0[1])?;
-                    writeln!(w, "vt {:.6} {:.6}", uv1[0], uv1[1])?;
-                    writeln!(w, "vt {:.6} {:.6}", uv2[0], uv2[1])?;
+                    // Write 3 UVs. OBJ uses a bottom-left UV origin (V up)
+                    // while the viewport and glTF use top-left; invert V as
+                    // the final step on the final UVs (after size, rotation
+                    // and flip) so consumers show the texture upright.
+                    writeln!(w, "vt {:.6} {:.6}", uv0[0], 1.0 - uv0[1])?;
+                    writeln!(w, "vt {:.6} {:.6}", uv1[0], 1.0 - uv1[1])?;
+                    writeln!(w, "vt {:.6} {:.6}", uv2[0], 1.0 - uv2[1])?;
 
                     // Write 1 normal
                     writeln!(w, "vn {:.6} {:.6} {:.6}", normal.x, normal.y, normal.z)?;

@@ -86,6 +86,13 @@ origin (−360…+360 degrees), and `Flip H` / `Flip V` mirror it. Order is
 flip → rotate → scale, matching the vertex shader exactly; the same
 transform is applied by the OBJ/glTF/DAE exporters when they write UVs.
 
+**UV origin per format**: the viewport and glTF use a top-left UV origin
+(V down); OBJ and COLLADA (DAE) use a bottom-left origin (V up). The
+exporters therefore write OBJ/DAE V as `1 - V` applied as the final step on
+the final UVs (after size, rotation and flip), and keep glTF as computed —
+texture orientation matches the viewport in convention-respecting
+consumers.
+
 - A newly imported texture defaults to its **physical size at 96 DPI**
   (pixels ÷ 96 × 25.4 mm). Tiny images whose DPI size would be under
   5 cm on an edge fall back to 1 m wide with the aspect preserved.
@@ -114,18 +121,27 @@ is resampled.
 
 ## Texture-array sizing and budget
 
-All texture layers live in one `texture_2d_array` whose square edge length
-`L` is chosen per document:
+All texture layers live in one uniform `texture_2d_array` whose square edge
+length `L` adapts to the document (never per-size-class arrays):
 
-- `L = 512` by default; upgraded to `L = 1024` only while the document has
-  ≤ 31 assets.
-- Every layer carries a full CPU-built bilinear mip chain (×4/3 memory);
-  sampling is trilinear with Repeat addressing and anisotropic filtering
-  clamped to `min(adapter max, 16)` (at least 4× when supported).
+- `L = 512` by default; upgraded to `L = 1024` while the document has ≤ 35
+  assets (36 layers × 5.33 MiB = exactly 192 MiB).
+- Every layer is resampled from the decoded source directly to `L` (box
+  prefilter plus Catmull-Rom) and carries a full CPU-built mip chain averaged
+  in premultiplied alpha (×4/3 memory), so transparent edges stay free of
+  dark halos. Sampling is trilinear with Repeat addressing and anisotropic
+  filtering (`anisotropy_clamp = 16`, clamped internally by wgpu to the
+  adapter maximum; at least 4× when supported).
 - Resident estimate `(assets + 1) × L² × 4 B × 4/3` stays inside the
-  192 MiB working target under the 256 MiB texture budget: 127 layers at
-  512² ≈ 170.7 MiB; 31 layers at 1024² ≈ 170.7 MiB. A decode that would
-  cross a class boundary re-creates the array once and re-uploads.
+  192 MiB working target under the 256 MiB texture budget: 128 layers at
+  512² ≈ 170.7 MiB; 36 layers at 1024² = 192 MiB. A decode that crosses the
+  edge threshold re-creates the array once and re-uploads from the original
+  embedded bytes.
+- Import decodes one asset at a time (decode → resample to `L` → mip chain →
+  drop before the next), so peak decoded memory is one asset even with 127
+  large textures.
+- If the GPU cannot allocate the array, a clear message appears in the
+  status bar and the previous textures remain in use.
 - Texture (re)uploads happen only on asset-table changes; style or shadow
   toggles touch uniforms only (asserted by regression).
 

@@ -279,10 +279,14 @@ fn geometry(
                 .material
                 .and_then(|m| doc_materials.get(&m))
                 .and_then(|m| m.texture_mapping.as_ref());
-            uvs.extend(cindral_core::TextureMapping::map_uv(
+            // COLLADA uses a bottom-left UV origin (V up) while the viewport
+            // and glTF use top-left; invert V as the final step on the final
+            // UVs (after size, rotation and flip).
+            let mapped = cindral_core::TextureMapping::map_uv(
                 uv(model.vertices()[vertex].position, face.plane.normal),
                 mapping,
-            ));
+            );
+            uvs.extend([mapped[0], 1.0 - mapped[1]]);
             corners.insert(indices[vertex], [indices[vertex], normal, uv_index]);
         }
         let symbol = face_symbol(face);

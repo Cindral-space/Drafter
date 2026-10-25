@@ -784,9 +784,14 @@ fn material_mapping_scales_rotates_and_flips_exported_uvs() {
     );
 
     // Hand-computed expectation: flip H then rotate 90° then scale by 1/2, 1.
-    // corners (0,0)(4,0)(4,4)(0,4) -> (0,0)(0,-4)(-2,-4)(-2,0)
+    // glTF/viewport corners (top-left V origin):
+    // (0,0)(4,0)(4,4)(0,4) -> (0,0)(0,-4)(-2,-4)(-2,0)
     let expected_min = [-2.0f32, -4.0];
     let expected_max = [0.0f32, 0.0];
+    // OBJ/DAE corners (bottom-left V origin): V is inverted as the final
+    // step, so every V becomes 1 - V: (0,1)(0,5)(-2,5)(-2,1).
+    let obj_expected_min = [-2.0f32, 1.0];
+    let obj_expected_max = [0.0f32, 5.0];
     let extents = |uvs: &[[f32; 2]]| {
         let mut min = [f32::INFINITY; 2];
         let mut max = [f32::NEG_INFINITY; 2];
@@ -820,11 +825,11 @@ fn material_mapping_scales_rotates_and_flips_exported_uvs() {
     let (min, max) = extents(&uvs);
     for i in 0..2 {
         assert!(
-            (min[i] - expected_min[i]).abs() < 1e-4,
+            (min[i] - obj_expected_min[i]).abs() < 1e-4,
             "obj min[{i}] {min:?}"
         );
         assert!(
-            (max[i] - expected_max[i]).abs() < 1e-4,
+            (max[i] - obj_expected_max[i]).abs() < 1e-4,
             "obj max[{i}] {max:?}"
         );
     }
@@ -897,15 +902,215 @@ fn material_mapping_scales_rotates_and_flips_exported_uvs() {
             .map(|u| [u[0] as f32, u[1] as f32])
             .collect::<Vec<_>>(),
     );
-    // DAE UVs are divided by the export unit scale (meters), so they match.
+    // DAE UVs are divided by the export unit scale (meters), and V carries
+    // the same bottom-left inversion as OBJ.
     for i in 0..2 {
         assert!(
-            (min[i] - expected_min[i]).abs() < 1e-4,
+            (min[i] - obj_expected_min[i]).abs() < 1e-4,
             "dae min[{i}] {min:?}"
         );
         assert!(
-            (max[i] - expected_max[i]).abs() < 1e-4,
+            (max[i] - obj_expected_max[i]).abs() < 1e-4,
             "dae max[{i}] {max:?}"
         );
     }
+
+    // Exact corner UVs per format: the four planar corners must appear
+    // verbatim in each format, with OBJ/DAE V exactly 1 - glTF V.
+    let gltf_uvs = gltf_texcoords(&value);
+    // Snap to the exported 6-decimal grid and fold -0.0 into 0.0 so 90°
+    // rotation epsilon (sin(PI/2) ~ 1e-16) cannot break exactness.
+    let snap = |uv: [f64; 2]| {
+        [
+            (uv[0] * 1e5).round() / 1e5 + 0.0,
+            (uv[1] * 1e5).round() / 1e5 + 0.0,
+        ]
+    };
+    let unique = |uvs: &[[f64; 2]]| {
+        let mut set: Vec<[f64; 2]> = Vec::new();
+        for uv in uvs {
+            let uv = snap(*uv);
+            if !set
+                .iter()
+                .any(|c| (c[0] - uv[0]).abs() < 1e-5 && (c[1] - uv[1]).abs() < 1e-5)
+            {
+                set.push(uv);
+            }
+        }
+        set.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        set
+    };
+    let gltf_corners = unique(
+        &gltf_uvs
+            .iter()
+            .map(|uv| [uv[0] as f64, uv[1] as f64])
+            .collect::<Vec<_>>(),
+    );
+    let obj_corners = unique(&uvs);
+    let dae_corners = unique(&uvs);
+    let expected_gltf = unique(&[[0.0f64, 0.0], [0.0, -4.0], [-2.0, -4.0], [-2.0, 0.0]]);
+    let expected_obj = unique(&[[0.0f64, 1.0], [0.0, 5.0], [-2.0, 5.0], [-2.0, 1.0]]);
+    assert_eq!(gltf_corners, expected_gltf, "glTF corner UVs");
+    assert_eq!(obj_corners, expected_obj, "OBJ corner UVs");
+    assert_eq!(dae_corners, expected_obj, "DAE corner UVs");
+    // OBJ and DAE carry exactly 1 - glTF V for every corner (U identical).
+    let has = |set: &[[f64; 2]], target: [f64; 2]| {
+        set.iter()
+            .any(|c| (c[0] - target[0]).abs() < 1e-5 && (c[1] - target[1]).abs() < 1e-5)
+    };
+    for g in &gltf_corners {
+        let inverted = snap([g[0], 1.0 - g[1]]);
+        assert!(has(&obj_corners, inverted), "OBJ lacks {inverted:?}");
+        assert!(has(&dae_corners, inverted), "DAE lacks {inverted:?}");
+    }
+}
+
+/// Decodes every TEXCOORD_0 pair from a self-contained glTF (base64 buffer).
+fn gltf_texcoords(value: &Value) -> Vec<[f32; 2]> {
+    let uri = value["buffers"][0]["uri"].as_str().unwrap();
+    let b64 = uri
+        .strip_prefix("data:application/octet-stream;base64,")
+        .unwrap();
+    let bytes = BASE64_STANDARD.decode(b64).unwrap();
+    let view_offset = |idx: usize| {
+        value["bufferViews"][idx]["byteOffset"]
+            .as_u64()
+            .unwrap_or(0)
+    };
+    let mut uvs = Vec::new();
+    for mesh in value["meshes"].as_array().unwrap() {
+        for prim in mesh["primitives"].as_array().unwrap() {
+            let texcoord = &prim["attributes"]["TEXCOORD_0"];
+            if texcoord.is_null() {
+                continue;
+            }
+            let accessor = &value["accessors"][texcoord.as_u64().unwrap() as usize];
+            let base = view_offset(accessor["bufferView"].as_u64().unwrap() as usize)
+                + accessor["byteOffset"].as_u64().unwrap_or(0);
+            let stride = value["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize]
+                ["byteStride"]
+                .as_u64()
+                .unwrap_or(8) as usize;
+            let count = accessor["count"].as_u64().unwrap() as usize;
+            for i in 0..count {
+                let at = base as usize + i * stride;
+                uvs.push([
+                    f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()),
+                    f32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()),
+                ]);
+            }
+        }
+    }
+    assert!(!uvs.is_empty(), "no TEXCOORD_0 pairs decoded");
+    uvs
+}
+
+#[test]
+fn obj_and_dae_invert_only_the_v_sign_convention() {
+    use cindral_core::{BulkFace, BulkGeometry, DefinitionData, Material};
+
+    // A plain 1x1 m XY face with a texture but the default mapping: the raw
+    // planar UVs reach the files untransformed, so the ONLY difference
+    // between the formats is the bottom-left V convention of OBJ/DAE. A
+    // regression that flips U, or inverts V before mapping, lands here.
+    let mut bundle = DraftBundle::default();
+    let (slot, asset) = make_test_png();
+    bundle.textures.insert(slot.clone(), asset);
+    bundle.document.next_id = 20;
+    bundle.document.materials.insert(
+        MaterialId(10),
+        Material {
+            name: "Plain".into(),
+            color: [150, 100, 60],
+            opacity: 1.,
+            texture: Some(slot),
+            texture_mapping: None,
+        },
+    );
+    bundle.document.definitions.insert(
+        DefinitionId(0),
+        DefinitionData {
+            name: "Model".into(),
+            kind: DefinitionKind::Root,
+            geometry: BulkGeometry {
+                vertices: vec![
+                    DVec3::ZERO,
+                    DVec3::new(1., 0., 0.),
+                    DVec3::new(1., 1., 0.),
+                    DVec3::new(0., 1., 0.),
+                ],
+                faces: vec![BulkFace {
+                    outer: vec![0, 1, 2, 3],
+                    holes: Vec::new(),
+                    material: Some(MaterialId(10)),
+                    color: [160, 177, 193, 255],
+                }],
+                edges: Vec::new(),
+            }
+            .build(false, false)
+            .unwrap()
+            .to_data(),
+            instances: BTreeMap::new(),
+        },
+    );
+
+    let dir = tempdir().unwrap();
+    let obj = dir.path().join("plain.obj");
+    export_obj(&obj, &bundle).unwrap();
+    let obj_uvs: Vec<[f64; 2]> = std::fs::read_to_string(&obj)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.strip_prefix("vt "))
+        .map(|l| {
+            let mut it = l.split_whitespace();
+            [
+                it.next().unwrap().parse().unwrap(),
+                it.next().unwrap().parse().unwrap(),
+            ]
+        })
+        .collect();
+
+    let gltf = dir.path().join("plain.gltf");
+    export_gltf(&gltf, &bundle).unwrap();
+    let value: Value = serde_json::from_str(&std::fs::read_to_string(&gltf).unwrap()).unwrap();
+    let gltf_uvs: Vec<[f64; 2]> = gltf_texcoords(&value)
+        .iter()
+        .map(|uv| [uv[0] as f64, uv[1] as f64])
+        .collect();
+
+    let dae = dir.path().join("plain.dae");
+    cindral_io::export_dae(&dae, &bundle, &Default::default(), &Default::default()).unwrap();
+    let dae_uvs: Vec<[f64; 2]> =
+        roxmltree::Document::parse(&std::fs::read_to_string(&dae).unwrap())
+            .unwrap()
+            .descendants()
+            .find(|n| {
+                n.has_tag_name("float_array")
+                    && n.attribute("id").is_some_and(|id| id.contains("-uv"))
+            })
+            .map(|n| {
+                n.text()
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|v| v.parse::<f64>().unwrap())
+                    .collect::<Vec<f64>>()
+                    .chunks(2)
+                    .map(|c| [c[0], c[1]])
+                    .collect()
+            })
+            .unwrap();
+
+    // Planar corners (0,0)(1,0)(1,1)(0,1) in meters: glTF keeps them; OBJ and
+    // DAE carry exactly 1 - V. U is untouched, so a flipped-U or V-before-
+    // mapping regression cannot satisfy these sets.
+    let expected_gltf = vec![[0.0f64, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+    let expected_bottom_left = vec![[0.0f64, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+    let sorted = |mut uvs: Vec<[f64; 2]>| {
+        uvs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        uvs.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5);
+        uvs
+    };
+    assert_eq!(sorted(gltf_uvs), expected_gltf);
+    assert_eq!(sorted(obj_uvs), expected_bottom_left);
+    assert_eq!(sorted(dae_uvs), expected_bottom_left);
 }
