@@ -8,10 +8,20 @@ meter/Y up; COLLADA without metadata uses meter/Y up. Unit and axis conversion
 conjugates instance matrices as well as transforming local vertices, preserving
 nested translations, mirrors and shared geometry.
 
-Default cleanup joins disjoint coplanar triangle pairs into polygons and marks
-remaining compatible coplanar seams soft/smooth (hidden in ordinary shaded styles).
-It does not compute maximal coplanar regions. Material and color boundaries
-are preserved. Source UV sets and their seams are not represented by the current
+Default cleanup groups coplanar, edge-connected triangles that share material,
+color and orientation into bounded regions and builds one polygon per region
+(outer boundary plus real holes as inner loops). Region growth is breadth-first
+from the lowest face id and capped at 2,048 faces per region with merged
+boundaries capped at 256 corners; larger coplanar areas split deterministically
+instead of failing. Regions whose boundary is self-touching or otherwise cannot
+produce a valid planar face fall back to the previous pairwise triangle-to-quad
+result and are counted in the import notes. Interior edges are removed exactly
+as the previous pairwise cleanup removed diagonals; remaining compatible
+coplanar seams are marked soft/smooth (hidden in ordinary shaded styles).
+Material and color boundaries are preserved. Exact duplicate faces (same vertex
+set, orientation and material) are removed and reported in the import summary;
+opposite-winding copies are kept because they may be intentional double-sided
+surfaces. Source UV sets and their seams are not represented by the current
 planar texture mapping model. The two cleanup switches are independent.
 A scene may remain a single wrapping component with nested shared definitions or be
 flattened into loose root geometry. Flattening is bounded by expanded geometry limits.
@@ -73,20 +83,26 @@ app workload installs worker-prepared caches and measures a connected corner cho
 through the real `DrafterApp::execute` path, including dirty CPU mesh preparation.
 These tests enforce a 10-second import budget and a 16-ms edit budget. They exclude
 GPU completion, picking/inference, UI event dispatch, vsync and whole-frame latency.
-Triangle pair cleanup yields approximately 50,000 faces; exact pair count depends on
-mesh connectivity, so the regression checks workload/geometry ranges rather than a
-maximal-region face count. Original explicit mesh edges cannot restore a removed
-cleanup diagonal or clear a softened seam.
+Region cleanup merges the fully coplanar single-material sheet into bounded compact
+faces (67-68 faces under the region/ring caps); the regression checks a bounded
+range rather than an exact region count. Original explicit mesh edges cannot
+restore a removed cleanup diagonal or clear a softened seam.
 
 Final release measurements on the local Ryzen 5 2400G machine, sequentially without
 concurrent builds/agents during measured execution:
 
-| Workload | Result |
-| --- | ---: |
-| glTF 100k triangles: parse + conversion + validation/history | 3.609 s |
-| Same import including append to destination/history | 5.707 s |
-| Connected chord edit in that imported component (kernel) | 0.212 ms |
-| Imported sheet edit + dirty CPU mesh preparation (app) | 2.123 ms |
+| Workload | Pairwise cleanup | Region cleanup |
+| --- | ---: | ---: |
+| glTF 100k triangles: parse + conversion + validation/history | 3.609 s | 1.127 s |
+| Same import including append to destination/history | 5.707 s | 1.245 s |
+| Connected chord edit in that imported component (kernel) | 0.212 ms | 2.003 ms |
+| Imported sheet edit + dirty CPU mesh preparation (app) | 2.123 ms | 2.909 ms |
+
+Imported sheet: 68 merged faces (region cap 2,048, ring cap 256) versus
+approximately 50,000 pairwise quads. A real textured cube fixture imports as
+6 faces / 12 edges instead of 12 triangles / 18 edges. Merged faces keep local
+edits inside the interactive budget through the confined-chord fast path, whose
+convexity check accepts rings up to the merged-ring cap.
 
 Raw evidence: [glTF import](benchmarks/2026-10-21-i1-gltf-import.txt) and
 [app edit/CPU mesh](benchmarks/2026-10-21-i1-import-edit.txt). These are single
@@ -138,4 +154,4 @@ suffixes. Definitions receive unique numbered names. Existing records remain unc
 Undo removes added geometry, definitions, tags, materials and texture assets; redo
 restores them. Unused source texture assets are omitted. Completion identifies the
 current model or new document and provides an Import report link with merge/rename
-counts, warnings and omissions.
+counts, removed duplicate faces, coplanar fallback notes, warnings and omissions.
