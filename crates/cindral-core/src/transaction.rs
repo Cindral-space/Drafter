@@ -3,6 +3,13 @@ use crate::spatial::envelope;
 use crate::topology::face_key;
 use crate::{Command, DVec3, Edge, EdgeId, Face, FaceId, KernelError, Model, Vertex, VertexId};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::AtomicBool;
+
+/// Test-only override: when set, the confined-chord cavity fast path is disabled
+/// and selection always walks the exterior boundary, so tests can compare the
+/// resulting geometry of both cavity paths on identical inputs.
+#[doc(hidden)]
+pub static FORCE_SLOW_CAVITY: AtomicBool = AtomicBool::new(false);
 
 /// Entities changed by the last edit/undo/redo, including removed IDs.
 /// Current geometry belongs to the root container; M5 can partition this per group.
@@ -347,12 +354,13 @@ impl Delta {
             // A chord wholly inside one convex face cannot close a remote wire loop.
             // Other edits still need the exterior-boundary traversal for Euler correctness.
             let confined = if let Command::AddEdge { start, end } = command {
-                faces.iter().any(|id| {
-                    model
-                        .faces
-                        .get(id)
-                        .is_some_and(|f| convex_chord(model, f, *start, *end))
-                })
+                !FORCE_SLOW_CAVITY.load(std::sync::atomic::Ordering::Relaxed)
+                    && faces.iter().any(|id| {
+                        model
+                            .faces
+                            .get(id)
+                            .is_some_and(|f| convex_chord(model, f, *start, *end))
+                    })
             } else {
                 false
             };

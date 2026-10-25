@@ -45,7 +45,7 @@ pub use command::{Command, History};
 pub use geometry::{Plane, MAX_COORDINATE, TOLERANCE};
 pub use glam::DVec3;
 pub use model::{Edge, EdgeId, Face, FaceId, Model, Vertex, VertexId};
-pub use transaction::ChangeSet;
+pub use transaction::{ChangeSet, FORCE_SLOW_CAVITY};
 
 /// Failures leave the model and its command history unchanged.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
