@@ -217,6 +217,44 @@ mod tests {
         }
         bundle
     }
+    /// Cube painted through the GPU material table (palette material, not
+    /// legacy vertex colors), plus the swatch color for expectations.
+    fn material_cube(color: [u8; 3]) -> cindral_io::DraftBundle {
+        use cindral_core::{FaceId, Material, OrganizationCommand as Org};
+        let mut app = DrafterApp::default();
+        app.execute(Command::AddPolyline {
+            points: vec![DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y],
+            closed: true,
+        })
+        .unwrap();
+        let face = *app.document().model().faces().keys().next().unwrap();
+        app.execute(Command::PushPull { face, distance: 1. })
+            .unwrap();
+        app.org_command(Org::CreateMaterial(Material {
+            name: "Swatch".into(),
+            color,
+            opacity: 1.,
+            texture: None,
+            texture_mapping: None,
+        }));
+        let material = app.history.materials().keys().next_back().copied().unwrap();
+        let faces: Vec<FaceId> = app.document().model().faces().keys().copied().collect();
+        app.org_command(Org::PaintFaces {
+            faces,
+            material: Some(material),
+        });
+        let mut bundle = app.file_values();
+        bundle.presentation.style.sky = None;
+        bundle.presentation.style.ground = None;
+        bundle
+    }
+    /// Orthographic top view: only the cube's +Z face is visible.
+    fn top_camera() -> Camera {
+        let mut camera = camera();
+        camera.set_view(cindral_render::camera::StandardView::Top);
+        camera.projection = cindral_render::camera::Projection::Orthographic;
+        camera
+    }
     fn options() -> Options {
         Options {
             width: 64,
@@ -391,6 +429,74 @@ mod tests {
         .is_err());
         assert!(!path.exists());
     }
+    /// A palette-material face renders the swatch color: the panel swatch
+    /// (the stored sRGB bytes), the viewport pixel and the exported PNG
+    /// pixel all agree with the shaded sRGB value within tolerance, for a
+    /// mid-gray and a saturated color (review #1). Both legs use the
+    /// production sRGB-surface path the desktop app exports and displays
+    /// with (`target_format.is_srgb()`).
+    #[test]
+    fn material_swatch_viewport_and_export_pixel_agree() {
+        for color in [[128u8, 128, 128], [30, 200, 90]] {
+            let bundle = material_cube(color);
+            let o = options();
+            let baseline = match render(
+                bundle.clone(),
+                Some(top_camera()),
+                None,
+                &o,
+                true,
+                &Control::default(),
+            ) {
+                Ok(image) => image,
+                Err(e) if adapter_unavailable(&e) => {
+                    eprintln!("SKIP PNG GPU checks: {e}");
+                    return;
+                }
+                Err(e) => panic!("{e}"),
+            };
+            let center = (32 * 64 + 32) * 4;
+            // scene.wgsl face lighting for the +Z face: fixed key/fill
+            // lights, shaded in linear space, sRGB-encoded by the
+            // Rgba8UnormSrgb target.
+            let key = glam::Vec3::new(0.45, -0.35, 0.82).normalize();
+            let fill = glam::Vec3::new(-0.55, 0.60, 0.58).normalize();
+            let shade = 0.45 + 0.40 * key.z.abs() + 0.15 * fill.z.abs();
+            let expected: [u8; 3] = color.map(|c| {
+                let linear = cindral_core::srgb_to_linear(f32::from(c) / 255.);
+                (255. * cindral_core::linear_to_srgb(linear * shade))
+                    .round()
+                    .clamp(0., 255.) as u8
+            });
+            let pixel = [
+                baseline.rgba[center],
+                baseline.rgba[center + 1],
+                baseline.rgba[center + 2],
+            ];
+            assert!(
+                pixel.iter().zip(expected).all(|(&a, b)| a.abs_diff(b) <= 2),
+                "{color:?}: export pixel {pixel:?} != shaded swatch {expected:?}"
+            );
+            // The live viewport composites the same color.
+            let mut app = DrafterApp {
+                history: cindral_io::validate_bundle(&bundle).unwrap(),
+                ..Default::default()
+            };
+            app.presentation = bundle.presentation.clone();
+            app.camera = top_camera();
+            app.sync_file_textures().unwrap();
+            app.prepare_sections();
+            let displayed = viewport_callback(&mut app, true);
+            assert!(
+                displayed
+                    .iter()
+                    .zip(&baseline.rgba)
+                    .all(|(&a, &b)| a.abs_diff(b) <= 2),
+                "{color:?}: viewport/export differ"
+            );
+        }
+    }
+
     fn bg(v: u8, srgb: bool) -> f64 {
         let v = f64::from(v) / 255.;
         if srgb {
