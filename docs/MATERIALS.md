@@ -154,3 +154,27 @@ after load writes the current schema (the round trip is idempotent).
   ordering guarantees).
 - Importer UV derivation: re-importing a file replaces authored UVs with
   native planar mapping from the material's size/rotation/flip.
+
+## Questions for the user
+
+Each of these can be answered by trying one thing in the reference desktop
+application or its web version; the conventional choice is implemented until
+then.
+
+1. **Multi-selection painting** — with two objects selected, does clicking one
+   of them paint both selected objects, or only the clicked one? (Implemented:
+   clicking a selected object paints the whole selection, both objects.)
+2. **Sampling binding** — is Alt+click really the conventional sample
+   (eyedropper) binding for the Paint Bucket, and does the reference app
+   offer a separate Eyedropper tool/button? (Implemented: Alt+click plus a
+   panel Eyedropper button for the Linux Alt-grab case.)
+3. **Default texture size** — for an imported image without explicit
+   metadata, is the default physical size pixels-at-96-DPI, the image's
+   embedded DPI metadata, or a fixed one-repeat-per-meter rule? (Implemented:
+   96 DPI with a 1-meter fallback for tiny images.)
+4. **Shift-replace scope** — does Shift+click replace the material across the
+   whole model, or only inside the clicked group/component? (Implemented:
+   whole model; Ctrl+Shift limits it to the clicked object.)
+5. **Rotation behavior** — does rotating a texture in the reference app
+   rotate about the face-local mapping origin (our choice) or about the
+   face/camera center, and is the rotation sign clockwise on screen?
