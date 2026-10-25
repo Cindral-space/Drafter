@@ -98,4 +98,4 @@ mod sun;
 pub use sun::{sun_direction, valid_date};
 
 mod bulk;
-pub use bulk::{BulkEdge, BulkFace, BulkGeometry};
+pub use bulk::{BulkEdge, BulkFace, BulkGeometry, BulkStats};

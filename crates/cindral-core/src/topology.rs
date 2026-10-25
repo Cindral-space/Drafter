@@ -432,7 +432,7 @@ fn interior_sample(polygon: &[DVec2]) -> Result<DVec2, KernelError> {
     Err(KernelError::Triangulation)
 }
 
-fn canonical_ring(ring: &[VertexId]) -> Vec<VertexId> {
+pub(crate) fn canonical_ring(ring: &[VertexId]) -> Vec<VertexId> {
     let Some((start, _)) = ring.iter().enumerate().min_by_key(|(_, id)| *id) else {
         return Vec::new();
     };
