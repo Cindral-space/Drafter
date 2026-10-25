@@ -34,28 +34,43 @@ Linear/Linear, no anisotropy:
 
 ### A — budget-sized uniform array (chosen)
 
-Keep the single texture array; all layers share one edge length `L`; add a CPU
-mip chain (×4/3 bytes) and an anisotropic sampler (clamped to what the adapter
-reports). `L` is picked per document from the asset count so the estimated
-resident set stays inside the budget:
+Keep the single texture array; all layers share one adaptive edge length `L`
+(one uniform array, never per-size-class arrays); add a CPU mip chain (×4/3
+bytes) and an anisotropic sampler (hardcoded 16, which wgpu clamps internally
+to the adapter maximum). `L` is picked per document from the asset count so
+the estimated resident set stays inside the budget:
 
     estimate(n, L) = (n + 1) × L² × 4 B × 4/3
 
+One 1024² layer with mips is 16/3 MiB ≈ 5.33 MiB; one 512² layer with mips is
+4/3 MiB ≈ 1.33 MiB.
+
 | L | layers that fit ≤ 192 MiB working target | resident at 127 layers |
 | --- | --- | --- |
-| 256 | 508 | 42.7 MiB |
-| 512 | 127 | 170.7 MiB |
-| 1024 | 31 | — (rejected at 127) |
+| 512 | 144 (the 127-asset cap needs 128) | 170.7 MiB |
+| 1024 | 36 | — (rejected at 127) |
 
-Policy: `L = 1024` while the document has ≤ 31 assets, else `L = 512`
-(≤ 127 assets). A decode that would cross a class boundary re-creates the
-array once and re-uploads (rare, user-visible only as a brief one-time cost).
-Original encoded bytes stay untouched in `.cdraft`; only the GPU copy is
-resampled (already true today, now with a bigger target and mips).
+Policy: `L = 1024` while the document has ≤ 35 assets (36 layers × 5.33 MiB =
+exactly 192 MiB), else `L = 512` (≤ 127 assets, 170.7 MiB). A decode that
+would cross the edge threshold re-creates the array once and re-uploads
+(rare, user-visible only as a brief one-time cost). Original encoded bytes
+stay untouched in `.cdraft`; only the GPU copy is resampled.
 
-- 4096×4096 import: decoded source is 64 MiB transient CPU memory; the GPU
-  resident copy is one 512² layer ≈ 1.33 MiB. Upload = resample to L plus a
-  10-level mip chain.
+- 4096×4096 import: the decoded source is 64 MiB of transient CPU memory and
+  only one asset is ever decoded at a time (decode → resample to L → mip
+  chain → drop, before the next asset), so peak decoded memory is one asset,
+  not all assets. The GPU resident copy is one L² layer with mips ≈ 5.33 MiB
+  at `L = 1024`. Upload = resample the decoded source directly to L (box
+  prefilter + Catmull-Rom, never through a smaller preview) plus an 11-level
+  mip chain. If the asset count later crosses the edge threshold, every
+  layer is re-resampled from the original embedded bytes.
+- Mip levels below the base are averaged in premultiplied alpha and
+  un-premultiplied afterwards, so transparent texels cannot bleed dark
+  colors into visible edges; the base level and all opaque textures are
+  pixel-identical to the resampled source.
+- Array creation and upload run inside wgpu error scopes: an allocation
+  failure reports a clear status-bar message and leaves the previous array
+  and the document unchanged.
 - Fits the budget, touches only `create_materials_texture_array`, the layer
   preparation, the sampler and their tests — no shader restructure.
 
@@ -80,13 +95,13 @@ predictability, unnecessary at ≤127 assets.
 
 Option A. Numbers for the implementation contract:
 
-- Default `L = 512`, upgrading to `L = 1024` only for documents with ≤ 31
+- Default `L = 512`, upgrading to `L = 1024` only for documents with ≤ 35
   assets; both stay under the 192 MiB working target and the 256 MiB budget.
-- Mipmaps: CPU `resample_bilinear` chain (each level half the previous),
-  uploaded once per layer change; `mip_level_count = log2(L) + 1`.
+- Mipmaps: CPU chain, each level half the previous, averaged in premultiplied
+  space, uploaded once per layer change; `mip_level_count = log2(L) + 1`.
 - Filtering: trilinear (`Linear`/`Linear`/`Linear` mipmap) with Repeat
-  addressing, plus `anisotropy_clamp = min(adapter max, 16)`, at least 4× when
-  the adapter reports support.
+  addressing, plus `anisotropy_clamp = 16` (wgpu clamps internally to the
+  adapter maximum; at least 4× when supported).
 - Texture bytes on disk remain the original encoded images; dedup by SHA-256
   is unchanged. The 127-asset cap keeps its clear rejection message.
 - Style or shadow toggles only touch uniforms; texture (re)uploads happen on

@@ -17,7 +17,8 @@ pub use scene::{
     DefinitionUpdate, InstanceBatch, InstanceData, SceneCallback, SceneRenderer, SceneUpdate,
 };
 pub use texture::{
-    TextureError, TexturePixels, DEFAULT_WHITE_LAYER, MAX_TEXTURE_LAYERS, PREVIEW_SIZE,
+    build_texture_layers, texture_array_edge, TextureArrayData, TextureError, TextureMips,
+    TexturePixels, TextureSource, DEFAULT_WHITE_LAYER, MAX_TEXTURE_LAYERS,
 };
 
 mod shadow;

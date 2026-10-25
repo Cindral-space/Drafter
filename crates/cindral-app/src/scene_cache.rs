@@ -21,7 +21,7 @@ pub(crate) struct SceneCache {
     placements: BTreeMap<DefinitionId, glam::DMat4>,
     revision: Option<u64>,
     texture_layers: BTreeMap<String, u32>,
-    textures: Option<Arc<Vec<cindral_render::texture::TexturePixels>>>,
+    textures: Option<Arc<cindral_render::texture::TextureArrayData>>,
     material_indices: BTreeMap<MaterialId, u32>,
 }
 fn style(
@@ -61,10 +61,10 @@ impl SceneCache {
     pub(crate) fn set_textures(
         &mut self,
         layers: BTreeMap<String, u32>,
-        pixels: Vec<cindral_render::texture::TexturePixels>,
+        data: Arc<cindral_render::texture::TextureArrayData>,
     ) {
         self.texture_layers = layers;
-        self.textures = Some(Arc::new(pixels));
+        self.textures = Some(data);
         self.revision = None;
     }
     pub(crate) fn definitions(&self) -> Vec<DefinitionId> {
@@ -489,16 +489,24 @@ mod tests {
         .unwrap();
         let mut cache = SceneCache::default();
         cache.sync(&doc).unwrap();
+        let asset_data = cindral_render::texture::TexturePixels::new(1, 1, vec![20, 40, 60, 128]);
         cache.set_textures(
             BTreeMap::from([("asset".into(), 1)]),
-            vec![cindral_render::texture::TexturePixels::new(
-                1,
-                1,
-                vec![20, 40, 60, 128],
-            )],
+            std::sync::Arc::new(cindral_render::texture::TextureArrayData {
+                edge: cindral_render::texture::texture_array_edge(1),
+                layers: cindral_render::texture::build_texture_layers::<
+                    cindral_render::texture::TexturePixels,
+                    std::convert::Infallible,
+                    _,
+                >(
+                    cindral_render::texture::texture_array_edge(1),
+                    [Ok(asset_data)],
+                )
+                .unwrap(),
+            }),
         );
         let update = cache.sync(&doc).unwrap();
-        assert_eq!(update.textures.as_ref().unwrap().len(), 1);
+        assert_eq!(update.textures.as_ref().unwrap().layers.len(), 2);
         // Texture layer changes ride the material table; painted faces are
         // never restyled or rewritten.
         assert!(update.geometry.is_empty());
@@ -511,9 +519,21 @@ mod tests {
         assert_eq!(params.texture_layer, 1);
         let mut pending = None;
         merge(&mut pending, update);
-        cache.set_textures(BTreeMap::new(), Vec::new());
+        cache.set_textures(
+            BTreeMap::new(),
+            std::sync::Arc::new(cindral_render::texture::TextureArrayData {
+                edge: 1,
+                layers: Vec::new(),
+            }),
+        );
         merge(&mut pending, cache.sync(&doc).unwrap());
-        assert!(pending.unwrap().textures.as_ref().unwrap().is_empty());
+        assert!(pending
+            .unwrap()
+            .textures
+            .as_ref()
+            .unwrap()
+            .layers
+            .is_empty());
         assert!(cache.sync(&doc).unwrap().textures.is_none());
     }
 

@@ -34,7 +34,7 @@ use cindral_core::DefinitionId;
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, ScreenDescriptor};
 
 use crate::mesh::{EdgeVertex, FaceVertex, GeometryBuffers, MeshUpdate};
-use crate::texture::{prepare_preview_layers, TexturePixels, PREVIEW_SIZE};
+use crate::texture::{texture_array_edge, TextureArrayData, TexturePixels};
 
 /// Offscreen color target format (transparent RGBA).
 const OFFSCREEN_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -134,7 +134,7 @@ pub struct SceneUpdate {
     /// Definitions removed from the document, whose GPU buffers should be freed.
     pub removed: Vec<DefinitionId>,
     /// Optional texture array image data for layers 1..N (layer 0 is reserved for white).
-    pub textures: Option<Arc<Vec<TexturePixels>>>,
+    pub textures: Option<Arc<TextureArrayData>>,
     /// Updated GPU material parameter table. Presence rewrites one small
     /// texture and never touches geometry or instance buffers.
     pub materials: Option<Arc<crate::materials::MaterialTable>>,
@@ -275,7 +275,9 @@ pub struct SceneRenderer {
     composite_sampler: wgpu::Sampler,
     offscreen: OffscreenTarget,
     last_update: Option<Weak<SceneUpdate>>,
-    last_textures: Option<Weak<Vec<TexturePixels>>>,
+    last_textures: Option<Weak<TextureArrayData>>,
+    /// Failed texture-array allocations, drained by the app into the status bar.
+    pub texture_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     draw_calls: usize,
 }
 
@@ -324,90 +326,89 @@ fn camera_binding(
     })
 }
 
-/// Working memory target for the texture array (inside the 256 MiB budget).
-const TEXTURE_ARRAY_TARGET_BYTES: u64 = 192 * 1024 * 1024;
-/// Layer edge classes, largest first; the first class fitting the target wins.
-const TEXTURE_ARRAY_EDGES: [u32; 3] = [1024, 512, 256];
-
-/// Layer edge length for `n` assets under the texture budget (TEXTURE_DESIGN.md).
-pub fn texture_array_edge(asset_count: usize) -> u32 {
-    let layers = (asset_count + 1) as u64; // + white fallback
-    TEXTURE_ARRAY_EDGES
-        .iter()
-        .copied()
-        .find(|&edge| {
-            TexturePixels::array_memory_bytes(layers as u32, edge) <= TEXTURE_ARRAY_TARGET_BYTES
-        })
-        .unwrap_or(256)
-}
-
+/// Creates and fills the materials texture array from pre-built edge-sized
+/// mip chains. Allocation and upload run inside wgpu error scopes so an
+/// allocation failure (or validation error) returns a readable error instead
+/// of surfacing as an uncaptured device error.
 fn create_materials_texture_array(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    layers: &[TexturePixels],
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let edge = texture_array_edge(layers.len());
+    data: &TextureArrayData,
+) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+    let edge = data.edge;
     // OpenGL needs an actual array allocation even for the white-only table.
-    let layer_count = (layers.len() as u32).max(2);
+    let layer_count = (data.layers.len() as u32).max(2);
     let mip_levels = edge.trailing_zeros() + 1;
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Cindral scene materials texture array"),
-        size: wgpu::Extent3d {
-            width: edge,
-            height: edge,
-            depth_or_array_layers: layer_count,
-        },
-        mip_level_count: mip_levels,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let create = || -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Cindral scene materials texture array"),
+            size: wgpu::Extent3d {
+                width: edge,
+                height: edge,
+                depth_or_array_layers: layer_count,
+            },
+            mip_level_count: mip_levels,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
 
-    for (layer_idx, layer) in layers.iter().enumerate() {
-        // Layer pixels may be any size (previews are 256); normalize to the
-        // array edge so UV space maps onto the full layer.
-        let base = if layer.width == edge && layer.height == edge {
-            layer.clone()
-        } else {
-            layer.resample(edge, edge)
-        };
-        let chain = base.mip_chain();
-        for (mip_level, level) in chain.iter().enumerate() {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: mip_level as u32,
-                    origin: wgpu::Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: layer_idx as u32,
+        for (layer_idx, layer) in data.layers.iter().enumerate() {
+            for (mip_level, level) in layer.levels.iter().enumerate() {
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: mip_level as u32,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: layer_idx as u32,
+                        },
+                        aspect: wgpu::TextureAspect::All,
                     },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &level.rgba,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(level.width * 4),
-                    rows_per_image: Some(level.height),
-                },
-                wgpu::Extent3d {
-                    width: level.width,
-                    height: level.height,
-                    depth_or_array_layers: 1,
-                },
-            );
+                    &level.rgba,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(level.width * 4),
+                        rows_per_image: Some(level.height),
+                    },
+                    wgpu::Extent3d {
+                        width: level.width,
+                        height: level.height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Cindral scene materials texture array view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+
+        Ok((texture, view))
+    };
+    let result = create();
+
+    // A single poll resolves the scopes: creation-time errors are recorded
+    // synchronously and nothing else was submitted in between, so popping
+    // below never blocks on GPU work.
+    let _ = device.poll(wgpu::PollType::Poll);
+    let mut gpu_error = None;
+    for _ in 0..2 {
+        if let Some(e) = crate::capture::block_on(device.pop_error_scope()) {
+            gpu_error = Some(format!("materials texture array allocation failed: {e}"));
         }
     }
-
-    let view = texture.create_view(&wgpu::TextureViewDescriptor {
-        label: Some("Cindral scene materials texture array view"),
-        dimension: Some(wgpu::TextureViewDimension::D2Array),
-        ..Default::default()
-    });
-
-    (texture, view)
+    match gpu_error {
+        Some(message) => Err(message),
+        None => result,
+    }
 }
 
 /// Creates the small `Rgba32Float` material parameter table texture.
@@ -518,8 +519,8 @@ impl SceneRenderer {
             ],
         });
 
-        // All backends and devices support anisotropic filtering (wgpu 27);
-        // clamp to 16 so grazing-angle sampling stays bounded.
+        // Anisotropy is hardcoded to 16; wgpu clamps it to the adapter
+        // maximum internally (wgpu 27), so no adapter query is needed.
         let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Cindral scene texture sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -984,6 +985,7 @@ impl SceneRenderer {
             offscreen,
             last_update: None,
             last_textures: None,
+            texture_errors: Arc::new(std::sync::Mutex::new(Vec::new())),
             draw_calls: 0,
         }
     }
@@ -1070,26 +1072,37 @@ impl SceneRenderer {
                 .and_then(Weak::upgrade)
                 .is_none_or(|prev| !Arc::ptr_eq(&prev, textures));
             if changed {
-                let layers = prepare_preview_layers(textures);
-                let (texture, view) = create_materials_texture_array(device, queue, &layers);
-                self.shadow.set_materials(
-                    device,
-                    &view,
-                    &self.texture_sampler,
-                    &self.material_params_view,
-                );
-                self.camera_bind_group = camera_binding(
-                    device,
-                    &self.camera_layout,
-                    &self.uniform,
-                    &view,
-                    &self.texture_sampler,
-                    &self.shadow,
-                    &self.material_params_view,
-                );
-                self.materials_texture = texture;
-                self.materials_view = view;
-                self.default_texture_initialized = true;
+                // On allocation failure keep the previous array and bindings
+                // (the CPU document is untouched either way) and surface the
+                // error through `texture_errors` for the status bar.
+                match create_materials_texture_array(device, queue, textures) {
+                    Ok((texture, view)) => {
+                        self.shadow.set_materials(
+                            device,
+                            &view,
+                            &self.texture_sampler,
+                            &self.material_params_view,
+                        );
+                        self.camera_bind_group = camera_binding(
+                            device,
+                            &self.camera_layout,
+                            &self.uniform,
+                            &view,
+                            &self.texture_sampler,
+                            &self.shadow,
+                            &self.material_params_view,
+                        );
+                        self.materials_texture = texture;
+                        self.materials_view = view;
+                        self.default_texture_initialized = true;
+                    }
+                    Err(message) => {
+                        self.texture_errors
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .push(message);
+                    }
+                }
                 self.last_textures = Some(Arc::downgrade(textures));
             }
         }
@@ -1416,26 +1429,34 @@ impl SceneRenderer {
         size: [u32; 2],
     ) {
         if !self.default_texture_initialized {
-            let white_preview = TexturePixels::default_white_preview();
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.materials_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &white_preview.rgba,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(PREVIEW_SIZE * 4),
-                    rows_per_image: Some(PREVIEW_SIZE),
-                },
-                wgpu::Extent3d {
-                    width: PREVIEW_SIZE,
-                    height: PREVIEW_SIZE,
-                    depth_or_array_layers: 1,
-                },
-            );
+            // Mirror apply_update: fill every mip of the placeholder array
+            // with the solid white fallback so sampling never reads
+            // uninitialized memory.
+            let edge = texture_array_edge(0);
+            let white = TexturePixels::white(edge, edge);
+            let mip_levels = edge.trailing_zeros() + 1;
+            for mip_level in 0..mip_levels {
+                let w = edge >> mip_level;
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &self.materials_texture,
+                        mip_level,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &white.rgba,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(w * 4),
+                        rows_per_image: Some(w),
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: w,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
             self.default_texture_initialized = true;
         }
         self.prepare_shadows(device, queue, encoder);

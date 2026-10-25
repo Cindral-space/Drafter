@@ -84,6 +84,8 @@ pub struct DrafterApp {
     draw_drag: Option<()>,
     measurements: cindral_tools::measurements::MeasurementsBox,
     error: Option<String>,
+    /// GPU texture-array allocation failures, drained into the status bar.
+    texture_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     scene: scene_cache::SceneCache,
     organization: organization_ui::OrganizationUi,
     pending: Option<Arc<SceneUpdate>>,
@@ -132,6 +134,7 @@ impl Default for DrafterApp {
             draw_drag: None,
             measurements: Default::default(),
             error: None,
+            texture_errors: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             scene: scene_cache::SceneCache::default(),
             organization: organization_ui::OrganizationUi::default(),
             pending: None,
@@ -154,11 +157,9 @@ impl DrafterApp {
             render.target_format,
             4,
         ));
-        renderer.callback_resources.insert(SceneRenderer::new(
-            &render.device,
-            render.target_format,
-            4,
-        ));
+        let scene_renderer = SceneRenderer::new(&render.device, render.target_format, 4);
+        let texture_errors = std::sync::Arc::clone(&scene_renderer.texture_errors);
+        renderer.callback_resources.insert(scene_renderer);
         workspace_ui::configure_style(&cc.egui_ctx);
         let png = png_ui::PngUi::with_surface(render.target_format.is_srgb());
         png.theme().apply(&cc.egui_ctx);
@@ -168,6 +169,7 @@ impl DrafterApp {
                 notice,
                 ..Default::default()
             },
+            texture_errors,
             modifying: true,
             #[cfg(target_os = "linux")]
             system_theme: theme::SystemTheme::start(cc.egui_ctx.clone()),

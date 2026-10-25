@@ -843,6 +843,15 @@ impl DrafterApp {
     }
 
     pub(crate) fn workspace_status(&mut self, ctx: &egui::Context) {
+        // Surface GPU texture-array allocation failures in the status bar.
+        for message in self
+            .texture_errors
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain(..)
+        {
+            self.error = Some(message);
+        }
         let readout = self.measurement_readout();
         self.measurements
             .update(readout, self.presentation.measurements);

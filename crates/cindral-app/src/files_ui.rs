@@ -47,6 +47,36 @@ struct AutosaveJob {
     superseded: bool,
     receiver: mpsc::Receiver<Result<PathBuf, String>>,
 }
+/// Computes the array edge from the asset count, then decodes one asset at a
+/// time: each asset is resampled directly to the edge and reduced to a mip
+/// chain before the decoded buffer is dropped, so the peak number of
+/// simultaneously-live decoded buffers is one (never all assets).
+fn build_texture_data(
+    assets: &BTreeMap<String, TextureAsset>,
+) -> cindral_io::Result<(
+    BTreeMap<String, u32>,
+    std::sync::Arc<cindral_render::texture::TextureArrayData>,
+)> {
+    let edge = cindral_render::texture::texture_array_edge(assets.len());
+    let decoded = assets.values().map(|asset| {
+        cindral_io::decode_texture(asset).map(|image| cindral_render::texture::TexturePixels {
+            width: image.width,
+            height: image.height,
+            rgba: image.rgba,
+        })
+    });
+    let layers = cindral_render::texture::build_texture_layers(edge, decoded)?;
+    let layer_map = assets
+        .keys()
+        .enumerate()
+        .map(|(i, key)| (key.clone(), i as u32 + 1))
+        .collect();
+    Ok((
+        layer_map,
+        std::sync::Arc::new(cindral_render::texture::TextureArrayData { edge, layers }),
+    ))
+}
+
 pub(crate) struct PreparedImport {
     result: ImportResult,
     scene: scene_cache::SceneCache,
@@ -62,19 +92,9 @@ fn prepare_import(
         ));
     }
     let mut scene = scene_cache::SceneCache::default();
-    let mut layers = BTreeMap::new();
-    let mut pixels = Vec::new();
-    for (key, asset) in &result.textures {
-        control.check()?;
-        let image = cindral_io::decode_texture(asset)?;
-        layers.insert(key.clone(), pixels.len() as u32 + 1);
-        pixels.push(cindral_render::texture::TexturePixels {
-            width: image.width,
-            height: image.height,
-            rgba: image.rgba,
-        });
-    }
-    scene.set_textures(layers, pixels);
+    control.check()?;
+    let (layers, data) = build_texture_data(&result.textures)?;
+    scene.set_textures(layers, data);
     control.check()?;
     let update = scene.sync(&result.history)?;
     control.check()?;
@@ -265,18 +285,8 @@ enum Action {
 }
 impl DrafterApp {
     pub(crate) fn sync_file_textures(&mut self) -> cindral_io::Result<()> {
-        let mut layers = BTreeMap::new();
-        let mut pixels = Vec::new();
-        for (key, asset) in &self.files.textures {
-            let image = cindral_io::decode_texture(asset)?;
-            layers.insert(key.clone(), pixels.len() as u32 + 1);
-            pixels.push(cindral_render::texture::TexturePixels {
-                width: image.width,
-                height: image.height,
-                rgba: image.rgba,
-            });
-        }
-        self.scene.set_textures(layers, pixels);
+        let (layers, data) = build_texture_data(&self.files.textures)?;
+        self.scene.set_textures(layers, data);
         self.refresh_mesh();
         Ok(())
     }
@@ -2948,5 +2958,51 @@ mod tests {
         assert_eq!(editor.history.undo_depth(), 2);
         assert!(editor.history.undo().unwrap());
         assert!(editor.history.redo().unwrap());
+    }
+
+    /// A transparent-edge PNG decoded through the production path and mipped
+    /// in premultiplied space keeps its hue at the boundary; the old
+    /// straight-alpha path darkened such edges toward black.
+    #[test]
+    fn transparent_edge_png_keeps_hue_through_mips() {
+        let (w, h) = (8u32, 8u32);
+        let mut img = image::RgbaImage::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                if x < 4 {
+                    img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+                } else {
+                    img.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+                }
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let asset = cindral_io::TextureAsset {
+            mime: "image/png".into(),
+            bytes: png,
+        };
+        let decoded = cindral_io::decode_texture(&asset).unwrap();
+        let source = cindral_render::texture::TexturePixels::new(
+            decoded.width,
+            decoded.height,
+            decoded.rgba,
+        );
+        let layers = cindral_render::texture::build_texture_layers::<
+            cindral_render::texture::TexturePixels,
+            std::convert::Infallible,
+            _,
+        >(8, [Ok(source)])
+        .unwrap();
+        let mip1 = &layers[1].levels[1];
+        let boundary = &mip1.rgba[4..8];
+        assert_eq!(boundary[0], 255, "red channel stays saturated");
+        assert!(
+            boundary[1] <= 64 && boundary[2] <= 64,
+            "no dark halo after mips: got rgb {:?}",
+            &boundary[..3]
+        );
     }
 }

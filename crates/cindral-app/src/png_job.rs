@@ -83,10 +83,13 @@ pub fn render(
         })
         + app.section_ui.caps.len() as u64
             * std::mem::size_of::<cindral_render::FaceVertex>() as u64
-        + update
-            .textures
-            .as_ref()
-            .map_or(0, |t| t.iter().map(|t| t.rgba.len() as u64).sum::<u64>());
+        + update.textures.as_ref().map_or(0, |t| {
+            t.layers
+                .iter()
+                .flat_map(|l| l.levels.iter())
+                .map(|l| l.rgba.len() as u64)
+                .sum::<u64>()
+        });
     let (_, estimate) = options.estimate(geometry)?;
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -531,5 +534,74 @@ mod tests {
         let pixels = buffer.slice(..).get_mapped_range().to_vec();
         buffer.unmap();
         pixels
+    }
+
+    /// An oversized texture array fails inside the wgpu error scope with a
+    /// readable message; the previous array and bindings stay in use and a
+    /// valid update afterwards still succeeds. The CPU document is never
+    /// touched by a GPU allocation failure.
+    #[test]
+    fn texture_array_allocation_failure_reports_error_and_keeps_previous_array() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+        let adapter = match block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: None,
+            ..Default::default()
+        })) {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                eprintln!("skipping: no wgpu adapter ({e})");
+                return;
+            }
+        };
+        let (device, queue) = match block_on(adapter.request_device(&Default::default())) {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("skipping: no wgpu device ({e})");
+                return;
+            }
+        };
+        let mut renderer = SceneRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 1);
+        let limit = device.limits().max_texture_dimension_2d;
+        let oversized = cindral_render::SceneUpdate {
+            textures: Some(std::sync::Arc::new(cindral_render::TextureArrayData {
+                edge: limit + 1,
+                layers: vec![cindral_render::TextureMips {
+                    levels: vec![cindral_render::TexturePixels::new(
+                        limit + 1,
+                        limit + 1,
+                        Vec::new(),
+                    )],
+                }],
+            })),
+            ..Default::default()
+        };
+        renderer.apply_update(&device, &queue, &oversized);
+        let errors = renderer
+            .texture_errors
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(errors.len(), 1, "allocation failure must be reported");
+        assert!(errors[0].contains("materials texture array allocation failed"));
+
+        // The renderer survives with the previous (default) array, and a
+        // valid update replaces it without a new error.
+        let valid = cindral_render::SceneUpdate {
+            textures: Some(std::sync::Arc::new(cindral_render::TextureArrayData {
+                edge: 1024,
+                layers: vec![
+                    cindral_render::TextureMips::white(1024),
+                    cindral_render::TextureMips::white(1024),
+                ],
+            })),
+            ..Default::default()
+        };
+        renderer.apply_update(&device, &queue, &valid);
+        let errors = renderer
+            .texture_errors
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(errors.len(), 1, "valid update must not add errors");
     }
 }
