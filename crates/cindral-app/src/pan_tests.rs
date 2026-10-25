@@ -474,4 +474,17 @@ fn ordinary_middle_navigation_still_works_while_pan_is_active() {
     assert_ne!(app.camera.yaw, before.yaw);
     assert_eq!(app.camera.target, before.target);
     assert_eq!(app.shortcuts.navigation, Some(shortcuts::Action::Pan));
+    frame(
+        &mut app,
+        &ctx,
+        vec![button(
+            p + egui::vec2(30., 15.),
+            PointerButton::Middle,
+            false,
+            false,
+        )],
+        false,
+    );
+    frame(&mut app, &ctx, vec![key(Key::Escape)], false);
+    assert!(app.shortcuts.navigation.is_none());
 }

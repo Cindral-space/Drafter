@@ -10,10 +10,14 @@ pub(crate) struct PanDrag {
 }
 
 impl DrafterApp {
-    pub(crate) fn activate_pan(&mut self) {
+    pub(crate) fn activate_navigation(&mut self, mode: shortcuts::Action) {
         self.choose_modify(ModifyKind::Select);
-        self.shortcuts.navigation = Some(shortcuts::Action::Pan);
+        self.shortcuts.navigation = Some(mode);
         self.snap = None;
+    }
+
+    pub(crate) fn activate_pan(&mut self) {
+        self.activate_navigation(shortcuts::Action::Pan);
     }
 
     fn pan_press_depth(&self, rect: egui::Rect, pos: egui::Pos2) -> f32 {
@@ -54,6 +58,9 @@ impl DrafterApp {
         let valid = focused && rect.is_finite() && rect.width() > 0. && rect.height() > 0.;
         if !valid || escape || self.pan_drag.is_some_and(|d| d.rect != rect) {
             let owned = self.pan_drag.take().is_some();
+            if escape && !owned && active {
+                self.shortcuts.navigation = None;
+            }
             return owned || active || (middle && shift);
         }
         if self.pan_drag.is_none() && response.is_pointer_button_down_on() {

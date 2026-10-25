@@ -437,10 +437,7 @@ impl DrafterApp {
                 Draw(k) => self.set_tool(k),
                 Modify(k) => self.choose_modify(k),
                 Pan => self.activate_pan(),
-                Orbit | Zoom => {
-                    self.choose_modify(ModifyKind::Select);
-                    self.shortcuts.navigation = Some(action);
-                }
+                Orbit | Zoom => self.activate_navigation(action),
                 Fit => self.extents(response.rect.aspect_ratio()),
                 View(v) => self.camera.set_view(v),
                 Projection => toggle_projection(&mut self.camera),

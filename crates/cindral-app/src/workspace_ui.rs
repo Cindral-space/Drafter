@@ -168,16 +168,31 @@ impl DrafterApp {
                         });
                         ui.menu_button("Camera", |ui| {
                             ui.set_min_width(224.);
-                            if ui
-                                .add(
-                                    egui::Button::new("Pan")
-                                        .shortcut_text(shortcuts::hint(shortcuts::Action::Pan)),
-                                )
-                                .clicked()
-                            {
-                                self.activate_pan();
-                                ui.close();
-                            }
+                            ui.horizontal(|ui| {
+                                for (action, label) in [
+                                    (shortcuts::Action::Orbit, "Orbit"),
+                                    (shortcuts::Action::Pan, "Pan"),
+                                    (shortcuts::Action::Zoom, "Zoom"),
+                                ] {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(label).selected(
+                                                self.shortcuts.navigation == Some(action),
+                                            ),
+                                        )
+                                        .on_hover_text(shortcuts::tooltip(
+                                            shortcuts::MAP
+                                                .iter()
+                                                .find(|e| e.action == action)
+                                                .unwrap(),
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.activate_navigation(action);
+                                        ui.close();
+                                    }
+                                }
+                            });
                             ui.separator();
                             menu_section(ui, "Projection");
                             ui.selectable_value(
@@ -231,14 +246,13 @@ impl DrafterApp {
                         });
                         ui.menu_button("Draw", |ui| {
                             ui.set_min_width(224.);
+                            let nav_none = self.shortcuts.navigation.is_none();
                             for (kind, label) in DRAW {
                                 let shortcut = shortcuts::hint(shortcuts::Action::Draw(kind));
                                 if ui
-                                    .add(
-                                        egui::Button::new(label)
-                                            .shortcut_text(shortcut)
-                                            .selected(!self.modifying && self.tool.kind() == kind),
-                                    )
+                                    .add(egui::Button::new(label).shortcut_text(shortcut).selected(
+                                        nav_none && !self.modifying && self.tool.kind() == kind,
+                                    ))
                                     .clicked()
                                 {
                                     self.set_tool(kind);
@@ -248,6 +262,7 @@ impl DrafterApp {
                         });
                         ui.menu_button("Tools", |ui| {
                             ui.set_min_width(224.);
+                            let nav_none = self.shortcuts.navigation.is_none();
                             for (index, (kind, label)) in MODIFY.into_iter().enumerate() {
                                 if index == 0 {
                                     menu_section(ui, "Selection");
@@ -260,11 +275,9 @@ impl DrafterApp {
                                 }
                                 let shortcut = shortcuts::hint(shortcuts::Action::Modify(kind));
                                 if ui
-                                    .add(
-                                        egui::Button::new(label)
-                                            .shortcut_text(shortcut)
-                                            .selected(self.modifying && self.modify.kind() == kind),
-                                    )
+                                    .add(egui::Button::new(label).shortcut_text(shortcut).selected(
+                                        nav_none && self.modifying && self.modify.kind() == kind,
+                                    ))
                                     .clicked()
                                 {
                                     self.choose_modify(kind);
@@ -424,21 +437,6 @@ impl DrafterApp {
                                     self.extents(size.x / size.y.max(1.));
                                 }
                                 ui.separator();
-                                if ui
-                                    .selectable_label(
-                                        self.shortcuts.navigation == Some(shortcuts::Action::Pan),
-                                        "Pan",
-                                    )
-                                    .on_hover_text(shortcuts::tooltip(
-                                        shortcuts::MAP
-                                            .iter()
-                                            .find(|e| e.action == shortcuts::Action::Pan)
-                                            .unwrap(),
-                                    ))
-                                    .clicked()
-                                {
-                                    self.activate_pan();
-                                }
                                 ui.label(
                                     RichText::new(self.active_tool_label())
                                         .strong()
@@ -675,6 +673,7 @@ impl DrafterApp {
             )
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    let nav_none = self.shortcuts.navigation.is_none();
                     egui::Grid::new("full_tool_palette")
                         .num_columns(2)
                         .spacing([2., 3.])
@@ -685,7 +684,7 @@ impl DrafterApp {
                                     ui,
                                     label,
                                     shortcuts::Action::Modify(kind),
-                                    self.modifying && self.modify.kind() == kind,
+                                    nav_none && self.modifying && self.modify.kind() == kind,
                                 )
                                 .clicked()
                                 {
@@ -701,7 +700,7 @@ impl DrafterApp {
                                     ui,
                                     label,
                                     shortcuts::Action::Draw(kind),
-                                    !self.modifying && self.tool.kind() == kind,
+                                    nav_none && !self.modifying && self.tool.kind() == kind,
                                 )
                                 .clicked()
                                 {
@@ -717,11 +716,12 @@ impl DrafterApp {
                                     ui,
                                     label,
                                     shortcuts::Action::Modify(kind),
-                                    self.modifying && self.modify.kind() == kind,
+                                    nav_none && self.modifying && self.modify.kind() == kind,
                                 )
                                 .clicked()
                                 {
                                     if kind == ModifyKind::PaintBucket
+                                        && nav_none
                                         && self.modifying
                                         && self.modify.kind() == kind
                                     {
@@ -735,6 +735,43 @@ impl DrafterApp {
                                     ui.end_row();
                                 }
                             }
+                        });
+                    ui.separator();
+                    egui::Grid::new("navigation_tool_palette")
+                        .num_columns(2)
+                        .spacing([2., 3.])
+                        .show(ui, |ui| {
+                            for (action, label) in [
+                                (shortcuts::Action::Orbit, "Orbit"),
+                                (shortcuts::Action::Pan, "Pan"),
+                            ] {
+                                if tool_button(
+                                    ui,
+                                    label,
+                                    action,
+                                    self.shortcuts.navigation == Some(action),
+                                )
+                                .clicked()
+                                {
+                                    self.activate_navigation(action);
+                                }
+                            }
+                            ui.end_row();
+                            if tool_button(
+                                ui,
+                                "Zoom",
+                                shortcuts::Action::Zoom,
+                                self.shortcuts.navigation == Some(shortcuts::Action::Zoom),
+                            )
+                            .clicked()
+                            {
+                                self.activate_navigation(shortcuts::Action::Zoom);
+                            }
+                            if tool_button(ui, "Fit", shortcuts::Action::Fit, false).clicked() {
+                                let size = ctx.available_rect().size();
+                                self.extents(size.x / size.y.max(1.));
+                            }
+                            ui.end_row();
                         });
                 });
             });
@@ -949,7 +986,7 @@ impl DrafterApp {
                     });
                     ui.separator();
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let prompt = if self.shortcuts.navigation == Some(shortcuts::Action::Pan) {"Drag to pan the view.".to_owned()} else if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select".to_owned()} else if self.modifying {
+                        let prompt = if self.shortcuts.navigation == Some(shortcuts::Action::Pan) {"Drag to pan the view · Escape returns to Select".to_owned()} else if self.shortcuts.navigation.is_some() {"Drag to navigate · Escape returns to Select".to_owned()} else if self.modifying {
                             match self.modify.kind() {
                                 ModifyKind::Select => "Click to select · Shift to add · Drag a selection box".into(),
                                 ModifyKind::Rotate => self.rotate_hint().to_owned(),
@@ -1187,6 +1224,60 @@ fn paint_tool_icon(p: &egui::Painter, c: egui::Pos2, label: &str, stroke: Stroke
                 Stroke::new(stroke.width + 1.3, icon_color),
             );
         }
+        "Orbit" => {
+            let horiz = (0..=24)
+                .map(|i| {
+                    let t = i as f32 / 24. * std::f32::consts::TAU;
+                    pos(t.cos() * 10., t.sin() * 4.5)
+                })
+                .collect();
+            let vert = (0..=24)
+                .map(|i| {
+                    let t = i as f32 / 24. * std::f32::consts::TAU;
+                    pos(t.cos() * 4.5, t.sin() * 9.5)
+                })
+                .collect();
+            p.add(egui::Shape::line(horiz, stroke));
+            p.add(egui::Shape::line(vert, stroke));
+            p.circle_filled(c, 2., icon_color);
+        }
+        "Pan" => {
+            p.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(8., 6.)),
+                1.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            for (tip, arm_a, arm_b) in [
+                (pos(0., -10.), pos(-3., -7.), pos(3., -7.)),
+                (pos(0., 10.), pos(-3., 7.), pos(3., 7.)),
+                (pos(-11., 0.), pos(-8., -3.), pos(-8., 3.)),
+                (pos(11., 0.), pos(8., -3.), pos(8., 3.)),
+            ] {
+                p.line_segment([arm_a, tip], stroke);
+                p.line_segment([arm_b, tip], stroke);
+            }
+        }
+        "Zoom" => {
+            p.circle_stroke(pos(-2., -2.), 6.5, stroke);
+            p.line_segment(
+                [pos(2.8, 2.8), pos(9.5, 9.5)],
+                Stroke::new(stroke.width + 0.6, icon_color),
+            );
+        }
+        "Fit" => {
+            for (sx, sy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
+                let corner = pos(9. * sx, 7. * sy);
+                p.line_segment([corner, pos(5. * sx, 7. * sy)], stroke);
+                p.line_segment([corner, pos(9. * sx, 3. * sy)], stroke);
+            }
+            p.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(7., 5.)),
+                0.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
         _ => {}
     }
 }
@@ -1256,6 +1347,9 @@ mod header_tests {
             (
                 "Camera",
                 vec![
+                    "Orbit",
+                    "Pan",
+                    "Zoom",
                     "Projection",
                     "Standard views",
                     "Construction grid",
@@ -1384,6 +1478,85 @@ mod header_tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn tool_palette_groups_navigation_controls_with_single_active_highlight() {
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let ctx = egui::Context::default();
+            configure_style(&ctx);
+            ctx.set_theme(theme);
+            let mut app = DrafterApp::default();
+            app.choose_modify(ModifyKind::Select);
+
+            let run_workspace = |app: &mut DrafterApp, events: Vec<egui::Event>| {
+                ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1366., 768.),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        app.workspace_header(ctx);
+                        app.workspace_status(ctx);
+                        app.tool_palette(ctx);
+                    },
+                )
+            };
+
+            let _ = run_workspace(&mut app, vec![]);
+            let output = run_workspace(&mut app, vec![]);
+            for label in ["Orbit", "Pan", "Zoom", "Fit"] {
+                let rect = text_rect(&output, label);
+                assert!(rect.bottom() <= 768., "{label} clipped at 1366x768");
+            }
+
+            let click_palette = |app: &mut DrafterApp, label: &str| {
+                let out = run_workspace(app, vec![]);
+                let pos = text_rect(&out, label).center();
+                for pressed in [true, false] {
+                    let _ = run_workspace(
+                        app,
+                        vec![
+                            egui::Event::PointerMoved(pos),
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
+                }
+            };
+
+            click_palette(&mut app, "Pan");
+            assert_eq!(app.shortcuts.navigation, Some(shortcuts::Action::Pan));
+            assert_eq!(app.active_tool_label(), "Pan");
+            let out = run_workspace(&mut app, vec![]);
+            let selected_color = ctx.style().visuals.selection.stroke.color;
+            let label_color = |label: &str| {
+                out.shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.job.text == label && t.pos.x < 132. => {
+                            Some(t.galley.job.sections[0].format.color)
+                        }
+                        _ => None,
+                    })
+                    .unwrap()
+            };
+            assert_eq!(label_color("Pan"), selected_color);
+            assert_ne!(label_color("Select"), selected_color);
+
+            click_palette(&mut app, "Orbit");
+            assert_eq!(app.shortcuts.navigation, Some(shortcuts::Action::Orbit));
+            click_palette(&mut app, "Zoom");
+            assert_eq!(app.shortcuts.navigation, Some(shortcuts::Action::Zoom));
         }
     }
 }
