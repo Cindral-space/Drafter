@@ -182,6 +182,14 @@ impl BulkGeometry {
                 normal: normal.normalize(),
                 distance: normal.normalize().dot(a),
             };
+            // Duplicate detection uses the raw ring order: winding normalization would
+            // erase the orientation distinction between a copy and a deliberate
+            // opposite-winding (double-sided) face.
+            let duplicate_key = (canonical_ring(&outer), {
+                let mut hole_keys: Vec<_> = holes.iter().map(|r| canonical_ring(r)).collect();
+                hole_keys.sort();
+                hole_keys
+            }, f.material);
             if crate::geometry::signed_area(&model.project_loop(&outer, plane)?) < 0. {
                 outer.reverse();
             }
@@ -190,14 +198,9 @@ impl BulkGeometry {
                     h.reverse();
                 }
             }
-            if merge {
-                let mut hole_keys: Vec<_> = holes.iter().map(|r| canonical_ring(r)).collect();
-                hole_keys.sort();
-                let key = (canonical_ring(&outer), hole_keys, f.material);
-                if !seen.insert(key) {
-                    stats.duplicates_removed += 1;
-                    continue;
-                }
+            if merge && !seen.insert(duplicate_key) {
+                stats.duplicates_removed += 1;
+                continue;
             }
             let fid = FaceId::from_raw(model.allocate()?);
             for r in std::iter::once(&outer).chain(&holes) {

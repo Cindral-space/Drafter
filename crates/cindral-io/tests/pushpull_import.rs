@@ -571,3 +571,63 @@ fn private_skp_starting_faces_are_replaced_when_present() {
     assert!(checked > 0, "no attached faces exercised");
     eprintln!("private SKP cleanup: {checked} definitions exercised");
 }
+#[test]
+fn push_pull_moves_merged_wall_as_one_face() {
+    // A 4x2 grid of eight unit quads (16 triangles) merges into one face; Push/Pull
+    // must move that whole face as one, like an authored polygon.
+    let mut g = BulkGeometry::default();
+    let idx = |x: usize, y: usize| y * 5 + x;
+    for y in 0..=2 {
+        for x in 0..=4 {
+            g.vertices.push(DVec3::new(x as f64, y as f64, 0.));
+        }
+    }
+    for y in 0..2 {
+        for x in 0..4 {
+            for outer in [
+                [idx(x, y), idx(x + 1, y), idx(x + 1, y + 1)],
+                [idx(x, y), idx(x + 1, y + 1), idx(x, y + 1)],
+            ] {
+                g.faces.push(BulkFace {
+                    outer: outer.to_vec(),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    let mut h = convert_scene(
+        source(g),
+        &ImportOptions {
+            as_component: false,
+            merge_coplanar: true,
+            soften_coplanar: true,
+        },
+        &ImportControl::default(),
+    )
+    .unwrap()
+    .history;
+    assert_eq!(h.model().faces().len(), 1);
+    let (face, original) = h.model().faces().iter().next().unwrap();
+    let (face, original) = (*face, original.clone());
+    let area = h.model().face_area(face).unwrap();
+    assert!(h.execute(Command::PushPull { face, distance: 1. }).unwrap());
+    h.model().validate().unwrap();
+    // One side wall per boundary edge (12-edge perimeter), the moved face, and
+    // the retained base face of the loose surface.
+    assert_eq!(h.model().faces().len(), 14);
+    let (pulled, pulled_face) = h
+        .model()
+        .faces()
+        .iter()
+        .find(|(_, f)| f.plane.distance > 0.5 && f.plane.normal.z > 0.9)
+        .expect("pulled face");
+    assert_eq!(pulled_face.outer.len(), original.outer.len());
+    assert_eq!(pulled_face.holes.len(), original.holes.len());
+    assert!((h.model().face_area(*pulled).unwrap() - area).abs() < 1e-9);
+    let before = h.to_data();
+    assert!(h.undo().unwrap());
+    assert_eq!(h.model().faces().len(), 1);
+    assert_eq!(h.model().faces().values().next().unwrap(), &original);
+    assert!(h.redo().unwrap());
+    assert_eq!(h.to_data(), before);
+}
