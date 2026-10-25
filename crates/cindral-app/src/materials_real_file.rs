@@ -30,8 +30,9 @@ fn frame(
     start.elapsed().as_secs_f64() * 1000.
 }
 
-/// Generates the 4096x4096 texture in memory (wood-grain-ish stripes).
-fn big_texture() -> (String, cindral_io::TextureAsset) {
+/// Generates a 4096x4096 texture in memory (wood-grain-ish stripes); the
+/// seed shifts the colors so distinct SHA-256 asset keys are produced.
+fn big_texture(seed: u8) -> (String, cindral_io::TextureAsset) {
     let side = 4096usize;
     let mut rgba = Vec::with_capacity(side * side * 4);
     for y in 0..side {
@@ -39,8 +40,8 @@ fn big_texture() -> (String, cindral_io::TextureAsset) {
         for x in 0..side {
             let ripple = (((x + y) as f32 / 96.).sin() * 12.) as i16;
             rgba.extend_from_slice(&[
-                (150 + grain + ripple).clamp(0, 255) as u8,
-                (100 + grain / 2).clamp(0, 255) as u8,
+                (150 + grain + ripple + i16::from(seed)).clamp(0, 255) as u8,
+                (100 + grain / 2 + i16::from(seed)).clamp(0, 255) as u8,
                 (60 + ripple).clamp(0, 255) as u8,
                 255,
             ]);
@@ -53,6 +54,34 @@ fn big_texture() -> (String, cindral_io::TextureAsset) {
         .expect("encode big texture");
     let (key, asset) = cindral_io::texture_from_bytes(bytes.into_inner()).expect("valid png");
     (key, asset)
+}
+
+/// Loads the private model headlessly or builds the labeled synthetic grid.
+fn load_or_synthetic(path: &Path) -> Result<(DrafterApp, String), String> {
+    let mut app = DrafterApp::default();
+    match app.load_replay(path) {
+        Ok(()) => Ok((app, "real file".into())),
+        Err(e) => {
+            println!("Real file unavailable headlessly ({e}); using synthetic scene");
+            let mut app = DrafterApp::default();
+            for y in 0..50 {
+                for x in 0..50 {
+                    let origin = DVec3::new(x as f64 * 2., y as f64 * 2., 0.);
+                    app.execute(Command::AddPolyline {
+                        points: vec![
+                            origin,
+                            origin + DVec3::X * 2.,
+                            origin + DVec3::X * 2. + DVec3::Y * 2.,
+                            origin + DVec3::Y * 2.,
+                        ],
+                        closed: true,
+                    })
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+            Ok((app, "synthetic 5,000-face grid".into()))
+        }
+    }
 }
 
 /// Runs the Phase 2 workload; external watchdog in the example enforces a
@@ -71,30 +100,7 @@ pub fn run(path: &Path) -> Result<(), String> {
     };
     gpu.allow_shadows();
 
-    let mut app = DrafterApp::default();
-    let source = match app.load_replay(path) {
-        Ok(()) => "real file",
-        Err(e) => {
-            println!("Real file unavailable headlessly ({e}); using synthetic scene");
-            app = DrafterApp::default();
-            for y in 0..50 {
-                for x in 0..50 {
-                    let origin = DVec3::new(x as f64 * 2., y as f64 * 2., 0.);
-                    app.execute(Command::AddPolyline {
-                        points: vec![
-                            origin,
-                            origin + DVec3::X * 2.,
-                            origin + DVec3::X * 2. + DVec3::Y * 2.,
-                            origin + DVec3::Y * 2.,
-                        ],
-                        closed: true,
-                    })
-                    .map_err(|e| e.to_string())?;
-                }
-            }
-            "synthetic 5,000-face grid"
-        }
-    };
+    let (mut app, source) = load_or_synthetic(path)?;
     let ctx = egui::Context::default();
     workspace_ui::configure_style(&ctx);
     let faces: Vec<_> = app.history.model().faces().keys().copied().collect();
@@ -102,7 +108,7 @@ pub fn run(path: &Path) -> Result<(), String> {
 
     // 4096x4096 import + material creation + upload timing.
     let t = Instant::now();
-    let (key, asset) = big_texture();
+    let (key, asset) = big_texture(0);
     let encode_ms = t.elapsed().as_secs_f64() * 1000.;
     let t = Instant::now();
     app.files.textures.insert(key.clone(), asset);
@@ -242,5 +248,87 @@ pub fn run(path: &Path) -> Result<(), String> {
         revision,
         "workload mutated the document"
     );
+    Ok(())
+}
+
+/// Off-thread texture re-layout budget: 10 large textures prepare on the
+/// worker while the UI thread runs full frames; no frame may exceed 33 ms.
+/// Prints the old synchronous re-layout cost for comparison.
+pub fn run_texture_prepare(path: &Path) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("texture prepare benchmark requires --release".into());
+    }
+    let mut gpu = match real_file_gpu::Gpu::new() {
+        Ok(gpu) => gpu,
+        Err(e) => {
+            println!("SKIP GPU texture prepare benchmark: {e}");
+            return Ok(());
+        }
+    };
+    gpu.allow_shadows();
+    let (mut app, source) = load_or_synthetic(path)?;
+    let ctx = egui::Context::default();
+    workspace_ui::configure_style(&ctx);
+
+    // Ten distinct 4096x4096 textures; generation is one-time and outside timing.
+    for i in 0..10u8 {
+        let (key, asset) = big_texture(i * 7);
+        app.files.textures.insert(key, asset);
+    }
+
+    // The UI-thread request (map clone + spawn) must be far under one frame.
+    let t = Instant::now();
+    app.request_texture_sync();
+    let request_ms = t.elapsed().as_secs_f64() * 1000.;
+    assert!(app.files.texture_job.is_some(), "job must be running");
+
+    // Warmup: the first frames pay one-time GL pipeline creation for the
+    // loaded scene (established benchmark protocol), not per-frame UI work.
+    for _ in 0..5 {
+        let _ = frame(&mut app, &ctx, &mut gpu, vec![]);
+    }
+    if app.files.texture_job.is_none() {
+        // A tiny set could settle during warmup; restart it for the budget.
+        app.request_texture_sync();
+    }
+
+    // Full UI+GPU frames while the worker prepares; draw_frame polls the
+    // job and the renderer stages one texture layer per frame.
+    let mut worst = 0f64;
+    let mut total = 0f64;
+    let mut frames = 0usize;
+    loop {
+        let job_done = app.files.texture_job.is_none();
+        let dt = frame(&mut app, &ctx, &mut gpu, vec![]);
+        frames += 1;
+        worst = worst.max(dt);
+        total += dt;
+        if dt > 16. {
+            println!(
+                "  frame {frames}: {dt:.3}ms (job done before frame: {job_done}, status: {})",
+                app.files.status
+            );
+        }
+        if app.files.texture_job.is_none() {
+            break;
+        }
+        if frames > 2000 {
+            return Err("texture preparation never settled".into());
+        }
+    }
+    println!(
+        "{source}: request_texture_sync on the UI thread {request_ms:.3}ms; \
+10 large textures prepared over {frames} full frames, worst {worst:.3}ms / mean {:.3}ms (budget 33ms)",
+        total / frames as f64
+    );
+    assert!(worst < 33., "UI frame budget exceeded: {worst:.3}ms");
+    assert_eq!(app.files.status, "Textures ready");
+    assert!(app.error.is_none(), "app error: {:?}", app.error);
+
+    // The old synchronous path on the same textures, for the before/after record.
+    let t = Instant::now();
+    app.sync_file_textures().map_err(|e| e.to_string())?;
+    let sync_ms = t.elapsed().as_secs_f64() * 1000.;
+    println!("{source}: old synchronous re-layout of the same 10 textures: {sync_ms:.1}ms");
     Ok(())
 }

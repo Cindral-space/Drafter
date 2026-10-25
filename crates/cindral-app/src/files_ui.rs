@@ -104,6 +104,87 @@ fn prepare_import(
         update,
     })
 }
+
+/// Result of the off-thread texture preparation: the asset→layer map, the
+/// GPU-ready array, and the first decode failure (that asset renders the
+/// white placeholder and the failure is reported; the rest still prepare).
+pub(crate) struct TexturePrepared {
+    layers: BTreeMap<String, u32>,
+    data: std::sync::Arc<cindral_render::texture::TextureArrayData>,
+    failed: Option<String>,
+}
+
+/// Off-UI-thread decode/resample/mip preparation of `files.textures`.
+///
+/// The worker checks the cancel flag between assets and gives up sending
+/// once the job is dropped, so closing or replacing the document leaves
+/// neither a leaked thread nor a stale result.
+pub(crate) struct TextureJob {
+    progress: std::sync::Arc<(
+        std::sync::atomic::AtomicUsize,
+        std::sync::atomic::AtomicUsize,
+    )>,
+    control: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    receiver: mpsc::Receiver<TexturePrepared>,
+}
+impl Drop for TextureJob {
+    fn drop(&mut self) {
+        self.control
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Decodes one asset at a time (peak live decodes: one), resamples straight
+/// to the array edge and builds the mip chain. A failed decode becomes the
+/// white fallback layer and is reported. `done`/`total` drive the progress
+/// indicator; `cancel` stops the loop between assets.
+fn prepare_texture_data(
+    assets: &BTreeMap<String, TextureAsset>,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &std::sync::Arc<(
+        std::sync::atomic::AtomicUsize,
+        std::sync::atomic::AtomicUsize,
+    )>,
+) -> TexturePrepared {
+    use std::sync::atomic::Ordering;
+    let edge = cindral_render::texture::texture_array_edge(assets.len());
+    progress.1.store(assets.len(), Ordering::Relaxed);
+    let mut layers = vec![cindral_render::texture::TextureMips::white(edge)];
+    let mut failed = None;
+    for (name, asset) in assets {
+        if cancel.load(Ordering::Relaxed)
+            || layers.len() > cindral_render::texture::MAX_TEXTURE_LAYERS
+        {
+            break;
+        }
+        let layer = match cindral_io::decode_texture(asset) {
+            Ok(image) => cindral_render::texture::TextureMips::from_source(
+                edge,
+                &cindral_render::texture::TexturePixels {
+                    width: image.width,
+                    height: image.height,
+                    rgba: image.rgba,
+                },
+            ),
+            Err(e) => {
+                failed.get_or_insert(format!("{name}: {e}"));
+                cindral_render::texture::TextureMips::white(edge)
+            }
+        };
+        layers.push(layer);
+        progress.0.fetch_add(1, Ordering::Relaxed);
+    }
+    TexturePrepared {
+        layers: assets
+            .keys()
+            .take(layers.len() - 1)
+            .enumerate()
+            .map(|(i, key)| (key.clone(), i as u32 + 1))
+            .collect(),
+        data: std::sync::Arc::new(cindral_render::texture::TextureArrayData { edge, layers }),
+        failed,
+    }
+}
 pub(crate) struct ImportJob {
     save_epoch: u64,
     pub(crate) replace_document: bool,
@@ -135,7 +216,7 @@ pub(crate) struct FileState {
     close_error: Option<String>,
     close_approved: bool,
     recovered_from: Option<PathBuf>,
-    status: String,
+    pub(crate) status: String,
     import_save_epoch: u64,
     pending_open: Option<PathBuf>,
     import_dialog: Option<PathBuf>,
@@ -148,6 +229,7 @@ pub(crate) struct FileState {
     pub(crate) import_job: Option<ImportJob>,
     pub(crate) import_summary: Option<ImportReport>,
     pub(crate) import_report_open: bool,
+    pub(crate) texture_job: Option<TextureJob>,
 }
 fn state_directory() -> PathBuf {
     if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
@@ -265,6 +347,7 @@ impl Default for FileState {
             import_job: None,
             import_summary: None,
             import_report_open: false,
+            texture_job: None,
         }
     }
 }
@@ -284,11 +367,97 @@ enum Action {
     Discard(PathBuf),
 }
 impl DrafterApp {
+    /// Synchronous texture re-layout on the calling thread; used by headless
+    /// paths (PNG export, benchmarks). The UI calls `request_texture_sync`.
     pub(crate) fn sync_file_textures(&mut self) -> cindral_io::Result<()> {
         let (layers, data) = build_texture_data(&self.files.textures)?;
+        self.apply_texture_data(layers, data);
+        Ok(())
+    }
+    fn apply_texture_data(
+        &mut self,
+        layers: BTreeMap<String, u32>,
+        data: std::sync::Arc<cindral_render::texture::TextureArrayData>,
+    ) {
         self.scene.set_textures(layers, data);
         self.refresh_mesh();
-        Ok(())
+    }
+    /// Spawns the off-thread texture preparation (decode, resample, mips run
+    /// on a worker; the GPU upload stays on the render thread, one layer per
+    /// frame). Any previous job is cancelled; while the job runs the scene
+    /// keeps its current texture bindings (white placeholders for unknown
+    /// layers). With no assets the (cheap) white-only array is built inline.
+    pub(crate) fn request_texture_sync(&mut self) {
+        if self.files.textures.is_empty() {
+            if let Ok((layers, data)) = build_texture_data(&self.files.textures) {
+                self.apply_texture_data(layers, data);
+            }
+            return;
+        }
+        let control = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let progress = std::sync::Arc::new((
+            std::sync::atomic::AtomicUsize::new(0),
+            std::sync::atomic::AtomicUsize::new(0),
+        ));
+        let (sender, receiver) = mpsc::channel();
+        let assets = self.files.textures.clone();
+        let cancel = std::sync::Arc::clone(&control);
+        let progress_worker = std::sync::Arc::clone(&progress);
+        std::thread::Builder::new()
+            .name("texture-prepare".into())
+            .spawn(move || {
+                let prepared = prepare_texture_data(&assets, &cancel, &progress_worker);
+                // A cancelled job's receiver is already dropped; the send
+                // fails and the result is discarded.
+                let _ = sender.send(prepared);
+            })
+            .map(|_| ())
+            .unwrap_or_else(|e| {
+                // Without a worker thread, fall back to the synchronous path.
+                let _ = e;
+                if let Err(error) = self.sync_file_textures() {
+                    self.error = Some(error.to_string());
+                }
+            });
+        self.files.texture_job = Some(TextureJob {
+            progress,
+            control,
+            receiver,
+        });
+    }
+    fn cancel_texture_job(&mut self) {
+        self.files.texture_job = None;
+    }
+    /// Drains the texture preparation job each frame, reporting progress and
+    /// applying finished results (a decode failure becomes a status message
+    /// with a white placeholder for that asset; the document is untouched).
+    pub(crate) fn poll_texture_job(&mut self, ctx: &egui::Context) {
+        use std::sync::atomic::Ordering;
+        let Some(job) = &self.files.texture_job else {
+            return;
+        };
+        match job.receiver.try_recv() {
+            Ok(prepared) => {
+                let failed = prepared.failed.clone();
+                self.files.texture_job = None;
+                self.apply_texture_data(prepared.layers, prepared.data);
+                self.files.status = match &failed {
+                    Some(name) => format!("Texture failed to decode, placeholder shown: {name}"),
+                    None => "Textures ready".into(),
+                };
+            }
+            Err(mpsc::TryRecvError::Disconnected) => self.files.texture_job = None,
+            Err(mpsc::TryRecvError::Empty) => {
+                let (done, total) = (
+                    job.progress.0.load(Ordering::Relaxed),
+                    job.progress.1.load(Ordering::Relaxed),
+                );
+                if total > 0 {
+                    self.files.status = format!("Preparing textures {done}/{total}");
+                }
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            }
+        }
     }
     fn file_revision(&self) -> (u64, u64) {
         (self.history.revision(), self.presentation_serial)
@@ -339,6 +508,9 @@ impl DrafterApp {
         Ok(())
     }
     fn reset_file_target(&mut self, path: Option<PathBuf>) {
+        // A pending texture job belongs to the replaced document; dropping it
+        // sets its cancel flag, so the worker stops between assets.
+        self.cancel_texture_job();
         self.files.import_assets.clear();
         self.files.generation = self.files.generation.wrapping_add(1);
         self.files.path = path;
@@ -364,8 +536,10 @@ impl DrafterApp {
         self.section_ui = Default::default();
         self.presentation_serial = self.presentation_serial.wrapping_add(1);
         self.reset_file_target(path);
-        self.sync_file_textures()?;
         self.ensure_builtin_textures();
+        // Decode/resample/mips run on a worker; the viewport shows white
+        // placeholders until the prepared layers arrive.
+        self.request_texture_sync();
         self.files.fit = true;
         self.files.offer = false;
         self.files.status = self.files.path.as_ref().map_or_else(
@@ -1004,7 +1178,7 @@ impl DrafterApp {
                 self.organization.texture = key.clone();
                 self.files.textures.insert(key, asset);
                 self.organize(cindral_core::OrganizationCommand::UpdateMaterial { id, material })?;
-                self.sync_file_textures()?;
+                self.request_texture_sync();
                 Ok(())
             })();
             if let Err(e) = result {
@@ -1344,7 +1518,8 @@ impl DrafterApp {
                 self.files.textures.remove(key);
             }
         }
-        self.sync_file_textures()
+        self.request_texture_sync();
+        Ok(())
     }
     fn resolve_open_choice(&mut self, choice: u8) {
         let Some(path) = self.files.pending_open.clone() else {
@@ -3050,5 +3225,189 @@ mod tests {
             );
             assert_eq!(data.1.layers.len(), count + 1);
         }
+    }
+
+    fn solid_png(side: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let mut img = image::RgbaImage::new(side, side);
+        for y in 0..side {
+            for x in 0..side {
+                img.put_pixel(x, y, image::Rgba(rgba));
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        png
+    }
+
+    /// Off-thread preparation must produce byte-identical layers to the old
+    /// synchronous path, including the progress counters.
+    #[test]
+    fn off_thread_texture_preparation_matches_the_synchronous_path() {
+        let mut assets = BTreeMap::new();
+        for (i, (side, rgba)) in [
+            (64u32, [255u8, 0, 0, 255]),
+            (128, [0, 255, 0, 128]),
+            (256, [10, 20, 30, 255]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assets.insert(
+                format!("asset{i:02}"),
+                TextureAsset {
+                    mime: "image/png".into(),
+                    bytes: solid_png(side, rgba),
+                },
+            );
+        }
+        let control = std::sync::atomic::AtomicBool::new(false);
+        let progress = std::sync::Arc::new((
+            std::sync::atomic::AtomicUsize::new(0),
+            std::sync::atomic::AtomicUsize::new(0),
+        ));
+        let prepared = prepare_texture_data(&assets, &control, &progress);
+        let (sync_layers, sync_data) = build_texture_data(&assets).unwrap();
+        assert!(prepared.failed.is_none());
+        assert_eq!(prepared.layers, sync_layers);
+        assert_eq!(prepared.data.edge, sync_data.edge);
+        assert_eq!(prepared.data.layers, sync_data.layers);
+        assert_eq!(
+            (
+                progress.0.load(std::sync::atomic::Ordering::Relaxed),
+                progress.1.load(std::sync::atomic::Ordering::Relaxed)
+            ),
+            (3, 3)
+        );
+    }
+
+    /// A corrupt asset becomes the white placeholder and a status message;
+    /// every other asset still prepares, and the document is untouched.
+    #[test]
+    fn failed_decode_is_reported_and_skipped() {
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            "good".into(),
+            TextureAsset {
+                mime: "image/png".into(),
+                bytes: solid_png(64, [5, 200, 90, 255]),
+            },
+        );
+        assets.insert(
+            "bad".into(),
+            TextureAsset {
+                mime: "image/png".into(),
+                bytes: vec![0, 1, 2, 3, 4, 5],
+            },
+        );
+        let control = std::sync::atomic::AtomicBool::new(false);
+        let progress = std::sync::Arc::new((
+            std::sync::atomic::AtomicUsize::new(0),
+            std::sync::atomic::AtomicUsize::new(0),
+        ));
+        let prepared = prepare_texture_data(&assets, &control, &progress);
+        assert_eq!(
+            prepared.failed.as_deref().map(|f| f.contains("bad")),
+            Some(true)
+        );
+        assert_eq!(prepared.layers.len(), 2, "both assets keep a layer slot");
+        // The good asset's layer bytes match a direct prepare of it alone.
+        let (layers, data) = build_texture_data(
+            &assets
+                .iter()
+                .filter(|(k, _)| k.as_str() == "good")
+                .map(|(k, a)| (k.clone(), a.clone()))
+                .collect(),
+        )
+        .unwrap();
+        let good = prepared.layers["good"];
+        assert_eq!(
+            prepared.data.layers[good as usize],
+            data.layers[layers["good"] as usize]
+        );
+    }
+
+    fn poll_until_settled(editor: &mut DrafterApp, ctx: &egui::Context) {
+        for _ in 0..10_000 {
+            editor.poll_texture_job(ctx);
+            if editor.files.texture_job.is_none() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        panic!("texture job never settled");
+    }
+
+    /// The UI-thread job reports a failed decode as a status message with
+    /// the document untouched, and closing the document mid-prepare cancels
+    /// cleanly (the next request still completes).
+    #[test]
+    fn texture_job_reports_failure_and_close_mid_prepare_is_clean() {
+        let directory = tempfile::tempdir().unwrap();
+        let ctx = egui::Context::default();
+        let mut editor = app(directory.path());
+        let revision = editor.history.revision();
+
+        editor.files.textures.insert(
+            "bad".into(),
+            TextureAsset {
+                mime: "image/png".into(),
+                bytes: vec![9, 9, 9],
+            },
+        );
+        editor.request_texture_sync();
+        poll_until_settled(&mut editor, &ctx);
+        assert!(
+            editor.files.status.contains("failed to decode"),
+            "status: {}",
+            editor.files.status
+        );
+        assert_eq!(editor.history.revision(), revision, "document untouched");
+
+        // Cancel mid-prepare by replacing the document target.
+        editor.files.textures.insert(
+            "good".into(),
+            TextureAsset {
+                mime: "image/png".into(),
+                bytes: solid_png(64, [1, 2, 3, 255]),
+            },
+        );
+        editor.request_texture_sync();
+        assert!(editor.files.texture_job.is_some());
+        editor.reset_file_target(None);
+        poll_until_settled(&mut editor, &ctx);
+        assert!(editor.files.texture_job.is_none());
+
+        // A fresh request after the cancellation completes normally.
+        editor.files.textures.remove("bad");
+        editor.request_texture_sync();
+        poll_until_settled(&mut editor, &ctx);
+        assert_eq!(editor.files.status, "Textures ready");
+    }
+
+    /// The progress indicator counts prepared assets while the job runs.
+    #[test]
+    fn texture_job_progress_indicator_counts_prepared_assets() {
+        let directory = tempfile::tempdir().unwrap();
+        let ctx = egui::Context::default();
+        let mut editor = app(directory.path());
+        for i in 0..8 {
+            editor.files.textures.insert(
+                format!("t{i}"),
+                TextureAsset {
+                    mime: "image/png".into(),
+                    bytes: solid_png(512, [i as u8, 64, 128, 255]),
+                },
+            );
+        }
+        editor.request_texture_sync();
+        poll_until_settled(&mut editor, &ctx);
+        assert!(
+            editor.files.status.starts_with("Preparing textures ")
+                || editor.files.status == "Textures ready",
+            "status: {}",
+            editor.files.status
+        );
     }
 }

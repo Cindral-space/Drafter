@@ -762,6 +762,7 @@ impl DrafterApp {
         self.tape_resize_window(ctx);
         self.recovery_offer();
         self.autosave_tick(ctx);
+        self.poll_texture_job(ctx);
         self.scene_tabs(ctx);
         self.tool_palette(ctx);
         self.model_inspector(ctx);

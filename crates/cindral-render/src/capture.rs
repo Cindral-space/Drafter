@@ -62,6 +62,11 @@ impl SceneRenderer {
         {
             return Err("PNG size exceeds GPU texture limit (8192 maximum)".into());
         }
+        // One-shot readback must see every staged texture layer; finish all
+        // pending uploads instead of the render thread's one-layer-per-frame.
+        while self.texture_staging_active() {
+            self.pump_texture_upload(device, queue);
+        }
         let mut encoder = device.create_command_encoder(&Default::default());
         self.render(device, queue, &mut encoder, matrix, size);
         let stride = row_stride(size[0]);

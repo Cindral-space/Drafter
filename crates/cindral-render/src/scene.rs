@@ -33,6 +33,7 @@ use bytemuck::{Pod, Zeroable};
 use cindral_core::DefinitionId;
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, ScreenDescriptor};
 
+use crate::materials::MaterialTable;
 use crate::mesh::{EdgeVertex, FaceVertex, GeometryBuffers, MeshUpdate};
 use crate::texture::{texture_array_edge, TextureArrayData, TexturePixels};
 
@@ -242,6 +243,17 @@ struct OffscreenTarget {
     composite_bind_group: wgpu::BindGroup,
 }
 
+/// A freshly allocated materials texture array whose layers are still being
+/// written, one layer per frame. The previous array stays bound until the
+/// staging completes, then the new view and any deferred material table apply
+/// atomically.
+struct StagingTextures {
+    data: Arc<TextureArrayData>,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    next_layer: usize,
+}
+
 /// Persistent GPU instanced renderer for scene definitions and occurrences.
 pub struct SceneRenderer {
     definitions: BTreeMap<DefinitionId, DefinitionState>,
@@ -276,6 +288,12 @@ pub struct SceneRenderer {
     offscreen: OffscreenTarget,
     last_update: Option<Weak<SceneUpdate>>,
     last_textures: Option<Weak<TextureArrayData>>,
+    /// Texture array allocated but not yet fully uploaded; one layer's mip
+    /// chain is written per frame (see `pump_texture_upload`).
+    staging_textures: Option<StagingTextures>,
+    /// Material table updates held back while staging runs, so the visible
+    /// array and the table referencing it switch in the same frame.
+    deferred_materials: Option<Arc<MaterialTable>>,
     /// Failed texture-array allocations, drained by the app into the status bar.
     pub texture_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     draw_calls: usize,
@@ -326,13 +344,13 @@ fn camera_binding(
     })
 }
 
-/// Creates and fills the materials texture array from pre-built edge-sized
-/// mip chains. Allocation and upload run inside wgpu error scopes so an
-/// allocation failure (or validation error) returns a readable error instead
-/// of surfacing as an uncaptured device error.
-fn create_materials_texture_array(
+/// Allocates the materials texture array without uploading layer data; the
+/// layers are staged one per frame by `pump_texture_upload`. Allocation runs
+/// inside wgpu error scopes so an allocation failure (or validation error)
+/// returns a readable error instead of surfacing as an uncaptured device
+/// error.
+fn allocate_materials_texture_array(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
     data: &TextureArrayData,
 ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
     let edge = data.edge;
@@ -356,35 +374,6 @@ fn create_materials_texture_array(
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-
-        for (layer_idx, layer) in data.layers.iter().enumerate() {
-            for (mip_level, level) in layer.levels.iter().enumerate() {
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &texture,
-                        mip_level: mip_level as u32,
-                        origin: wgpu::Origin3d {
-                            x: 0,
-                            y: 0,
-                            z: layer_idx as u32,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &level.rgba,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(level.width * 4),
-                        rows_per_image: Some(level.height),
-                    },
-                    wgpu::Extent3d {
-                        width: level.width,
-                        height: level.height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-            }
-        }
-
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("Cindral scene materials texture array view"),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -985,6 +974,8 @@ impl SceneRenderer {
             offscreen,
             last_update: None,
             last_textures: None,
+            staging_textures: None,
+            deferred_materials: None,
             texture_errors: Arc::new(std::sync::Mutex::new(Vec::new())),
             draw_calls: 0,
         }
@@ -1072,28 +1063,19 @@ impl SceneRenderer {
                 .and_then(Weak::upgrade)
                 .is_none_or(|prev| !Arc::ptr_eq(&prev, textures));
             if changed {
+                // Allocate inside the error scope, then stage the layer
+                // uploads one layer per frame (see `pump_texture_upload`).
                 // On allocation failure keep the previous array and bindings
                 // (the CPU document is untouched either way) and surface the
                 // error through `texture_errors` for the status bar.
-                match create_materials_texture_array(device, queue, textures) {
+                match allocate_materials_texture_array(device, textures) {
                     Ok((texture, view)) => {
-                        self.shadow.set_materials(
-                            device,
-                            &view,
-                            &self.texture_sampler,
-                            &self.material_params_view,
-                        );
-                        self.camera_bind_group = camera_binding(
-                            device,
-                            &self.camera_layout,
-                            &self.uniform,
-                            &view,
-                            &self.texture_sampler,
-                            &self.shadow,
-                            &self.material_params_view,
-                        );
-                        self.materials_texture = texture;
-                        self.materials_view = view;
+                        self.staging_textures = Some(StagingTextures {
+                            data: Arc::clone(textures),
+                            texture,
+                            view,
+                            next_layer: 0,
+                        });
                         self.default_texture_initialized = true;
                     }
                     Err(message) => {
@@ -1108,38 +1090,133 @@ impl SceneRenderer {
         }
 
         if let Some(table) = &update.materials {
-            let needed = table.required_height().max(1);
-            if needed > self.material_params_capacity {
-                let capacity = needed
-                    .next_power_of_two()
-                    .min(crate::materials::MAX_MATERIALS as u32);
-                let (texture, view) = create_material_params_texture(device, capacity);
-                self.material_params_texture = texture;
-                self.material_params_view = view;
-                self.material_params_capacity = capacity;
-                let materials_view = self.materials_view.clone();
-                let params_view = self.material_params_view.clone();
-                self.shadow.set_materials(
-                    device,
-                    &materials_view,
-                    &self.texture_sampler,
-                    &params_view,
-                );
-                self.camera_bind_group = camera_binding(
-                    device,
-                    &self.camera_layout,
-                    &self.uniform,
-                    &materials_view,
-                    &self.texture_sampler,
-                    &self.shadow,
-                    &params_view,
-                );
+            // While a new array is staging, hold the table back so the bound
+            // array and the table's layer indices keep matching; the pump
+            // applies it in the same frame the new view binds.
+            if self.staging_textures.is_some() {
+                self.deferred_materials = Some(Arc::clone(table));
+            } else {
+                self.apply_material_table(device, queue, table);
             }
-            self.write_material_params(queue, &table.upload_bytes(), needed);
-        } else if !self.material_params_initialized {
+        }
+
+        self.pump_texture_upload(device, queue);
+
+        if !update.materials.is_some() && !self.material_params_initialized {
             // Guarantee a valid default record even before the first table sync.
             let table = crate::materials::MaterialTable::new();
             self.write_material_params(queue, &table.upload_bytes(), table.required_height());
+        }
+    }
+
+    /// Uploads one material parameter table, growing the params texture when
+    /// needed. Called directly from `apply_update`, or from the staging pump
+    /// for tables held back while a texture array uploads.
+    fn apply_material_table(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        table: &Arc<MaterialTable>,
+    ) {
+        let needed = table.required_height().max(1);
+        if needed > self.material_params_capacity {
+            let capacity = needed
+                .next_power_of_two()
+                .min(crate::materials::MAX_MATERIALS as u32);
+            let (texture, view) = create_material_params_texture(device, capacity);
+            self.material_params_texture = texture;
+            self.material_params_view = view;
+            self.material_params_capacity = capacity;
+            let materials_view = self.materials_view.clone();
+            let params_view = self.material_params_view.clone();
+            self.shadow
+                .set_materials(device, &materials_view, &self.texture_sampler, &params_view);
+            self.camera_bind_group = camera_binding(
+                device,
+                &self.camera_layout,
+                &self.uniform,
+                &materials_view,
+                &self.texture_sampler,
+                &self.shadow,
+                &params_view,
+            );
+        }
+        self.write_material_params(queue, &table.upload_bytes(), needed);
+    }
+
+    /// Writes at most one layer's mip chain of a staging texture array per
+    /// call, keeping per-frame GPU upload bounded. Writing the last layer
+    /// binds the new view and applies any material table held back during
+    /// staging in the same frame. Cheap no-op when nothing stages.
+    pub fn pump_texture_upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let Some(pending) = self.staging_textures.as_mut() else {
+            return;
+        };
+        let Some(layer) = pending.data.layers.get(pending.next_layer) else {
+            let pending = self.staging_textures.take().unwrap();
+            self.promote_staged_textures(device, queue, pending);
+            return;
+        };
+        for (mip_level, level) in layer.levels.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &pending.texture,
+                    mip_level: mip_level as u32,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: pending.next_layer as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &level.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(level.width * 4),
+                    rows_per_image: Some(level.height),
+                },
+                wgpu::Extent3d {
+                    width: level.width,
+                    height: level.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        pending.next_layer += 1;
+        if pending.next_layer >= pending.data.layers.len() {
+            let pending = self.staging_textures.take().unwrap();
+            self.promote_staged_textures(device, queue, pending);
+        }
+    }
+
+    /// Binds a fully uploaded staging array and applies the material table
+    /// held back while it staged, so the array and its layer indices switch
+    /// atomically.
+    fn promote_staged_textures(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pending: StagingTextures,
+    ) {
+        self.shadow.set_materials(
+            device,
+            &pending.view,
+            &self.texture_sampler,
+            &self.material_params_view,
+        );
+        self.camera_bind_group = camera_binding(
+            device,
+            &self.camera_layout,
+            &self.uniform,
+            &pending.view,
+            &self.texture_sampler,
+            &self.shadow,
+            &self.material_params_view,
+        );
+        self.materials_texture = pending.texture;
+        self.materials_view = pending.view;
+        if let Some(table) = self.deferred_materials.take() {
+            self.apply_material_table(device, queue, &table);
         }
     }
 
@@ -1164,6 +1241,11 @@ impl SceneRenderer {
             },
         );
         self.material_params_initialized = true;
+    }
+
+    /// True while a newly allocated texture array still has layers to stage.
+    pub fn texture_staging_active(&self) -> bool {
+        self.staging_textures.is_some()
     }
 
     /// Total capacity in bytes currently allocated across per-definition geometry and instance GPU buffers.
@@ -1684,6 +1766,9 @@ impl CallbackTrait for SceneCallback {
         if let Some(update) = &self.update {
             renderer.apply_update_once(device, queue, update);
         }
+        // Stage at most one texture-array layer per frame, even when no
+        // scene update is pending this frame.
+        renderer.pump_texture_upload(device, queue);
         renderer.set_section(device, queue, self.section.clone(), &self.caps);
         renderer.set_shadows(self.shadows.clone(), self.bounds);
         renderer.prepare_shadows(device, queue, encoder);

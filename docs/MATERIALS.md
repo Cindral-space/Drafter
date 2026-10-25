@@ -181,8 +181,14 @@ documents.
 - **Texture upload** (one-time per texture change): CPU decode of a
   generated 4096² PNG + resample to the 1024² array edge + premultiplied
   mip chain + layer sync — measured **714.8 ms** on the re-run above
-  (605–616 ms in the previous session; run-to-run variance, one-time cost
-  on the worker thread for imports).
+  (605–616 ms in the previous session; run-to-run variance). Opening a
+  document or attaching a texture runs this preparation on a worker thread
+  with a "Preparing textures k/n" status; the GPU upload then stages at
+  most one texture-array layer per frame, so the UI stays responsive
+  (measured: 10 large textures preparing, worst full UI frame 19.1 ms
+  against a 33 ms budget; the old synchronous path cost 3.75 s on the UI
+  thread). Import already prepared off-thread; headless PNG export keeps
+  the synchronous path.
 - **GPU resident copy**: reported by `gpu.allocated_bytes()` as a constant
   ~1.44 MiB on Mesa GL because wgpu's counter does not include GL texture
   storage; the analytic array bytes for one 4096² asset are the 2-layer

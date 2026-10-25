@@ -789,4 +789,73 @@ mod tests {
             .clone();
         assert_eq!(errors.len(), 1, "valid update must not add errors");
     }
+
+    /// Texture-array uploads stage one layer per frame on the render
+    /// thread; the headless one-shot `capture` flushes every remaining
+    /// layer before reading back.
+    #[test]
+    fn texture_upload_stages_one_layer_per_frame_and_capture_flushes() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+        let adapter = match block_on(instance.request_adapter(&Default::default())) {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                eprintln!("skipping: no wgpu adapter ({e})");
+                return;
+            }
+        };
+        let (device, queue) = match block_on(adapter.request_device(&Default::default())) {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("skipping: no wgpu device ({e})");
+                return;
+            }
+        };
+        let mut renderer = SceneRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 1);
+        let array = |colors: &[[u8; 4]]| cindral_render::SceneUpdate {
+            textures: Some(std::sync::Arc::new(cindral_render::TextureArrayData {
+                edge: 8,
+                layers: std::iter::once(cindral_render::TextureMips::white(8))
+                    .chain(colors.iter().map(|c| {
+                        cindral_render::TextureMips::from_source(
+                            8,
+                            &cindral_render::TexturePixels::new(
+                                8,
+                                8,
+                                c.iter().copied().cycle().take(8 * 8 * 4).collect(),
+                            ),
+                        )
+                    }))
+                    .collect(),
+            })),
+            ..Default::default()
+        };
+        renderer.apply_update(&device, &queue, &array(&[[255, 0, 0, 255]]));
+        assert!(
+            renderer.texture_staging_active(),
+            "allocation alone must not complete the upload"
+        );
+        renderer.pump_texture_upload(&device, &queue);
+        assert!(
+            !renderer.texture_staging_active(),
+            "one pump finishes the remaining layer"
+        );
+        renderer.apply_update(
+            &device,
+            &queue,
+            &array(&[[0, 0, 255, 255], [0, 255, 0, 255]]),
+        );
+        assert!(renderer.texture_staging_active());
+        renderer
+            .capture(
+                &device,
+                &queue,
+                glam::Mat4::IDENTITY.to_cols_array_2d(),
+                [8, 8],
+            )
+            .unwrap();
+        assert!(
+            !renderer.texture_staging_active(),
+            "capture must flush staged layers before readback"
+        );
+    }
 }

@@ -453,9 +453,7 @@ impl DrafterApp {
                         id,
                         material: edited,
                     });
-                    if let Err(e) = self.sync_file_textures() {
-                        self.error = Some(e.to_string());
-                    }
+                    self.request_texture_sync();
                 }
             }
             if ui.button("Load PNG/JPEG…").clicked() {
@@ -1185,7 +1183,7 @@ impl DrafterApp {
             self.org_command(Org::CreateMaterial(material));
             if self.error.is_none() {
                 self.select_last_material();
-                self.sync_file_textures()?;
+                self.request_texture_sync();
             }
             Ok(())
         })();
@@ -1200,12 +1198,23 @@ impl DrafterApp {
         }
     }
 
-    /// Encode a procedural pattern into the runtime asset table once.
+    /// Encode a procedural pattern into the runtime asset table once, then
+    /// refresh textures off-thread.
     fn ensure_builtin_pattern(&mut self, index: usize) -> Result<(), String> {
+        if self.insert_builtin_pattern(index)? {
+            self.request_texture_sync();
+        }
+        Ok(())
+    }
+
+    /// Encodes the procedural pattern into the runtime asset table once;
+    /// returns true when bytes were newly inserted. No scene sync here —
+    /// callers batch one `request_texture_sync` after several inserts.
+    fn insert_builtin_pattern(&mut self, index: usize) -> Result<bool, String> {
         let name = crate::builtin_materials::BUILTIN_PATTERNS[index].name;
         let key = format!("builtin:{name}");
         if self.files.textures.contains_key(&key) {
-            return Ok(());
+            return Ok(false);
         }
         let pixels = crate::builtin_materials::pattern_texture(index).ok_or("unknown pattern")?;
         let image = image::RgbaImage::from_raw(pixels.width, pixels.height, pixels.rgba)
@@ -1221,13 +1230,11 @@ impl DrafterApp {
                 bytes: bytes.into_inner(),
             },
         );
-        if let Err(e) = self.sync_file_textures() {
-            return Err(e.to_string());
-        }
-        Ok(())
+        Ok(true)
     }
 
     /// Regenerate procedural pattern slots referenced by a loaded document.
+    /// Inserts only; the caller applies one texture sync for all assets.
     pub(crate) fn ensure_builtin_textures(&mut self) {
         let missing: Vec<String> = self
             .history
@@ -1247,7 +1254,7 @@ impl DrafterApp {
             else {
                 continue;
             };
-            if let Err(e) = self.ensure_builtin_pattern(index) {
+            if let Err(e) = self.insert_builtin_pattern(index) {
                 self.error = Some(e);
             }
         }
