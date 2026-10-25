@@ -54,6 +54,13 @@ pub(crate) struct MaterialsUi {
     /// Original values captured while the name field is being edited.
     name_original: Option<(MaterialId, Material)>,
     name_buffer: String,
+    /// Live texture-mapping edit session: pre-edit material plus whether the
+    /// size text fields own it (text commits on Enter/focus loss; slider
+    /// edits commit when a frame passes without a widget change).
+    mapping_session: Option<(MaterialId, Material, bool)>,
+    /// Width/height text buffers for the size editor (persists between
+    /// keystrokes so partial input is not clobbered by the formatted value).
+    size_buffers: Option<(MaterialId, String, String)>,
     editing_widgets: bool,
     hex: String,
     rename: Option<(MaterialId, String)>,
@@ -81,6 +88,8 @@ impl Default for MaterialsUi {
             drag_original: None,
             name_original: None,
             name_buffer: String::new(),
+            mapping_session: None,
+            size_buffers: None,
             editing_widgets: false,
             hex: String::new(),
             rename: None,
@@ -462,43 +471,49 @@ impl DrafterApp {
     /// Real-world texture size, rotation and flip for the edited material.
     ///
     /// Sizes accept the shared measurements parser (`60cm`, `2'`, `1/2"`);
-    /// changes preview live through the material table with one undo entry.
+    /// typing previews valid values live and commits exactly one undo entry
+    /// on Enter or focus loss (Escape reverts); sliders and buttons commit
+    /// one entry per completed edit.
     fn texture_mapping_editor(&mut self, ui: &mut egui::Ui, id: MaterialId, material: &Material) {
         if material.texture.is_none() {
             return;
         }
+        // A session for another material ends where it stands.
+        if self
+            .materials
+            .mapping_session
+            .as_ref()
+            .is_some_and(|(n, _, _)| *n != id)
+        {
+            self.materials.mapping_session = None;
+        }
+        if self
+            .materials
+            .size_buffers
+            .as_ref()
+            .is_some_and(|(n, _, _)| *n != id)
+        {
+            self.materials.size_buffers = None;
+        }
+        if self.materials.size_buffers.is_none() {
+            let settings = self.presentation.measurements;
+            let mapping = material.texture_mapping.unwrap_or_default();
+            let (width, height) = Self::size_field_texts(&mapping, settings);
+            self.materials.size_buffers = Some((id, width, height));
+        }
         ui.label(RichText::new("Texture mapping").small().weak());
-        let settings = self.presentation.measurements;
         let mapping = material.texture_mapping.unwrap_or_default();
-        let aspect = mapping.width_m / mapping.height_m.max(1e-9);
-        let mut lock_aspect = self.materials.lock_aspect;
-        let size_text = |mapping: &cindral_core::TextureMapping| {
-            let digits = usize::from(settings.precision).clamp(1, 6);
-            format!(
-                "{:.*} × {:.*}",
-                digits, mapping.width_m, digits, mapping.height_m
-            )
-        };
-        let mut width_text = size_text(&mapping)
-            .split(" × ")
-            .next()
-            .unwrap_or("")
-            .to_string();
-        let mut height_text = size_text(&mapping)
-            .split(" × ")
-            .nth(1)
-            .unwrap_or("")
-            .to_string();
+        let lock_aspect = self.materials.lock_aspect;
 
-        ui.add_space(2.);
+        let mut buffers = self.materials.size_buffers.take().unwrap();
         let size = ui.add(
-            egui::TextEdit::singleline(&mut width_text)
+            egui::TextEdit::singleline(&mut buffers.1)
                 .desired_width(64.)
                 .font(egui::TextStyle::Monospace),
         );
         ui.label("×");
         let height = ui.add(
-            egui::TextEdit::singleline(&mut height_text)
+            egui::TextEdit::singleline(&mut buffers.2)
                 .desired_width(64.)
                 .font(egui::TextStyle::Monospace),
         );
@@ -507,46 +522,27 @@ impl DrafterApp {
             .on_hover_text("Lock aspect ratio: editing one side scales the other");
         if lock.clicked() {
             self.materials.lock_aspect = !lock_aspect;
-            lock_aspect = self.materials.lock_aspect;
         }
         if size.changed() || height.changed() {
-            let parsed = |text: &str| cindral_tools::parse_length(text);
-            let width = parsed(&width_text);
-            let height_value = parsed(&height_text);
-            let (new_w, new_h) = match (width, height_value) {
-                (Ok(w), Ok(h)) => {
-                    if lock_aspect && size.changed() && !height.changed() {
-                        (w, w / aspect.max(1e-9))
-                    } else if lock_aspect {
-                        (h * aspect.max(1e-9), h)
-                    } else {
-                        (w, h)
-                    }
-                }
-                (Ok(w), Err(_)) if height_text.trim().is_empty() => (
-                    w,
-                    if lock_aspect {
-                        w / aspect.max(1e-9)
-                    } else {
-                        mapping.height_m
-                    },
-                ),
-                (Err(_), Ok(h)) if width_text.trim().is_empty() => (
-                    if lock_aspect {
-                        h * aspect.max(1e-9)
-                    } else {
-                        mapping.width_m
-                    },
-                    h,
-                ),
-                _ => return,
-            };
-            let updated = cindral_core::TextureMapping {
-                width_m: new_w,
-                height_m: new_h,
-                ..mapping
-            };
-            self.apply_mapping_edit(id, material, updated);
+            self.mapping_size_preview(
+                id,
+                &buffers.1,
+                &buffers.2,
+                size.changed() && !height.changed(),
+            );
+        }
+        let focused = size.has_focus() || height.has_focus();
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) && focused {
+            self.mapping_session_revert(id);
+            self.materials.size_buffers = None;
+        } else if (ui.input(|i| i.key_pressed(egui::Key::Enter)) && focused)
+            || size.lost_focus()
+            || height.lost_focus()
+        {
+            self.mapping_size_commit(id, &buffers.1, &buffers.2);
+            self.materials.size_buffers = None;
+        } else {
+            self.materials.size_buffers = Some(buffers);
         }
 
         let mut rotation = mapping.rotation_deg;
@@ -555,23 +551,42 @@ impl DrafterApp {
                 .text("Rotation °")
                 .step_by(1.),
         );
+        if rot.drag_started() && self.materials.mapping_session.is_none() {
+            self.materials.mapping_session = Some((id, material.clone(), false));
+        }
         if rot.changed() {
-            self.apply_mapping_edit(
-                id,
-                material,
-                cindral_core::TextureMapping {
+            if self.materials.mapping_session.is_none() {
+                self.materials.mapping_session = Some((id, material.clone(), false));
+            }
+            let edited = Material {
+                texture_mapping: Some(cindral_core::TextureMapping {
                     rotation_deg: rotation,
                     ..mapping
-                },
-            );
+                }),
+                ..self.history.materials()[&id].clone()
+            };
+            let _ = self.history.material_preview(id, edited);
+            self.scene_mark_dirty();
+        }
+        if rot.drag_stopped() {
+            self.mapping_session_commit(id);
+        }
+        // A frame with no slider changes ends a rotation edit session.
+        if self
+            .materials
+            .mapping_session
+            .as_ref()
+            .is_some_and(|(_, _, text)| !*text)
+            && !rot.changed()
+        {
+            self.mapping_session_commit(id);
         }
         let flip_h = ui
             .selectable_label(mapping.flip_h, "Flip H")
             .on_hover_text("Mirror the texture horizontally");
         if flip_h.clicked() {
-            self.apply_mapping_edit(
+            self.commit_mapping_value(
                 id,
-                material,
                 cindral_core::TextureMapping {
                     flip_h: !mapping.flip_h,
                     ..mapping
@@ -582,9 +597,8 @@ impl DrafterApp {
             .selectable_label(mapping.flip_v, "Flip V")
             .on_hover_text("Mirror the texture vertically");
         if flip_v.clicked() {
-            self.apply_mapping_edit(
+            self.commit_mapping_value(
                 id,
-                material,
                 cindral_core::TextureMapping {
                     flip_v: !mapping.flip_v,
                     ..mapping
@@ -596,12 +610,138 @@ impl DrafterApp {
             .button("Reset to image size")
             .on_hover_text("Physical size at 96 DPI");
         if reset.clicked() {
-            self.apply_mapping_edit(
+            self.commit_mapping_value(
                 id,
-                material,
                 cindral_core::TextureMapping::from_pixels(image_w, image_h),
             );
+            self.materials.size_buffers = None;
         }
+    }
+
+    /// Parse the size text buffers and preview the resulting mapping.
+    ///
+    /// Returns false when the text does not yet form a valid mapping (zero,
+    /// negative or unparseable); the document keeps its last valid value.
+    fn mapping_size_preview(
+        &mut self,
+        id: MaterialId,
+        width_text: &str,
+        height_text: &str,
+        width_drove: bool,
+    ) -> bool {
+        let current = self.history.materials()[&id].clone();
+        let base = self
+            .materials
+            .mapping_session
+            .as_ref()
+            .filter(|(n, _, _)| *n == id)
+            .map_or(&current, |(_, m, _)| m)
+            .texture_mapping
+            .unwrap_or_default();
+        let aspect = base.width_m / base.height_m.max(1e-9);
+        let lock_aspect = self.materials.lock_aspect;
+        let parsed = |text: &str| cindral_tools::parse_length(text);
+        let width = parsed(width_text);
+        let height_value = parsed(height_text);
+        let (new_w, new_h) = match (width, height_value) {
+            (Ok(w), Ok(h)) => {
+                if lock_aspect && width_drove {
+                    (w, w / aspect.max(1e-9))
+                } else if lock_aspect {
+                    (h * aspect.max(1e-9), h)
+                } else {
+                    (w, h)
+                }
+            }
+            (Ok(w), Err(_)) if height_text.trim().is_empty() => (
+                w,
+                if lock_aspect {
+                    w / aspect.max(1e-9)
+                } else {
+                    base.height_m
+                },
+            ),
+            (Err(_), Ok(h)) if width_text.trim().is_empty() => (
+                if lock_aspect {
+                    h * aspect.max(1e-9)
+                } else {
+                    base.width_m
+                },
+                h,
+            ),
+            _ => return false,
+        };
+        if !new_w.is_finite() || !new_h.is_finite() || new_w <= 0. || new_h <= 0. {
+            return false;
+        }
+        let updated = cindral_core::TextureMapping {
+            width_m: new_w,
+            height_m: new_h,
+            ..base
+        };
+        if updated == base {
+            return true;
+        }
+        if self.materials.mapping_session.is_none() {
+            self.materials.mapping_session = Some((id, current.clone(), true));
+        }
+        let edited = Material {
+            texture_mapping: Some(updated),
+            ..current
+        };
+        let _ = self.history.material_preview(id, edited);
+        self.scene_mark_dirty();
+        true
+    }
+
+    /// Commit the size text session: one undo entry when the final text
+    /// forms a mapping that differs from the pre-edit value; otherwise the
+    /// preview is silently restored (no entry, no invalid value recorded).
+    fn mapping_size_commit(&mut self, id: MaterialId, width_text: &str, height_text: &str) {
+        if self.mapping_size_preview(id, width_text, height_text, true) {
+            self.mapping_session_commit(id);
+        } else {
+            self.mapping_session_revert(id);
+        }
+    }
+
+    /// Record one undo entry covering the live mapping session (if any).
+    fn mapping_session_commit(&mut self, id: MaterialId) {
+        if let Some((session_id, original, _)) = self.materials.mapping_session.take() {
+            if session_id == id {
+                if let Some(edited) = self.history.materials().get(&id).cloned() {
+                    if edited != original {
+                        if let Err(e) = self.history.finish_material_edit(id, original, edited) {
+                            self.error = Some(e.to_string());
+                        }
+                        self.refresh_mesh();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Discard the live mapping session and restore the pre-edit material.
+    fn mapping_session_revert(&mut self, id: MaterialId) {
+        if let Some((session_id, original, _)) = self.materials.mapping_session.take() {
+            if session_id == id {
+                let _ = self.history.material_preview(id, original);
+                self.scene_mark_dirty();
+            }
+        }
+    }
+
+    /// Commit a discrete mapping change (flip toggle, size reset) as one
+    /// undo entry.
+    fn commit_mapping_value(&mut self, id: MaterialId, mapping: cindral_core::TextureMapping) {
+        let edited = Material {
+            texture_mapping: Some(mapping),
+            ..self.history.materials()[&id].clone()
+        };
+        self.org_command(Org::UpdateMaterial {
+            id,
+            material: edited,
+        });
     }
 
     /// Decoded pixel size of a material's texture (0,0 when unavailable).
@@ -629,22 +769,74 @@ impl DrafterApp {
         size
     }
 
-    /// Apply one live mapping edit: preview now, commit on interaction end.
-    fn apply_mapping_edit(
-        &mut self,
-        id: MaterialId,
-        original: &Material,
-        mapping: cindral_core::TextureMapping,
-    ) {
-        if self.materials.drag_original.is_none() {
-            self.materials.drag_original = Some((id, original.clone()));
+    /// Formatted width/height text for the size fields.
+    fn size_field_texts(
+        mapping: &cindral_core::TextureMapping,
+        settings: cindral_core::MeasurementSettings,
+    ) -> (String, String) {
+        let digits = usize::from(settings.precision).clamp(1, 6);
+        let text = format!(
+            "{:.*} × {:.*}",
+            digits, mapping.width_m, digits, mapping.height_m
+        );
+        let mut parts = text.split(" × ");
+        (
+            parts.next().unwrap_or("").to_string(),
+            parts.next().unwrap_or("").to_string(),
+        )
+    }
+
+    /// Duplicate a material with a unique name and select the copy; one
+    /// undo entry.
+    fn duplicate_material(&mut self, material_id: MaterialId) {
+        if let Some(current) = self.history.materials().get(&material_id).cloned() {
+            let copy = Material {
+                name: unique_material_name(&self.history, &current.name),
+                ..current
+            };
+            self.org_command(Org::CreateMaterial(copy));
+            self.select_last_material();
         }
-        let edited = Material {
-            texture_mapping: Some(mapping),
-            ..original.clone()
-        };
-        let _ = self.history.material_preview(id, edited);
-        self.materials.editing_widgets = true;
+    }
+
+    /// Select everything using a material, matching the panel's usage count:
+    /// faces in the active context, instances carrying the material anywhere
+    /// in the tree, and instances of definitions whose own faces use it
+    /// (painted faces inside a component cannot be selected from outside).
+    fn select_material_users(&mut self, material: MaterialId) {
+        let mut selection = cindral_tools::Selection::default();
+        for face in faces_with_material(self.history.model(), Some(material)) {
+            selection.faces.insert(face);
+        }
+        self.selection = selection;
+        self.selection_start = None;
+        let active = self.history.active_definition();
+        let carried: BTreeSet<cindral_core::DefinitionId> = self
+            .history
+            .definitions()
+            .filter(|&d| d != active)
+            .filter(|&d| {
+                self.history
+                    .definition_model(d)
+                    .is_some_and(|m| !faces_with_material(m, Some(material)).is_empty())
+            })
+            .collect();
+        let mut paths = Vec::new();
+        visit_material_users(
+            &self.history,
+            cindral_core::DefinitionId(0),
+            Vec::new(),
+            material,
+            &carried,
+            &mut paths,
+        );
+        if paths.len() == 1 {
+            self.organization.selected = paths.pop();
+            self.organization.multiple.clear();
+        } else {
+            self.organization.selected = None;
+            self.organization.multiple = paths.into_iter().collect();
+        }
     }
 
     fn recent_colors_row(&mut self, ui: &mut egui::Ui) {
@@ -738,14 +930,7 @@ impl DrafterApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("Duplicate").clicked() {
-                        if let Some(current) = self.history.materials().get(&material_id).cloned() {
-                            let copy = Material {
-                                name: unique_material_name(&self.history, &current.name),
-                                ..current
-                            };
-                            self.org_command(Org::CreateMaterial(copy));
-                            self.select_last_material();
-                        }
+                        self.duplicate_material(material_id);
                         close = true;
                     }
                     if ui.button("Delete").clicked() {
@@ -757,13 +942,7 @@ impl DrafterApp {
                     }
                 });
                 if ui.button("Select faces using it").clicked() {
-                    let faces = faces_with_material(self.history.model(), Some(material_id));
-                    let mut selection = cindral_tools::Selection::default();
-                    for face in faces {
-                        selection.faces.insert(face);
-                    }
-                    self.selection = selection;
-                    self.selection_start = None;
+                    self.select_material_users(material_id);
                     close = true;
                 }
                 if ui.button("Replace with another material…").clicked() {
@@ -1453,6 +1632,32 @@ fn unique_material_name(history: &cindral_core::DocumentHistory, base: &str) -> 
     candidate
 }
 
+/// Collect instance paths that use a material: nodes carrying it directly
+/// plus every instance of a definition whose faces use it.
+fn visit_material_users(
+    history: &cindral_core::DocumentHistory,
+    definition: cindral_core::DefinitionId,
+    parent: InstancePath,
+    material: MaterialId,
+    carried: &BTreeSet<cindral_core::DefinitionId>,
+    out: &mut Vec<InstancePath>,
+) {
+    if parent.len() >= 64 || out.len() > 100_000 {
+        return;
+    }
+    if let Some(nodes) = history.instances(definition) {
+        for node in nodes.values() {
+            let mut path = parent.clone();
+            path.push(node.id);
+            let uses = node.material == Some(material) || carried.contains(&node.definition);
+            if uses {
+                out.push(path.clone());
+            }
+            visit_material_users(history, node.definition, path, material, carried, out);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1758,6 +1963,23 @@ mod tests {
         app.materials.search.clear();
         app.materials.sort = MaterialSort::Usage;
         inspector(&mut app, &ctx);
+        // Usage sorts most-used first (the painted material leads) with the
+        // rest grouped by descending usage; name is the tiebreaker.
+        let entries = app.materials.visible_entries(&app.history);
+        assert_eq!(entries[0], (used, 1));
+        assert!(entries[1..].windows(2).all(|w| w[0].1 >= w[1].1));
+        assert!(entries[1..].windows(2).all(|w| w[0].1 != w[1].1
+            || app.history.materials()[&w[0].0].name <= app.history.materials()[&w[1].0].name));
+        // Name sort orders alphabetically.
+        app.materials.sort = MaterialSort::Name;
+        let entries = app.materials.visible_entries(&app.history);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|(id, _)| app.history.materials()[id].name.as_str())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
         let unused = app.materials.unused_materials(&app.history);
         assert_eq!(unused.len(), 4999);
         assert!(!unused.contains(&used));
@@ -1857,5 +2079,178 @@ mod tests {
         restored.apply_file(bundle, None).unwrap();
         assert!(restored.files.textures.contains_key(&key));
         assert!(restored.error.is_none());
+    }
+
+    #[test]
+    fn mapping_size_typing_previews_and_commits_one_entry() {
+        let mut app = DrafterApp::default();
+        square(&mut app, 0., 0.);
+        app.create_pattern_material(0);
+        let id = app.organization.material.unwrap();
+        let depth = app.history.undo_depth();
+        let width = |app: &DrafterApp| {
+            app.history.materials()[&id]
+                .texture_mapping
+                .unwrap_or_default()
+                .width_m
+        };
+        // Valid keystrokes preview without recording history; incomplete or
+        // invalid ones never reach the document.
+        for text in ["0", "0.", "0.6"] {
+            assert_eq!(
+                app.mapping_size_preview(id, text, "1.00", true),
+                text == "0.6"
+            );
+            assert_eq!(app.history.undo_depth(), depth);
+        }
+        assert!((width(&app) - 0.6).abs() < 1e-9);
+        assert!(!app.mapping_size_preview(id, "0.6.", "1.00", true));
+        assert!(!app.mapping_size_preview(id, "-2", "1.00", true));
+        assert!(!app.mapping_size_preview(id, "abc", "1.00", true));
+        assert!((width(&app) - 0.6).abs() < 1e-9);
+
+        // Enter (or focus loss) commits exactly one entry for the whole edit.
+        app.mapping_size_commit(id, "0.6", "1.00");
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        assert!((width(&app) - 0.6).abs() < 1e-9);
+        app.history.undo().unwrap();
+        assert_eq!(app.history.materials()[&id].texture_mapping, None);
+
+        // Escape reverts a live preview without an entry.
+        assert!(app.mapping_size_preview(id, "2", "1.00", true));
+        assert!((width(&app) - 2.).abs() < 1e-9);
+        app.mapping_session_revert(id);
+        assert_eq!(app.history.undo_depth(), depth);
+        assert_eq!(app.history.materials()[&id].texture_mapping, None);
+    }
+
+    #[test]
+    fn select_users_covers_component_interiors_and_instances() {
+        let mut app = DrafterApp::default();
+        square(&mut app, 0., 0.);
+        let before = app.model().vertices().len();
+        square(&mut app, 30., 30.);
+        let part_vertices: Vec<cindral_core::VertexId> = app
+            .model()
+            .vertices()
+            .keys()
+            .skip(before)
+            .copied()
+            .collect();
+        app.org_command(Org::Create {
+            kind: cindral_core::DefinitionKind::Component,
+            name: "Part".into(),
+            vertices: part_vertices,
+        });
+        let path = vec![*app
+            .history
+            .instances(cindral_core::DefinitionId(0))
+            .unwrap()
+            .keys()
+            .next()
+            .unwrap()];
+        app.org_command(Org::CreateMaterial(Material {
+            name: "Red".into(),
+            color: [200, 40, 40],
+            opacity: 1.,
+            texture: None,
+            texture_mapping: None,
+        }));
+        let id = app.history.materials().keys().next_back().copied().unwrap();
+
+        // The material is used only inside the component definition.
+        app.history.enter(path.clone()).unwrap();
+        let faces: Vec<FaceId> = app.history.model().faces().keys().copied().collect();
+        app.org_command(Org::PaintFaces {
+            faces,
+            material: Some(id),
+        });
+        app.history.exit().unwrap();
+        app.materials.refresh_counts(&app.history);
+        assert_eq!(app.materials.usage(Some(id)), 1);
+        assert!(app.selection.faces.is_empty());
+        app.select_material_users(id);
+        assert!(app.selection.faces.is_empty());
+        assert_eq!(app.organization.selected.as_ref(), Some(&path));
+
+        // A material-carrying instance counts and is selected as well.
+        app.org_command(Org::PaintInstance {
+            path: path.clone(),
+            material: Some(id),
+        });
+        app.materials.refresh_counts(&app.history);
+        assert_eq!(app.materials.usage(Some(id)), 2);
+        app.select_material_users(id);
+        assert_eq!(app.organization.selected.as_ref(), Some(&path));
+    }
+
+    #[test]
+    fn duplicate_material_copies_appearance_with_unique_name_and_one_undo() {
+        let (mut app, _ctx) = setup_paint();
+        let red = app.history.materials().keys().next().copied().unwrap();
+        let original = app.history.materials()[&red].clone();
+        let depth = app.history.undo_depth();
+        app.duplicate_material(red);
+        assert_eq!(app.history.undo_depth(), depth + 1);
+        let copy_id = app.history.materials().keys().next_back().copied().unwrap();
+        let copy = app.history.materials()[&copy_id].clone();
+        assert_eq!(copy.name, format!("{} 2", original.name));
+        assert_eq!(copy.color, original.color);
+        assert_eq!(copy.texture, original.texture);
+        assert_eq!(app.organization.material, Some(copy_id));
+        // Repeated duplicates keep names unique.
+        app.duplicate_material(red);
+        let third = app.history.materials().keys().next_back().copied().unwrap();
+        assert_eq!(
+            app.history.materials()[&third].name,
+            format!("{} 3", original.name)
+        );
+        app.history.undo().unwrap();
+        assert!(!app.history.materials().contains_key(&third));
+        assert!(app.history.materials().contains_key(&copy_id));
+    }
+
+    #[test]
+    fn paint_bucket_escape_resets_without_leaving_the_tool() {
+        let (mut app, ctx) = setup_paint();
+        let depth = app.history.undo_depth();
+        let model = app.model().clone();
+        let p = position(&app, DVec3::new(5., 5., 0.));
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(p)],
+            egui::Modifiers::NONE,
+        );
+        send(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: eframe::egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(
+            app.modify.kind(),
+            cindral_tools::ModifyKind::PaintBucket,
+            "Escape must keep the Paint Bucket selected"
+        );
+        assert_eq!(app.history.undo_depth(), depth);
+        assert_eq!(app.model(), &model);
+        // The tool still paints afterwards.
+        click_at(
+            &mut app,
+            &ctx,
+            DVec3::new(5., 5., 0.),
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(
+            material_of(&app, DVec3::new(5., 5., 0.)).is_some(),
+            app.organization.material.is_some()
+        );
     }
 }
