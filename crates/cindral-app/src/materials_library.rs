@@ -1,8 +1,8 @@
 //! User material library: off-UI-thread folder scanning and 64x64 thumbnailing.
 //!
-//! [`scan_folder`] is the synchronous reference implementation; [`LibraryScanJob`]
-//! runs it on a dedicated worker thread so the UI never blocks, and
-//! [`LibraryCache`] keeps one in-flight job per library folder.
+//! [`scan_folder_cancellable`] is the synchronous reference implementation;
+//! [`LibraryScanJob`] runs it on a dedicated worker thread so the UI never
+//! blocks, and [`LibraryCache`] keeps one in-flight job per library folder.
 
 use eframe::egui::{Color32, ColorImage};
 use image::ImageReader;
@@ -33,11 +33,8 @@ pub struct LibraryImage {
 }
 
 /// Result of scanning one library folder.
-#[allow(dead_code)] // folder retained for callers that key scans by origin
 #[derive(Clone, Default)]
 pub struct LibraryScan {
-    /// The folder that was scanned.
-    pub folder: PathBuf,
     /// Decoded images, sorted by file name.
     pub images: Vec<LibraryImage>,
     /// Files that were present but skipped (unreadable, corrupt, oversized,
@@ -46,9 +43,8 @@ pub struct LibraryScan {
 }
 
 impl LibraryScan {
-    fn empty(folder: &Path) -> Self {
+    fn empty() -> Self {
         LibraryScan {
-            folder: folder.to_path_buf(),
             images: Vec::new(),
             skipped: 0,
         }
@@ -62,16 +58,11 @@ impl LibraryScan {
 /// simply not scanned). Files that fail to read or decode, non-image files and
 /// duplicate basenames are counted in [`LibraryScan::skipped`] and never panic.
 /// Duplicate basenames across extensions keep the first entry in sort order.
-#[allow(dead_code)] // synchronous reference implementation; workers use the cancellable variant
-pub fn scan_folder(folder: &Path) -> LibraryScan {
-    scan_folder_cancellable(folder, &AtomicBool::new(false))
-}
-
 fn scan_folder_cancellable(folder: &Path, cancel: &AtomicBool) -> LibraryScan {
     let entries = match std::fs::read_dir(folder) {
         Ok(entries) => entries,
         // Unreadable/nonexistent folder: empty scan, no panic.
-        Err(_) => return LibraryScan::empty(folder),
+        Err(_) => return LibraryScan::empty(),
     };
     let mut candidates: Vec<(String, PathBuf)> = Vec::new();
     let mut skipped = 0usize;
@@ -97,7 +88,6 @@ fn scan_folder_cancellable(folder: &Path, cancel: &AtomicBool) -> LibraryScan {
     candidates.truncate(MAX_FILES);
 
     let mut scan = LibraryScan {
-        folder: folder.to_path_buf(),
         images: Vec::new(),
         skipped,
     };
@@ -185,7 +175,6 @@ pub fn downsample_64(rgba: &[u8], w: u32, h: u32) -> ColorImage {
 
 /// Asynchronous folder scan running on a dedicated worker thread.
 pub struct LibraryScanJob {
-    folder: PathBuf,
     rx: Receiver<LibraryScan>,
     cancel: Arc<AtomicBool>,
     done: bool,
@@ -197,7 +186,6 @@ impl LibraryScanJob {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let thread_cancel = Arc::clone(&cancel);
-        let thread_folder = folder.clone();
         let thread_tx = tx.clone();
         let handle = std::thread::Builder::new()
             .name("cindral-materials-library".to_string())
@@ -205,17 +193,16 @@ impl LibraryScanJob {
                 // Never let a worker panic propagate to the process; a failed
                 // scan degrades to an empty result.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    scan_folder_cancellable(&thread_folder, &thread_cancel)
+                    scan_folder_cancellable(&folder, &thread_cancel)
                 }))
-                .unwrap_or_else(|_| LibraryScan::empty(&thread_folder));
+                .unwrap_or_else(|_| LibraryScan::empty());
                 let _ = thread_tx.send(result);
             });
         // If the thread could not even be spawned, report an empty scan.
         if handle.is_err() {
-            let _ = tx.send(LibraryScan::empty(&folder));
+            let _ = tx.send(LibraryScan::empty());
         }
         LibraryScanJob {
-            folder,
             rx,
             cancel,
             done: false,
@@ -238,7 +225,7 @@ impl LibraryScanJob {
                 // Defensive: the worker always sends via catch_unwind, so a
                 // disconnected channel means it never ran; report empty.
                 self.done = true;
-                Some(LibraryScan::empty(&self.folder))
+                Some(LibraryScan::empty())
             }
         }
     }
@@ -382,7 +369,7 @@ mod tests {
             .expect("write corrupt");
         std::fs::write(dir.join("note.txt"), b"ignore me").expect("write txt");
 
-        let scan = scan_folder(&dir);
+        let scan = scan_folder_cancellable(&dir, &AtomicBool::new(false));
         assert_eq!(scan.images.len(), 3);
         assert_eq!(scan.skipped, 2, "corrupt.png + note.txt (non-image)");
         let names: Vec<&str> = scan.images.iter().map(|i| i.name.as_str()).collect();
@@ -399,7 +386,7 @@ mod tests {
         let dir = unique_temp_dir("dupes");
         write_png(&dir.join("rock.png"), 2, [255, 0, 0]);
         write_png(&dir.join("rock.jpg"), 2, [0, 255, 0]);
-        let scan = scan_folder(&dir);
+        let scan = scan_folder_cancellable(&dir, &AtomicBool::new(false));
         assert_eq!(scan.images.len(), 1);
         assert_eq!(scan.images[0].name, "rock.jpg", ".jpg sorts before .png");
         assert_eq!(scan.skipped, 1);
@@ -419,7 +406,7 @@ mod tests {
         for i in 0..2050u32 {
             std::fs::write(dir.join(format!("f{i:05}.png")), &bytes).expect("write tiny");
         }
-        let scan = scan_folder(&dir);
+        let scan = scan_folder_cancellable(&dir, &AtomicBool::new(false));
         assert_eq!(scan.images.len(), 2000);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
@@ -444,7 +431,7 @@ mod tests {
         f.write_all(&ihdr).expect("ihdr");
         drop(f);
 
-        let scan = scan_folder(&dir);
+        let scan = scan_folder_cancellable(&dir, &AtomicBool::new(false));
         assert_eq!(scan.images.len(), 0);
         assert_eq!(scan.skipped, 1, "9000x9000 exceeds the 8192 limit");
         std::fs::remove_dir_all(&dir).expect("cleanup");
@@ -521,9 +508,8 @@ mod tests {
     #[test]
     fn scan_nonexistent_folder_is_empty_without_panic() {
         let missing = std::env::temp_dir().join("cindral-matlib-does-not-exist-42");
-        let scan = scan_folder(&missing);
+        let scan = scan_folder_cancellable(&missing, &AtomicBool::new(false));
         assert_eq!(scan.images.len(), 0);
         assert_eq!(scan.skipped, 0);
-        assert_eq!(scan.folder, missing);
     }
 }

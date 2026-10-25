@@ -87,3 +87,7 @@ required-features = ["kernel-benchmark"]
 [[example]]
 name = "pan_benchmark"
 required-features = ["kernel-benchmark"]
+
+[[example]]
+name = "materials_benchmark"
+required-features = ["kernel-benchmark"]
