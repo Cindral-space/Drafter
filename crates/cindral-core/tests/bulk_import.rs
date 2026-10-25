@@ -335,7 +335,9 @@ fn total_area(m: &Model) -> f64 {
 fn flat_wall_of_2000_triangles_merges_to_one_face() {
     let g = grid(40, 25, &[], |_| None);
     assert_eq!(g.faces.len(), 2000);
-    let (m, stats) = g.build_cancellable_with_stats(true, true, || false).unwrap();
+    let (m, stats) = g
+        .build_cancellable_with_stats(true, true, || false)
+        .unwrap();
     assert_eq!(m.faces().len(), 1);
     assert_eq!(stats.duplicates_removed, 0);
     assert_eq!(stats.region_fallbacks, 0);
@@ -354,7 +356,9 @@ fn wall_with_window_hole_keeps_hole() {
 }
 #[test]
 fn different_material_regions_stay_separate() {
-    let g = grid(4, 2, &[], |(x, _)| Some(MaterialId(if x < 2 { 1 } else { 2 })));
+    let g = grid(4, 2, &[], |(x, _)| {
+        Some(MaterialId(if x < 2 { 1 } else { 2 }))
+    });
     let m = g.build(true, true).unwrap();
     assert_eq!(m.faces().len(), 2);
     m.validate().unwrap();
@@ -370,7 +374,8 @@ fn curved_surface_is_not_flattened() {
         let dir = DVec3::new(angle.cos(), 0., angle.sin());
         let next = base + dir;
         let top = g.vertices.len();
-        g.vertices.extend([base, next, next + DVec3::Y, base + DVec3::Y]);
+        g.vertices
+            .extend([base, next, next + DVec3::Y, base + DVec3::Y]);
         g.faces.push(BulkFace {
             outer: vec![top, top + 1, top + 2],
             ..Default::default()
@@ -399,7 +404,8 @@ fn locally_coplanar_curve_falls_back_to_pairwise() {
     for _ in 0..2000 {
         let next = base + DVec3::new(angle.cos(), 0., angle.sin());
         let top = g.vertices.len();
-        g.vertices.extend([base, next, next + DVec3::Y, base + DVec3::Y]);
+        g.vertices
+            .extend([base, next, next + DVec3::Y, base + DVec3::Y]);
         g.faces.push(BulkFace {
             outer: vec![top, top + 1, top + 2],
             ..Default::default()
@@ -447,7 +453,9 @@ fn exact_duplicate_removed_opposite_winding_kept() {
         outer: vec![6, 5, 4],
         ..Default::default()
     });
-    let (m, stats) = g.build_cancellable_with_stats(true, false, || false).unwrap();
+    let (m, stats) = g
+        .build_cancellable_with_stats(true, false, || false)
+        .unwrap();
     assert_eq!(stats.duplicates_removed, 1);
     // The grid quad plus both sides of the double-sided triangle.
     assert_eq!(m.faces().len(), 3);
@@ -458,9 +466,16 @@ fn oversized_region_splits_deterministically() {
     // 1x2100 cells: 4200 coplanar triangles whose outer boundary (4202 corners)
     // cannot fit one bounded face, so the region splits at the BFS midpoint.
     let g = grid(1, 2100, &[], |_| None);
-    let (m, stats) = g.clone().build_cancellable_with_stats(true, true, || false).unwrap();
+    let (m, stats) = g
+        .clone()
+        .build_cancellable_with_stats(true, true, || false)
+        .unwrap();
     // Region and ring caps split the long strip into bounded faces, deterministically.
-    assert!(m.faces().len() > 1 && m.faces().len() < 100, "faces={}", m.faces().len());
+    assert!(
+        m.faces().len() > 1 && m.faces().len() < 100,
+        "faces={}",
+        m.faces().len()
+    );
     assert_eq!(stats.region_fallbacks, 0);
     assert!((total_area(&m) - 2100.).abs() < 1e-9);
     m.validate().unwrap();
@@ -495,7 +510,9 @@ fn region_area_equivalence_and_split_preserve_surface_area() {
         grid(40, 25, &[], |_| None),
         grid(3, 3, &[(1, 1)], |_| None),
         grid(1, 2100, &[], |_| None),
-        grid(4, 2, &[], |(x, _)| Some(MaterialId(if x < 2 { 1 } else { 2 }))),
+        grid(4, 2, &[], |(x, _)| {
+            Some(MaterialId(if x < 2 { 1 } else { 2 }))
+        }),
     ] {
         let (merged, _) = g
             .clone()
@@ -559,45 +576,40 @@ fn malformed_meshes_never_panic() {
         });
         g
     };
-    let collinear = || {
-        let mut g = BulkGeometry::default();
-        g.vertices = vec![DVec3::ZERO, DVec3::X, DVec3::X * 2.];
-        g.faces.push(BulkFace {
+    let collinear = || BulkGeometry {
+        vertices: vec![DVec3::ZERO, DVec3::X, DVec3::X * 2.],
+        faces: vec![BulkFace {
             outer: vec![0, 1, 2],
             ..Default::default()
-        });
-        g
+        }],
+        ..Default::default()
     };
-    let welded_sliver = || {
-        let mut g = BulkGeometry::default();
-        g.vertices = vec![
+    let welded_sliver = || BulkGeometry {
+        vertices: vec![
             DVec3::ZERO,
             DVec3::X,
             DVec3::new(1., TOLERANCE / 4., 0.),
             DVec3::Y,
-        ];
-        g.faces.push(BulkFace {
-            outer: vec![0, 1, 2],
-            ..Default::default()
-        });
-        g.faces.push(BulkFace {
-            outer: vec![0, 2, 3],
-            ..Default::default()
-        });
-        g
+        ],
+        faces: vec![
+            BulkFace {
+                outer: vec![0, 1, 2],
+                ..Default::default()
+            },
+            BulkFace {
+                outer: vec![0, 2, 3],
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
     };
-    let huge_coordinates = || {
-        let mut g = BulkGeometry::default();
-        g.vertices = vec![
-            DVec3::ZERO,
-            DVec3::X * 1e30,
-            DVec3::new(1e30, 1e30, 0.),
-        ];
-        g.faces.push(BulkFace {
+    let huge_coordinates = || BulkGeometry {
+        vertices: vec![DVec3::ZERO, DVec3::X * 1e30, DVec3::new(1e30, 1e30, 0.)],
+        faces: vec![BulkFace {
             outer: vec![0, 1, 2],
             ..Default::default()
-        });
-        g
+        }],
+        ..Default::default()
     };
     let out_of_range_index = || {
         let mut g = grid(1, 1, &[], |_| None);
@@ -612,11 +624,6 @@ fn malformed_meshes_never_panic() {
                 g.vertices.push(DVec3::new(x as f64, y as f64, 0.));
             }
         }
-        g.faces.push(BulkFace {
-            outer: vec![0, 1, 2, 3, 4, 5, 6, 7, 8].iter().map(|i| *i).collect(),
-            ..Default::default()
-        });
-        g.faces.clear();
         g.faces.push(BulkFace {
             outer: vec![0, 1, 4, 3],
             holes: vec![vec![4, 5, 8, 7]],

@@ -498,10 +498,11 @@ pub fn convert_scene(
         data.materials = source.materials().clone();
         data.tags = source.tags().clone();
         data.next_id = data.materials.len().max(data.tags.len()) as u64 + 1;
-        let (built, stats) = flat
-            .build_cancellable_with_stats(options.merge_coplanar, options.soften_coplanar, || {
-                control.is_cancelled()
-            })?;
+        let (built, stats) = flat.build_cancellable_with_stats(
+            options.merge_coplanar,
+            options.soften_coplanar,
+            || control.is_cancelled(),
+        )?;
         duplicates_removed += stats.duplicates_removed;
         region_fallbacks += stats.region_fallbacks;
         data.definitions

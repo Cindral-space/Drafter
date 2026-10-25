@@ -191,11 +191,15 @@ impl BulkGeometry {
             // Duplicate detection uses the raw ring order: winding normalization would
             // erase the orientation distinction between a copy and a deliberate
             // opposite-winding (double-sided) face.
-            let duplicate_key = (canonical_ring(&outer), {
-                let mut hole_keys: Vec<_> = holes.iter().map(|r| canonical_ring(r)).collect();
-                hole_keys.sort();
-                hole_keys
-            }, f.material);
+            let duplicate_key = (
+                canonical_ring(&outer),
+                {
+                    let mut hole_keys: Vec<_> = holes.iter().map(|r| canonical_ring(r)).collect();
+                    hole_keys.sort();
+                    hole_keys
+                },
+                f.material,
+            );
             if crate::geometry::signed_area(&model.project_loop(&outer, plane)?) < 0. {
                 outer.reverse();
             }
@@ -399,9 +403,7 @@ fn merge_region(
                 Ok(())
             }
         }
-        RegionOutcome::TooLarge => {
-            split_region(model, edges, members, pairs, stats, check, work)
-        }
+        RegionOutcome::TooLarge => split_region(model, edges, members, pairs, stats, check, work),
         RegionOutcome::Fallback => {
             stats.region_fallbacks += 1;
             legacy_pairwise(model, edges, pairs);
@@ -431,13 +433,19 @@ fn split_region(
             .filter(|(a, b, _)| left.contains(a) && left.contains(b))
             .copied()
             .collect();
-        merge_region(model, edges, &component[..half], &left_pairs, stats, check, work)?;
+        merge_region(
+            model,
+            edges,
+            &component[..half],
+            &left_pairs,
+            stats,
+            check,
+            work,
+        )?;
         let rest: Vec<FaceId> = component[half..].to_vec();
         let rest_pairs: Vec<_> = pairs
             .iter()
-            .filter(|(a, b, _)| {
-                !left.contains(a) && !left.contains(b)
-            })
+            .filter(|(a, b, _)| !left.contains(a) && !left.contains(b))
             .copied()
             .collect();
         for sub in bfs_components(&rest, &rest_pairs) {
@@ -506,7 +514,11 @@ fn reconstruct_region(model: &Model, members: &[FaceId]) -> Result<RegionOutcome
             return Err(KernelError::MissingEntity);
         };
         for ring in std::iter::once(&face.outer).chain(&face.holes) {
-            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len()) {
+            for (a, b) in ring
+                .iter()
+                .zip(ring.iter().cycle().skip(1))
+                .take(ring.len())
+            {
                 let mut pair = [*a, *b];
                 pair.sort();
                 let entry = boundary.entry(pair).or_insert((*a, *b, 0));
@@ -519,7 +531,7 @@ fn reconstruct_region(model: &Model, members: &[FaceId]) -> Result<RegionOutcome
         return Ok(RegionOutcome::Fallback);
     }
     let mut next: BTreeMap<VertexId, VertexId> = BTreeMap::new();
-    for (_, (a, b, n)) in &boundary {
+    for (a, b, n) in boundary.values() {
         if *n == 1 && next.insert(*a, *b).is_some() {
             return Ok(RegionOutcome::Fallback);
         }
@@ -546,7 +558,11 @@ fn reconstruct_region(model: &Model, members: &[FaceId]) -> Result<RegionOutcome
             return Ok(RegionOutcome::Fallback);
         }
         ring_work = ring_work
-            .checked_add(ring.len().checked_mul(ring.len()).ok_or(KernelError::Capacity)?)
+            .checked_add(
+                ring.len()
+                    .checked_mul(ring.len())
+                    .ok_or(KernelError::Capacity)?,
+            )
             .ok_or(KernelError::Capacity)?;
         rings.push(ring);
     }
