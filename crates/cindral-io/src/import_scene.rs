@@ -171,6 +171,8 @@ pub struct ImportReport {
     pub instances: usize,
     /// Explicitly skipped source items.
     pub skipped: usize,
+    /// Exact duplicate faces removed by coplanar cleanup.
+    pub duplicates_removed: usize,
     /// Informational import notes.
     pub notes: Vec<String>,
     /// Source features excluded by the importer.
@@ -365,17 +367,21 @@ pub fn convert_scene(
         }
         Ok(out)
     };
+    let mut duplicates_removed = 0usize;
+    let mut region_fallbacks = 0usize;
     for (i, mut def) in scene.definitions.drain(..).enumerate() {
         control.check()?;
         control.set_progress(0.45 + 0.35 * i as f32 / definition_count.max(1) as f32);
         for p in &mut def.geometry.vertices {
             *p = basis.transform_point3(*p);
         }
-        let model = def.geometry.build_cancellable(
+        let (model, stats) = def.geometry.build_cancellable_with_stats(
             options.merge_coplanar,
             options.soften_coplanar,
             || control.is_cancelled(),
         )?;
+        duplicates_removed += stats.duplicates_removed;
+        region_fallbacks += stats.region_fallbacks;
         data.definitions.insert(
             DefinitionId(i as u64 + 1),
             DefinitionData {
@@ -492,14 +498,16 @@ pub fn convert_scene(
         data.materials = source.materials().clone();
         data.tags = source.tags().clone();
         data.next_id = data.materials.len().max(data.tags.len()) as u64 + 1;
+        let (built, stats) = flat
+            .build_cancellable_with_stats(options.merge_coplanar, options.soften_coplanar, || {
+                control.is_cancelled()
+            })?;
+        duplicates_removed += stats.duplicates_removed;
+        region_fallbacks += stats.region_fallbacks;
         data.definitions
             .get_mut(&DefinitionId(0))
             .ok_or_else(|| IoError::Invalid("missing root".into()))?
-            .geometry = flat
-            .build_cancellable(options.merge_coplanar, options.soften_coplanar, || {
-                control.is_cancelled()
-            })?
-            .to_data();
+            .geometry = built.to_data();
         DocumentHistory::from_import_data(data)?
     };
     let data = history.to_data();
@@ -508,8 +516,14 @@ pub fn convert_scene(
         notes: scene.notes,
         not_imported: scene.not_imported,
         skipped: scene.skipped,
+        duplicates_removed,
         ..Default::default()
     };
+    if region_fallbacks > 0 {
+        report.notes.push(format!(
+            "Coplanar region cleanup fell back to pairwise joins for {region_fallbacks} region(s)"
+        ));
+    }
     for d in data.definitions.values() {
         report.vertices += d.geometry.vertices.len();
         report.edges += d.geometry.edges.len();

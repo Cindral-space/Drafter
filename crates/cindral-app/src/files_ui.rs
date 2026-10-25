@@ -1715,6 +1715,11 @@ impl DrafterApp {
                                 ui.label(summary.skipped.to_string());
                                 ui.end_row();
                             }
+                            if summary.duplicates_removed > 0 {
+                                ui.label("Duplicates removed:");
+                                ui.label(summary.duplicates_removed.to_string());
+                                ui.end_row();
+                            }
                         });
                     ui.small("Geometry counted once per stored definition; instances include import wrappers.");
                     for note in &summary.notes { ui.label(note); }
