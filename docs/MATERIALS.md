@@ -33,30 +33,55 @@ channels are already sRGB and pass through unchanged.
 
 ## Materials panel
 
-The panel lives in the right inspector (Model / Appearance / Materials tabs).
-It shows one row per material with a color swatch, name and usage count
-(painted faces in every definition plus material-carrying instances). Rows
-are virtualized — only visible rows are built — so a 5,000-material palette
-stays responsive.
+Materials has its own destination in the right inspector, beside Model,
+Appearance and Recovery. Choosing Paint opens Materials. The inspector keeps
+its width while switching among three views:
 
-- **Search** filters by name; **Sort** switches between name and usage count.
-- **Actions** per material (with one-entry undo): Rename, Duplicate, Delete
-  (faces fall back to the default material), Select Faces (selects every
-  user of the material: its faces in the active context, instances that
-  carry it, and instances of definitions whose faces use it), Replace
-  (repaint all its faces with another material), Purge (delete unused
-  materials in one command).
-- **Editor**: HSV/hex color editing with live viewport preview while a
-  slider is dragged; the committed edit is exactly one history entry on
-  release. A 12-entry recent-colors row persists between sessions.
-- **Library**: 40 builtin colors in four groups and six procedural tileable
-  patterns generated on demand (patterns are never embedded in files; they
-  are regenerated on load). Folder import scans a chosen directory
-  off the UI thread, shows 64 px thumbnails, caps the scan at 2,000 files
-  and remembers the folder list. Known limit: the folder thumbnail strip is
-  not virtualized — one thumbnail widget per scan entry is built per frame.
-- **Texture import** loads a user-chosen PNG/JPEG file into the document
-  store (see limits below) and assigns it to the material.
+- **Browse** chooses the active paint material. Search and Name/Usage sorting
+  operate on a virtualized list with 32 px rows, named swatches/thumbnails,
+  usage counts, and a Material actions menu. Click a row, then use Up/Down to
+  move through the list. New color opens Edit; Import image creates a material
+  from a PNG/JPEG; Collections opens Library. Default clears an assignment.
+- **Edit** changes a shared material, with an explicit usage count: edits update
+  every user. Name, HSV/RGB, exact hex and opacity editing retain live preview
+  and undo. The recent **color values** in this view recolor the shared material;
+  they are deliberately separate from the quick picker's recent **materials**.
+  Default offers New color, Import image and Eyedropper actions.
+- **Library** contains a wrapped grid of 40 original named colors, six cached
+  procedural pattern buttons, and folder collections. Folder scans run off the
+  UI thread (64 px thumbnails, at most 2,000 files). Folder image grids build
+  only visible rows and reuse texture handles; the scan's thumbnail pixels are
+  borrowed rather than deep-cloned every frame. Pattern/image buttons support
+  actual clicking, keyboard focus and accessible names. Folder lists persist.
+
+A selection readout follows face/container selection independently of the active
+paint slot. It shows inherited and mixed face materials and offers **Use for
+painting**. Container selection reports the container assignment, rather than
+claiming that all descendant faces use one material. Inspecting geometry does
+not silently change the paint choice.
+
+**Quick pick:** click the named active-material chip in Paint's header, click
+Paint again when it is already active, or press **Shift+B** with the viewport
+focused/hovered (the normal canvas-shortcut rules apply). Search the In model or
+Recent materials lists; Up/Down changes the focused row, Enter chooses it, and
+Escape/outside click closes without painting. Choosing a material changes only
+the active slot, not its shared properties. Recent material IDs are session-only,
+limited to 12 and reset when the document is replaced. Recent color values remain
+persisted independently. Texture chips use an already prepared 64 px mip, without
+decoding source images during paint frames; a color swatch remains the fallback
+until preparation completes.
+
+**Actions:** Rename, Duplicate, Select users, Replace throughout document and
+Delete. Used-material Delete requires confirmation showing the affected usage
+count and Default fallback. Replace first selects a target, then explicitly
+applies to all document users, including definitions and material-carrying
+instances. Purge unused shows a count, disables when nothing is unused, and may
+remove an unused active paint material. Delete/Replace/Purge provide an Undo
+result while that action is still the latest document revision. A later edit
+hides the action-specific Undo button so it cannot undo an unrelated change.
+
+Usage counts count painted faces in every definition plus material-carrying
+instances; they are assignment counts, not the number of visible copies.
 
 ## Paint Bucket
 
@@ -68,7 +93,7 @@ was removed).
 | Click | Paint the clicked face (or the clicked group/component instance). |
 | Click on selected object | Paint the whole selection. |
 | Ctrl + click | Fill the clicked face plus all connected adjacent faces sharing the clicked face's material. |
-| Shift + click | Replace every face using the clicked face's current material. |
+| Shift + click | Replace matching faces in the current edit context. Use the material action for replacement throughout the document. |
 | Ctrl + Shift + click | Replace the material only inside the clicked object. |
 | Alt + click | Sample the clicked face's material into the active slot; never mutates. |
 
@@ -79,9 +104,21 @@ was removed).
 - **Hover outline** previews the fill extent before clicking (face, connected
   region, or same-material region per modifier). Regions beyond 256 faces
   show the object's bounding box instead of per-face outlines.
-- The **active material** is shown in a header swatch next to the tool
-  options (it is not attached to the pointer), and the status bar hint
-  reflects the current modifier.
+- The **active material** is shown in a named header chip with a texture
+  thumbnail where available, plus a base-color cursor dot. The chip opens quick
+  pick; the nearby help button explains all modifiers, including Ctrl+Shift.
+- Click execution and hover use the same paint plan, including selected faces,
+  selected containers and the current definition's matching-face scope. Alt and
+  Eyedropper clear the paint preview. Object plans draw world-space bounding
+  boxes; face plans use their definition's transform. Status text gives the
+  planned face/object counts and the active material. A shared component's
+  definition edit affects all copies; Ctrl+Shift does not make a copy unique.
+- Sampling uses an explicit hit-face material before walking its instance path
+  for inherited material, so sampling a painted face inside a container does
+  not accidentally choose only the container assignment.
+- Ctrl+Shift on a container operates on matching faces directly in that
+  container definition; it does not recursively replace every nested definition.
+  Shift is likewise scoped to the active context, not a global document action.
 
 ## Texture size, rotation and flip
 
@@ -101,6 +138,10 @@ consumers.
 - A newly imported texture defaults to its **physical size at 96 DPI**
   (pixels ÷ 96 × 25.4 mm). Tiny images whose DPI size would be under
   5 cm on an edge fall back to 1 m wide with the aspect preserved.
+- Texture-only Edit controls label **Width** and **Height** as the size of one
+  image repeat, accept explicit units, and explain that an image containing
+  multiple planks repeats as a whole. The raw texture asset reference lives
+  under Advanced. Invalid sizes show local feedback and retain editable text.
 - The size editor has a **lock-aspect toggle** (on by default): editing one
   dimension scales the other to preserve the image aspect; unlock to set
   independent width/height. Size text edits preview valid values live and

@@ -21,6 +21,7 @@ pub(crate) struct SceneCache {
     placements: BTreeMap<DefinitionId, glam::DMat4>,
     revision: Option<u64>,
     texture_layers: BTreeMap<String, u32>,
+    texture_previews: BTreeMap<String, cindral_render::texture::TexturePixels>,
     textures: Option<Arc<cindral_render::texture::TextureArrayData>>,
     material_indices: BTreeMap<MaterialId, u32>,
 }
@@ -63,9 +64,27 @@ impl SceneCache {
         layers: BTreeMap<String, u32>,
         data: Arc<cindral_render::texture::TextureArrayData>,
     ) {
+        // Retain only the small preview; the full array is taken by SceneUpdate.
+        self.texture_previews = layers
+            .iter()
+            .filter_map(|(key, index)| {
+                data.layers
+                    .get(*index as usize)?
+                    .levels
+                    .iter()
+                    .find(|mip| mip.width <= 64)
+                    .map(|mip| (key.clone(), mip.clone()))
+            })
+            .collect();
         self.texture_layers = layers;
         self.textures = Some(data);
         self.revision = None;
+    }
+    pub(crate) fn texture_preview(
+        &self,
+        key: &str,
+    ) -> Option<&cindral_render::texture::TexturePixels> {
+        self.texture_previews.get(key)
     }
     pub(crate) fn definitions(&self) -> Vec<DefinitionId> {
         self.meshes.keys().copied().collect()

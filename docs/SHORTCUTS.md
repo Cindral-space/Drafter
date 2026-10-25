@@ -23,6 +23,7 @@ when running that test to regenerate both tables. There is no rebinding UI.
 | Tools | Eraser | E | Yes |
 | Tools | Tape Measure | T | Yes |
 | Tools | Paint Bucket | B | Yes |
+| Materials | Choose paint material | Shift+B | Idle only |
 | Navigation | Orbit | O | Yes |
 | Navigation | Pan | H | Yes |
 | Navigation | Zoom | Z | Yes |

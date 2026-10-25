@@ -27,6 +27,7 @@ pub(crate) enum Action {
     Apply,
     Backspace,
     Section,
+    QuickMaterials,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Context {
@@ -150,6 +151,13 @@ pub(crate) static MAP: &[Entry] = &[
         "Tools",
         true,
         [(B, false, false, "B")]
+    ),
+    entry!(
+        QuickMaterials,
+        "Choose paint material",
+        "Materials",
+        false,
+        [(B, false, true, "Shift+B")]
     ),
     entry!(Orbit, "Orbit", "Navigation", true, [(O, false, false, "O")]),
     entry!(Pan, "Pan", "Navigation", true, [(H, false, false, "H")]),
@@ -421,6 +429,11 @@ impl DrafterApp {
         for action in actions {
             ctx.request_repaint();
             match action {
+                QuickMaterials => {
+                    self.choose_modify(ModifyKind::PaintBucket);
+                    self.open_material_picker();
+                    return true;
+                }
                 Draw(k) => self.set_tool(k),
                 Modify(k) => self.choose_modify(k),
                 Pan => self.activate_pan(),

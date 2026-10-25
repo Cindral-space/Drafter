@@ -379,6 +379,7 @@ impl DrafterApp {
         layers: BTreeMap<String, u32>,
         data: std::sync::Arc<cindral_render::texture::TextureArrayData>,
     ) {
+        self.materials.material_tiles.clear();
         self.scene.set_textures(layers, data);
         self.refresh_mesh();
     }
@@ -1278,6 +1279,7 @@ impl DrafterApp {
         self.scene = scene;
         scene_cache::merge(&mut self.pending, update);
         self.organization = Default::default();
+        self.reset_material_document_state();
         self.selection.clear();
         if replace {
             self.guide_cache.clear();

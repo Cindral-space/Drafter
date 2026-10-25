@@ -95,6 +95,7 @@ impl DrafterApp {
         self.modify.replace_guides(Vec::new());
         self.last_tape = None;
         self.organization = OrganizationUi::default();
+        self.reset_material_document_state();
         self.selection.clear();
         self.tool.cancel();
         self.modify.cancel();
@@ -480,9 +481,9 @@ impl DrafterApp {
                 });
             }
         });
-        egui::CollapsingHeader::new("Materials")
-            .default_open(true)
-            .show(ui, |ui| self.materials_panel(ui));
+        if ui.button("Materials…").clicked() {
+            self.inspector_tab = crate::workspace_ui::InspectorTab::Materials;
+        }
         if let Some(path) = expanded {
             if !self.organization.expanded.remove(&path) {
                 self.organization.expanded.insert(path);
@@ -1017,6 +1018,7 @@ impl DrafterApp {
             return true;
         }
         if !response.hovered() {
+            self.paint_hover = Default::default();
             return false;
         }
         if ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {

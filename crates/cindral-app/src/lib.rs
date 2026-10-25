@@ -460,7 +460,10 @@ impl DrafterApp {
     }
 
     fn viewport_input(&mut self, response: &egui::Response) {
-        if self.shortcuts.open || self.tape_resize.is_some() {
+        if !response.hovered() {
+            self.paint_hover = Default::default();
+        }
+        if self.shortcuts.open || self.materials.picker_open || self.tape_resize.is_some() {
             self.pan_drag = None;
             return;
         }
@@ -757,6 +760,7 @@ impl DrafterApp {
         );
         let ui_profile = cindral_core::profile::Scope::new(7);
         self.shortcut_overlay(ctx);
+        self.material_quick_picker(ctx);
         self.workspace_header(ctx);
         self.workspace_status(ctx);
         self.tape_resize_window(ctx);

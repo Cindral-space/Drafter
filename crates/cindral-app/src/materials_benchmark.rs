@@ -224,6 +224,7 @@ fn paint_20k_faces_and_undo() {
 #[ignore = "release-only; 16 ms preferred budget per inspector frame"]
 fn materials_panel_5000_materials_frame_times() {
     let mut app = app_with_5000_materials();
+    app.inspector_tab = crate::workspace_ui::InspectorTab::Materials;
     let ctx = egui_context();
     let mut samples = Vec::new();
     for _ in 0..100 {
@@ -242,6 +243,10 @@ fn materials_panel_5000_materials_frame_times() {
     println!(
         "Materials panel frame (5,000 materials): worst {worst:.3} ms, mean {mean:.3} ms, visible rows {}",
         app.materials.rows_built
+    );
+    assert!(
+        app.materials.rows_built > 0,
+        "benchmark must render the Materials list"
     );
     assert!(worst < 16., "worst frame {worst:.3} ms exceeds 16 ms");
 }

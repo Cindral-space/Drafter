@@ -6,6 +6,7 @@ use egui::{Align, Layout, RichText, Stroke};
 pub(crate) enum InspectorTab {
     Model,
     Appearance,
+    Materials,
     Recovery,
 }
 
@@ -368,6 +369,9 @@ impl DrafterApp {
                             .on_hover_text("Show or hide model properties")
                             .clicked()
                         {
+                            if self.show_tray {
+                                self.finish_material_edits();
+                            }
                             self.show_tray = !self.show_tray;
                         }
                         ui.separator();
@@ -515,10 +519,34 @@ impl DrafterApp {
                 .map_or(("Default".to_owned(), [148u8, 159, 172]), |m| {
                     (m.name.clone(), m.color)
                 });
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(14., 14.), egui::Sense::hover());
+            let tile = self.material_thumbnail(ui.ctx(), self.organization.material);
+            let button = if let Some(tile) = tile {
+                egui::Button::image_and_text(
+                    egui::Image::from_texture(&tile).fit_to_exact_size(egui::vec2(24., 24.)),
+                    format!("{name}..."),
+                )
+            } else {
+                egui::Button::new(format!("{name}..."))
+            };
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(24., 24.), egui::Sense::hover());
             ui.painter()
-                .rect_filled(rect, 2., Color32::from_rgb(color[0], color[1], color[2]));
-            ui.label(name);
+                .rect_filled(rect, 3., Color32::from_rgb(color[0], color[1], color[2]));
+            if ui
+                .add_sized([150., 32.], button.truncate())
+                .on_hover_text(
+                    "Choose paint material · Shift+B · selecting a material does not edit it",
+                )
+                .clicked()
+            {
+                self.open_material_picker();
+            }
+            ui.menu_button("?",|ui| {
+                ui.label("Click: paint a face; clicking a selected face paints the selection.");
+                ui.label("Ctrl: adjacent matching faces");
+                ui.label("Shift: matching faces in the current edit context");
+                ui.label("Ctrl+Shift: matching faces inside the clicked object (shared definitions affect all copies)");
+                ui.label("Alt: sample the visible face material; Eyedropper works if the desktop captures Alt.");
+            });
             if ui
                 .selectable_label(self.materials.eyedropper, "Eyedropper")
                 .on_hover_text("Pick a material by clicking a face (same as Alt+click)")
@@ -693,7 +721,14 @@ impl DrafterApp {
                                 )
                                 .clicked()
                                 {
-                                    self.choose_modify(kind);
+                                    if kind == ModifyKind::PaintBucket
+                                        && self.modifying
+                                        && self.modify.kind() == kind
+                                    {
+                                        self.open_material_picker();
+                                    } else {
+                                        self.choose_modify(kind);
+                                    }
                                 }
                                 cell += 1;
                                 if cell % 2 == 0 {
@@ -718,39 +753,65 @@ impl DrafterApp {
                     .inner_margin(20),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.;
-                    ui.spacing_mut().button_padding.x = 4.;
-                    ui.selectable_value(&mut self.inspector_tab, InspectorTab::Model, "Model");
-                    ui.selectable_value(
-                        &mut self.inspector_tab,
-                        InspectorTab::Appearance,
-                        "Appearance",
+                let previous_tab = self.inspector_tab;
+                ui.horizontal_top(|ui| {
+                    let tabs_width = (ui.available_width() - 36.).max(100.);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(tabs_width, 0.),
+                        Layout::left_to_right(Align::Min).with_main_wrap(true),
+                        |ui| {
+                            ui.set_min_width(tabs_width);
+                            ui.spacing_mut().item_spacing.x = 4.;
+                            ui.spacing_mut().button_padding.x = 4.;
+                            ui.selectable_value(
+                                &mut self.inspector_tab,
+                                InspectorTab::Model,
+                                "Model",
+                            );
+                            ui.selectable_value(
+                                &mut self.inspector_tab,
+                                InspectorTab::Appearance,
+                                "Appearance",
+                            );
+                            ui.selectable_value(
+                                &mut self.inspector_tab,
+                                InspectorTab::Materials,
+                                "Materials",
+                            );
+                            let count = self.recovery_count();
+                            let label = if count == 0 {
+                                "Recovery".into()
+                            } else {
+                                format!("Recovery ({count})")
+                            };
+                            ui.selectable_value(
+                                &mut self.inspector_tab,
+                                InspectorTab::Recovery,
+                                label,
+                            );
+                        },
                     );
-                    let count = self.recovery_count();
-                    let label = if count == 0 {
-                        "Recovery".into()
-                    } else {
-                        format!("Recovery ({count})")
-                    };
-                    ui.selectable_value(&mut self.inspector_tab, InspectorTab::Recovery, label);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new("×").size(18.))
-                                    .frame(false)
-                                    .min_size(egui::vec2(28., 28.)),
-                            )
-                            .on_hover_text(
-                                "Close inspector · Reopen from the Inspector toolbar button",
-                            )
-                            .clicked()
-                        {
-                            self.show_tray = false;
-                        }
-                    });
+                    if ui
+                        .add_sized(
+                            [28., 28.],
+                            egui::Button::new(RichText::new("×").size(18.)).frame(false),
+                        )
+                        .on_hover_text("Close inspector · Reopen from the Inspector toolbar button")
+                        .clicked()
+                    {
+                        self.show_tray = false;
+                    }
                 });
+                if previous_tab == InspectorTab::Materials
+                    && (self.inspector_tab != previous_tab || !self.show_tray)
+                {
+                    self.finish_material_edits();
+                }
                 ui.add_space(12.);
+                if self.inspector_tab == InspectorTab::Materials {
+                    self.materials_panel(ui);
+                    return;
+                }
                 egui::ScrollArea::vertical()
                     .id_salt(("tray_scroll", self.inspector_tab))
                     .show(ui, |ui| {

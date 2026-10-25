@@ -13,6 +13,8 @@ impl DrafterApp {
             self.axis_lock = None;
         }
         if kind == ModifyKind::PaintBucket {
+            self.show_tray = true;
+            self.inspector_tab = crate::workspace_ui::InspectorTab::Materials;
             self.paint_hover = Default::default();
         }
         self.tool.cancel();

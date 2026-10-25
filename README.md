@@ -90,6 +90,7 @@ WGPU_BACKEND=opengl cargo run -p cindral-app
 | Tools | Eraser | E | Yes |
 | Tools | Tape Measure | T | Yes |
 | Tools | Paint Bucket | B | Yes |
+| Materials | Choose paint material | Shift+B | Idle only |
 | Navigation | Orbit | O | Yes |
 | Navigation | Pan | H | Yes |
 | Navigation | Zoom | Z | Yes |

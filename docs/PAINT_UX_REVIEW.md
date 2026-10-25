@@ -2,6 +2,18 @@
 
 2026-10-25 · review only · branch `agent/paint-ux-review`
 
+Implementation follow-up: the approved changes are on `codex/paint-ux-implementation`.
+This review and its 20 images remain the pre-change baseline. See
+[MATERIALS.md](MATERIALS.md) for the implemented controls and
+[AGENT_LOG.md](AGENT_LOG.md) for validation and remaining limits.
+
+Implemented UI captures: [Browse](ui-review/implemented-1366x768-light-browse.png),
+[texture editing](ui-review/implemented-1366x768-dark-texture.png),
+[folder library](ui-review/implemented-1920x1080-light-library-folders.png),
+[quick pick](ui-review/implemented-1920x1080-dark-quick-pick-crop.png).
+The quick-pick image is a 900×600 crop from the 1920×1080 dark capture; the others
+are full-window native captures. Each new PNG is under 300 KB.
+
 ## Current state and evidence
 
 **Recommend D:** keep a reorganized Materials workspace in the inspector, with Browse / Edit / Library views, and turn the existing active-material header display into a quick picker. The right side is a good home for persistent properties; the current long, shared stack is a poor home for frequent paint choices. Useful foundations already exist: search, usage sorting, virtualized document rows, live edits, undo, an Eyedropper alternative to Alt, and modifier-sensitive status text.

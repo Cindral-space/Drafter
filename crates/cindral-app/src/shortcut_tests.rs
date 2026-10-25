@@ -390,3 +390,14 @@ fn focused_file_actions_do_not_save() {
         assert!(!path.exists());
     }
 }
+
+#[test]
+fn material_quick_pick_shortcut_opens_without_editing_the_document() {
+    let (mut app, ctx) = setup();
+    let before = app.history.to_data();
+    frame(&mut app, &ctx, vec![event(Key::B, false, true, false)]);
+    assert!(app.materials.picker_open);
+    assert_eq!(app.modify.kind(), ModifyKind::PaintBucket);
+    assert!(app.inspector_tab == workspace_ui::InspectorTab::Materials);
+    assert_eq!(app.history.to_data(), before);
+}
