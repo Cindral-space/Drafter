@@ -94,3 +94,44 @@ The benchmark's simulated drag (`frame(&mut app, &ctx, vec![Event::PointerMoved(
 
 The benchmark case (`real_file_benchmark.rs`) explicitly measures both CPU-only host frames and completed GPU frames when `CINDRAL_BENCH_GPU=1` is set, now reporting p50, p95, max, and all phase scopes.
 
+---
+
+## 3. Loose-Move Gap: Operations on the Slow Path
+
+In `cindral-core/src/transaction.rs` (lines 159–169), the fast Move path (`Translation::prepare`) is attempted before falling back to `prepare_entities` -> `modification::prepare`. In `cindral-core/src/translation.rs` (lines 21–40), `Translation::prepare` enforces strict conditions.
+
+Whenever these conditions are not met, the operation falls back to the **slow path** (`modification::prepare`), which performs:
+1. Spatial bounding box envelope queries (`spatial.query_faces`, `spatial.query_edges`).
+2. Connected component traversal (`prepare.connected_traversal`).
+3. Submodel patch cloning (`prepare.patch_clone`).
+4. Full geometry validation (`after.validate()`: Euler characteristics, edge-face manifold counts, face planarity).
+5. Full entity map diffing (`Delta::between(&before, &after)`).
+6. **No cached session across drag ticks**: Because `self.translation` is `None`, every mouse movement during the drag re-executes steps 1–5 from scratch, costing **16.0–22.5 ms per preview tick** on `SKP/mybedroom.skp`.
+
+### Concrete Operations Still Taking the Slow Path
+
+1. **Partial / Sub-selection Loose Move**:
+   - Moving any subset of loose geometry within an active definition (e.g. moving a single face, edge, vertex, or a selected connected group of loose entities when other loose geometry exists in the definition).
+   - *Code constraint*: `Translation::prepare` rejects if `vertices.len() != model.vertices.len() || !vertices.iter().eq(model.vertices.keys())`.
+
+2. **Loose Move Copy / Duplicate (`copy: true`)**:
+   - Using the Move tool with modifier keys (Alt/Ctrl) to duplicate loose geometry (`Command::Transform { copy: true, .. }`).
+   - *Code constraint*: `Translation::transform` explicitly matches only `copy: false`.
+
+3. **Loose Non-Uniform or Non-Rigid Transforms (Scale, Shear, Non-Rigid Stretch)**:
+   - Any transformation where the linear matrix component is not strictly orthonormal (`(linear.transpose() * linear).abs_diff_eq(IDENTITY, 1e-10)`) or determinant is not `1.0` (tolerance `1e-9`).
+   - *Code constraint*: `Translation::transform` rejects non-rigid transformations.
+
+4. **Connected / Attached Loose Geometry Move (Auto-fold / Stretching)**:
+   - Moving loose faces/edges shared with unselected faces, which warps or stretches neighboring geometry. This inherently alters adjacent face planes and topology, requiring validation.
+
+5. **Partial Loose Rotate**:
+   - Rotating a selected subset of loose geometry. While whole-definition rigid Rotate takes `Translation::prepare`, partial loose Rotate fails the whole-model vertex count check and executes `modification::prepare`.
+
+6. **Loose Scale Tool**:
+   - Any scaling of loose geometry in the active context, whether partial or full definition (since scale matrices have `determinant != 1.0`).
+
+7. **Multi-Selection Across Disjoint Loose Components**:
+   - Selecting two separate loose objects within the same root context and moving them together still takes the slow path if any third unselected loose entity remains in the definition.
+
+

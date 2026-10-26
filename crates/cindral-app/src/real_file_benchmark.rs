@@ -95,11 +95,7 @@ fn face_pick_position(app: &DrafterApp, target: cindral_core::FaceId) -> Result<
     let rect = app.replay_rect;
     let aspect = rect.width() / rect.height();
     let view = View {
-        matrix: app
-            .camera
-            .view_projection(aspect)
-            .as_dmat4()
-            * app.history.world_transform(),
+        matrix: app.camera.view_projection(aspect).as_dmat4() * app.history.world_transform(),
         size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
     };
     for y in 2..78 {
@@ -114,8 +110,16 @@ fn face_pick_position(app: &DrafterApp, target: cindral_core::FaceId) -> Result<
             );
             let (origin, direction) = app.camera.ray(ndc, aspect);
             let ray = Ray {
-                origin: app.history.world_transform().inverse().transform_point3(origin.as_dvec3()),
-                direction: app.history.world_transform().inverse().transform_vector3(direction.as_dvec3()),
+                origin: app
+                    .history
+                    .world_transform()
+                    .inverse()
+                    .transform_point3(origin.as_dvec3()),
+                direction: app
+                    .history
+                    .world_transform()
+                    .inverse()
+                    .transform_vector3(direction.as_dvec3()),
             };
             let hit = cindral_tools::pick_section(
                 app.history.model(),
@@ -130,7 +134,10 @@ fn face_pick_position(app: &DrafterApp, target: cindral_core::FaceId) -> Result<
             }
         }
     }
-    Err(format!("no direct face pick position found for {:?}", target))
+    Err(format!(
+        "no direct face pick position found for {:?}",
+        target
+    ))
 }
 fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
     let mut frame_times: Vec<f64> = samples.iter().map(|s| s.0).collect();
@@ -139,7 +146,10 @@ fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
     let p95 = frame_times[(frame_times.len() as f64 * 0.95) as usize];
     let max = frame_times[frame_times.len() - 1];
     let avg = frame_times.iter().sum::<f64>() / frame_times.len() as f64;
-    println!("{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms n={}", samples.len());
+    println!(
+        "{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms n={}",
+        samples.len()
+    );
     if std::env::var_os("CINDRAL_ENFORCE_BUDGET").is_some() {
         let pick_max = samples.iter().map(|s| s.1.phases[0]).fold(0., f64::max);
         assert!(pick_max < 5., "{label}: pick exceeded 5ms: {pick_max:.3}");
@@ -154,9 +164,7 @@ fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
         let p50 = phase_vals[phase_vals.len() / 2];
         let p95 = phase_vals[(phase_vals.len() as f64 * 0.95) as usize];
         let max = phase_vals[phase_vals.len() - 1];
-        println!(
-            "  {name}: mean={mean:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms"
-        );
+        println!("  {name}: mean={mean:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms");
     }
 }
 /// Returns an error rather than substituting authored geometry when import/replay fails.
@@ -300,12 +308,23 @@ pub fn run(path: &Path) -> Result<(), String> {
 
     // Case (b): face with an inner ring or cavity (FaceId(905))
     let start_b = face_pick_position(&app, cindral_core::FaceId::from_raw(905))?;
-    run_pushpull_drag(&mut app, &ctx, start_b, "PushPull (b) face with inner ring/cavity")?;
+    run_pushpull_drag(
+        &mut app,
+        &ctx,
+        start_b,
+        "PushPull (b) face with inner ring/cavity",
+    )?;
 
     // Case (c): face in a large group/component (FaceId(1790) in ThomThom)
-    app.enter_context(vec![InstanceId(25)]).map_err(|e| e.to_string())?;
+    app.enter_context(vec![InstanceId(25)])
+        .map_err(|e| e.to_string())?;
     let start_c = face_pick_position(&app, cindral_core::FaceId::from_raw(1790))?;
-    run_pushpull_drag(&mut app, &ctx, start_c, "PushPull (c) face in large component")?;
+    run_pushpull_drag(
+        &mut app,
+        &ctx,
+        start_c,
+        "PushPull (c) face in large component",
+    )?;
     app.exit_context().map_err(|e| e.to_string())?;
 
     Ok(())
@@ -319,7 +338,11 @@ fn run_pushpull_drag(
 ) -> Result<Vec<(f64, cindral_core::profile::Sample)>, String> {
     app.choose_modify(ModifyKind::PushPull);
     frame(app, ctx, vec![Event::PointerMoved(start)]);
-    let begin_dt = frame(app, ctx, vec![Event::PointerMoved(start), button(start, true)]);
+    let begin_dt = frame(
+        app,
+        ctx,
+        vec![Event::PointerMoved(start), button(start, true)],
+    );
     println!("{label} begin={begin_dt:.3}ms");
     if !app.modify.active() {
         return Err(format!("{label} did not begin: {:?}", app.error));
@@ -339,12 +362,18 @@ fn run_pushpull_drag(
     let p95 = frame_times[56];
     let max = frame_times[59];
     let avg = frame_times.iter().sum::<f64>() / frame_times.len() as f64;
-    println!("{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms (n={})", frame_times.len());
+    println!(
+        "{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms (n={})",
+        frame_times.len()
+    );
     for (i, name) in cindral_core::profile::NAMES.iter().enumerate() {
         let mut phase_vals: Vec<f64> = samples.iter().map(|s| s.1.phases[i]).collect();
         phase_vals.sort_by(f64::total_cmp);
         let mean = phase_vals.iter().sum::<f64>() / phase_vals.len() as f64;
-        println!("  {name}: mean={mean:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms", phase_vals[29], phase_vals[56], phase_vals[59]);
+        println!(
+            "  {name}: mean={mean:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms",
+            phase_vals[29], phase_vals[56], phase_vals[59]
+        );
     }
     let commit_dt = frame(app, ctx, vec![button(start + egui::vec2(0., -30.), false)]);
     println!("{label} release/commit={commit_dt:.3}ms");
