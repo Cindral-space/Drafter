@@ -56,3 +56,41 @@ In `local_extrusion::prepare`, allow faces with inner rings by sweeping both out
 4. Triangulate only the translated cap face and the newly synthesized side walls rather than triangulating the entire connected shell into CSG polygons.
 
 This bypasses `surfaces()` entirely for non-intersecting sweeps, reducing geometry rebuild from ~36 ms to < 1.0 ms and total frame preview from ~41 ms to **~4–5 ms**, well under the 16 ms target.
+
+---
+
+## 2. Component Move Discrepancy
+
+STATUS_CHECK reports **0.530 ms mean / 1.022 ms max**, whereas `REAL_FILE_PROFILE.md` reported **2.943 ms mean / 8.918 ms max** (often cited as ~8.9 ms).
+
+### Exact Phase Breakdown of What Each Number Measures
+
+| Phase | STATUS_CHECK (0.530 / 1.022 ms) | REAL_FILE_PROFILE (2.943 / 8.918 ms) | What is measured |
+|---|---|---|---|
+| **Pick** | 0.000 ms | 0.000 ms | No picking executes during active drag (anchor and target instance are locked at drag start). |
+| **Mesh update** | 0.006–0.011 ms | 0.009–0.011 ms | CPU scene cache sync (`self.scene.sync(&self.history)`): updates instance transform matrix buffers without re-triangulating definition geometry. |
+| **GPU upload** | **0.000 ms** (bypassed) | 0.014–0.016 ms (max 0.034 ms) | CPU time writing updated instance matrices into wgpu uniform buffers. |
+| **Redraw / GPU completion** | **0.000 ms** (bypassed) | **2.037–2.162 ms (max 8.081–8.918 ms)** | wgpu command encoding, `GridCallback` & `SceneCallback` rasterization, queue submission, and blocking `device.poll(PollType::Wait)` fence wait on Vega 11. |
+| **Host UI & tessellation** | 0.524 / 1.011 ms | 0.518 / 0.985 ms | egui host frame: `ctx.run` layout, `organization_pointer` raycast & snap inference (~0.16 ms), `preview_instance_transform` (~0.01 ms), and egui shape tessellation (`ctx.tessellate` ~0.15 ms). |
+
+**Cause of the discrepancy**:
+STATUS_CHECK was executed via `cargo run --release -p cindral-app --features kernel-benchmark --example real_file_benchmark SKP/mybedroom.skp` **without** `CINDRAL_BENCH_GPU=1`. Without this environment variable, `real_file_gpu::Gpu` is not instantiated, and the entire GPU upload, wgpu callback pass, and GPU queue wait are completely skipped. The 8.9 ms figure is the hardware-synchronized GPU frame maximum (`8.081 ms` GPU queue wait + `0.83 ms` CPU work).
+
+### Real UI Drag Path Parity
+
+The benchmark's simulated drag (`frame(&mut app, &ctx, vec![Event::PointerMoved(p)])`) **uses the exact same code path** as the real interactive UI drag:
+1. `DrafterApp::draw_frame` receives the pointer move event through egui.
+2. `viewport_input` delegates to `organization_pointer`.
+3. `organization_pointer` computes the camera ray, invokes `self.engine.infer` for inference/snapping, and calls `self.preview_instance`.
+4. `preview_instance` calls `self.history.preview_instance_transform` (fast matrix-only path) and `self.refresh_mesh()`.
+5. `self.refresh_mesh()` executes `self.scene.sync(&self.history)`, updating instance records.
+6. egui viewport registers `GridCallback` and `SceneCallback` paint callbacks.
+7. `ctx.tessellate` generates vertex and index meshes for egui.
+8. When `CINDRAL_BENCH_GPU=1` is active, `Gpu::draw` executes the wgpu callbacks, submits commands to the queue, and awaits completion.
+
+**Remaining environmental differences**:
+1. *Offscreen buffer vs presentation swapchain*: The benchmark renders to an offscreen `wgpu::TextureView` and blocks on `device.poll(Wait)`. The interactive desktop application renders to a window surface swapchain presented via winit/eframe, paced by display compositor vsync (typically 16.6 ms intervals at 60 Hz) [unverified on non-Linux display servers].
+2. *Event arrival pacing*: The benchmark feeds 60 synthetic pointer movements synchronously in a tight loop, whereas the real UI drag is driven by OS cursor motion events throttled to window frame rates.
+
+The benchmark case (`real_file_benchmark.rs`) explicitly measures both CPU-only host frames and completed GPU frames when `CINDRAL_BENCH_GPU=1` is set, now reporting p50, p95, max, and all phase scopes.
+

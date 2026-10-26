@@ -133,9 +133,13 @@ fn face_pick_position(app: &DrafterApp, target: cindral_core::FaceId) -> Result<
     Err(format!("no direct face pick position found for {:?}", target))
 }
 fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
-    let max = samples.iter().map(|s| s.0).fold(0., f64::max);
-    let avg = samples.iter().map(|s| s.0).sum::<f64>() / samples.len() as f64;
-    println!("{label}: mean={avg:.3} max={max:.3}ms n={}", samples.len());
+    let mut frame_times: Vec<f64> = samples.iter().map(|s| s.0).collect();
+    frame_times.sort_by(f64::total_cmp);
+    let p50 = frame_times[frame_times.len() / 2];
+    let p95 = frame_times[(frame_times.len() as f64 * 0.95) as usize];
+    let max = frame_times[frame_times.len() - 1];
+    let avg = frame_times.iter().sum::<f64>() / frame_times.len() as f64;
+    println!("{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms n={}", samples.len());
     if std::env::var_os("CINDRAL_ENFORCE_BUDGET").is_some() {
         let pick_max = samples.iter().map(|s| s.1.phases[0]).fold(0., f64::max);
         assert!(pick_max < 5., "{label}: pick exceeded 5ms: {pick_max:.3}");
@@ -144,10 +148,14 @@ fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
         }
     }
     for (i, name) in cindral_core::profile::NAMES.iter().enumerate() {
+        let mut phase_vals: Vec<f64> = samples.iter().map(|s| s.1.phases[i]).collect();
+        phase_vals.sort_by(f64::total_cmp);
+        let mean = phase_vals.iter().sum::<f64>() / phase_vals.len() as f64;
+        let p50 = phase_vals[phase_vals.len() / 2];
+        let p95 = phase_vals[(phase_vals.len() as f64 * 0.95) as usize];
+        let max = phase_vals[phase_vals.len() - 1];
         println!(
-            "  {name}: mean={:.3} max={:.3}ms",
-            samples.iter().map(|s| s.1.phases[i]).sum::<f64>() / samples.len() as f64,
-            samples.iter().map(|s| s.1.phases[i]).fold(0., f64::max)
+            "  {name}: mean={mean:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms"
         );
     }
 }
