@@ -1,5 +1,6 @@
 //! Private-file replay through production importer, pointer routing and full egui layout.
 use super::*;
+use cindral_core::InstanceId;
 use egui::{Event, Pos2};
 use std::{path::Path, time::Instant};
 thread_local! { static GPU: std::cell::RefCell<Option<super::real_file_gpu::Gpu>> = const { std::cell::RefCell::new(None) }; }
@@ -89,6 +90,48 @@ fn face_position(app: &DrafterApp, nested: bool) -> Result<Pos2, String> {
         }
     ))
 }
+
+fn face_pick_position(app: &DrafterApp, target: cindral_core::FaceId) -> Result<Pos2, String> {
+    let rect = app.replay_rect;
+    let aspect = rect.width() / rect.height();
+    let view = View {
+        matrix: app
+            .camera
+            .view_projection(aspect)
+            .as_dmat4()
+            * app.history.world_transform(),
+        size: glam::DVec2::new(rect.width() as f64, rect.height() as f64),
+    };
+    for y in 2..78 {
+        for x in 2..118 {
+            let cursor = glam::DVec2::new(
+                rect.width() as f64 * x as f64 / 120.,
+                rect.height() as f64 * y as f64 / 80.,
+            );
+            let ndc = Vec2::new(
+                2. * cursor.x as f32 / rect.width() - 1.,
+                1. - 2. * cursor.y as f32 / rect.height(),
+            );
+            let (origin, direction) = app.camera.ray(ndc, aspect);
+            let ray = Ray {
+                origin: app.history.world_transform().inverse().transform_point3(origin.as_dvec3()),
+                direction: app.history.world_transform().inverse().transform_vector3(direction.as_dvec3()),
+            };
+            let hit = cindral_tools::pick_section(
+                app.history.model(),
+                ray,
+                view,
+                cursor,
+                10.,
+                app.local_section().as_ref(),
+            );
+            if hit == Some(cindral_tools::Hit::Face(target)) {
+                return Ok(rect.min + egui::vec2(cursor.x as f32, cursor.y as f32));
+            }
+        }
+    }
+    Err(format!("no direct face pick position found for {:?}", target))
+}
 fn report(label: &str, samples: &[(f64, cindral_core::profile::Sample)]) {
     let max = samples.iter().map(|s| s.0).fold(0., f64::max);
     let avg = samples.iter().map(|s| s.0).sum::<f64>() / samples.len() as f64;
@@ -123,6 +166,7 @@ pub fn run(path: &Path) -> Result<(), String> {
     let t = Instant::now();
     app.load_replay(path).map_err(|e| e.to_string())?;
     println!("import + initial CPU mesh + textures={:.3}ms", ms(t));
+
     app.choose_modify(ModifyKind::Select);
     println!(
         "first full UI frame incl tessellation={:.3}ms",
@@ -239,39 +283,65 @@ pub fn run(path: &Path) -> Result<(), String> {
         )
     );
     app.history_step(false);
-    let start = face_position(&app, false)?;
+    app.selection.clear();
+    app.organization.selected = None;
+
+    // Case (a): planar face with no hole (FaceId(900))
+    let start_a = face_pick_position(&app, cindral_core::FaceId::from_raw(900))?;
+    run_pushpull_drag(&mut app, &ctx, start_a, "PushPull (a) planar face no hole")?;
+
+    // Case (b): face with an inner ring or cavity (FaceId(905))
+    let start_b = face_pick_position(&app, cindral_core::FaceId::from_raw(905))?;
+    run_pushpull_drag(&mut app, &ctx, start_b, "PushPull (b) face with inner ring/cavity")?;
+
+    // Case (c): face in a large group/component (FaceId(1790) in ThomThom)
+    app.enter_context(vec![InstanceId(25)]).map_err(|e| e.to_string())?;
+    let start_c = face_pick_position(&app, cindral_core::FaceId::from_raw(1790))?;
+    run_pushpull_drag(&mut app, &ctx, start_c, "PushPull (c) face in large component")?;
+    app.exit_context().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn run_pushpull_drag(
+    app: &mut DrafterApp,
+    ctx: &egui::Context,
+    start: Pos2,
+    label: &str,
+) -> Result<Vec<(f64, cindral_core::profile::Sample)>, String> {
     app.choose_modify(ModifyKind::PushPull);
-    frame(&mut app, &ctx, vec![Event::PointerMoved(start)]);
-    println!(
-        "PushPull begin={:.3}ms",
-        frame(
-            &mut app,
-            &ctx,
-            vec![Event::PointerMoved(start), button(start, true)]
-        )
-    );
+    frame(app, ctx, vec![Event::PointerMoved(start)]);
+    let begin_dt = frame(app, ctx, vec![Event::PointerMoved(start), button(start, true)]);
+    println!("{label} begin={begin_dt:.3}ms");
     if !app.modify.active() {
-        return Err(format!("PushPull did not begin: {:?}", app.error));
+        return Err(format!("{label} did not begin: {:?}", app.error));
     }
     let mut samples = Vec::new();
     for i in 1..=60 {
         let p = start + egui::vec2(0., -i as f32 * 0.5);
-        let dt = frame(&mut app, &ctx, vec![Event::PointerMoved(p)]);
+        let dt = frame(app, ctx, vec![Event::PointerMoved(p)]);
         if app.error.is_some() {
-            return Err(format!("PushPull preview: {:?}", app.error));
+            return Err(format!("{label} preview: {:?}", app.error));
         }
         samples.push((dt, cindral_core::profile::last()));
     }
-    report("PushPull preview full frame", &samples);
-    println!(
-        "PushPull release/commit frame={:.3}ms",
-        frame(
-            &mut app,
-            &ctx,
-            vec![button(start + egui::vec2(0., -30.), false)]
-        )
-    );
-    Ok(())
+    let mut frame_times: Vec<f64> = samples.iter().map(|s| s.0).collect();
+    frame_times.sort_by(f64::total_cmp);
+    let p50 = frame_times[29];
+    let p95 = frame_times[56];
+    let max = frame_times[59];
+    let avg = frame_times.iter().sum::<f64>() / frame_times.len() as f64;
+    println!("{label}: mean={avg:.3}ms p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms (n={})", frame_times.len());
+    for (i, name) in cindral_core::profile::NAMES.iter().enumerate() {
+        let mut phase_vals: Vec<f64> = samples.iter().map(|s| s.1.phases[i]).collect();
+        phase_vals.sort_by(f64::total_cmp);
+        let mean = phase_vals.iter().sum::<f64>() / phase_vals.len() as f64;
+        println!("  {name}: mean={mean:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms", phase_vals[29], phase_vals[56], phase_vals[59]);
+    }
+    let commit_dt = frame(app, ctx, vec![button(start + egui::vec2(0., -30.), false)]);
+    println!("{label} release/commit={commit_dt:.3}ms");
+    app.history_step(false);
+    Ok(samples)
 }
 
 /// Release Rotate replay on a private imported model, including inference and egui tessellation.
