@@ -465,6 +465,7 @@ fn surfaces_with_index(
         next_id: next,
         vertices: old.vertices.clone(),
         protected: old.protected.clone(),
+        protected_edges: old.protected_edges.clone(),
         ..Model::default()
     };
     // Segment insertion already maintains this index while the construction has no faces.
@@ -538,6 +539,7 @@ fn surfaces_with_index(
             && normals
                 .iter()
                 .all(|n| n.cross(normals[0]).length() <= TOLERANCE)
+            && !result.protected_edges.contains(&e.vertices)
         {
             seams.push(*id);
         }
@@ -572,7 +574,9 @@ fn surfaces_with_index(
     let usage = edge_usage(&result);
     result.edges.retain(|_, e| usage.contains_key(&e.vertices));
     let used: BTreeSet<_> = result.edges.values().flat_map(|e| e.vertices).collect();
-    result.vertices.retain(|id, _| used.contains(id));
+    result
+        .vertices
+        .retain(|id, _| used.contains(id) || result.protected.contains(id));
     for f in result.faces.values_mut() {
         f.color = color;
         f.material = material;

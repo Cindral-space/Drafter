@@ -631,3 +631,321 @@ fn push_pull_moves_merged_wall_as_one_face() {
     assert!(h.redo().unwrap());
     assert_eq!(h.to_data(), before);
 }
+
+fn assert_open_boundary_equivalence(a: &Model, b: &Model) {
+    a.validate().expect("model a valid");
+    b.validate().expect("model b valid");
+    let area_a: f64 = a
+        .faces()
+        .keys()
+        .map(|&id| a.face_area(id).unwrap_or(0.0))
+        .sum();
+    let area_b: f64 = b
+        .faces()
+        .keys()
+        .map(|&id| b.face_area(id).unwrap_or(0.0))
+        .sum();
+    assert!(
+        (area_a - area_b).abs() < TOLERANCE * area_a.max(1.0),
+        "area mismatch: {area_a} vs {area_b}"
+    );
+    let (amin, amax) = a.bounds().unwrap();
+    let (bmin, bmax) = b.bounds().unwrap();
+    assert!(amin.distance(bmin) < TOLERANCE && amax.distance(bmax) < TOLERANCE);
+}
+
+fn assert_model_equivalence(fast: &Model, slow: &Model) {
+    fast.validate().expect("fast validate");
+    slow.validate().expect("slow validate");
+
+    assert_eq!(
+        fast.vertices().len(),
+        slow.vertices().len(),
+        "vertex count mismatch: fast {} vs slow {}",
+        fast.vertices().len(),
+        slow.vertices().len()
+    );
+    assert_eq!(
+        fast.edges().len(),
+        slow.edges().len(),
+        "edge count mismatch: fast {} vs slow {}",
+        fast.edges().len(),
+        slow.edges().len()
+    );
+    assert_eq!(
+        fast.faces().len(),
+        slow.faces().len(),
+        "face count mismatch: fast {} vs slow {}",
+        fast.faces().len(),
+        slow.faces().len()
+    );
+
+    let area_fast: f64 = fast
+        .faces()
+        .keys()
+        .map(|&id| fast.face_area(id).unwrap_or(0.0))
+        .sum();
+    let area_slow: f64 = slow
+        .faces()
+        .keys()
+        .map(|&id| slow.face_area(id).unwrap_or(0.0))
+        .sum();
+    assert!(
+        (area_fast - area_slow).abs() < 1e-4,
+        "total area mismatch: fast {area_fast} vs slow {area_slow}"
+    );
+
+    let mut areas_fast: Vec<f64> = fast
+        .faces()
+        .keys()
+        .map(|&id| fast.face_area(id).unwrap_or(0.0))
+        .collect();
+    let mut areas_slow: Vec<f64> = slow
+        .faces()
+        .keys()
+        .map(|&id| slow.face_area(id).unwrap_or(0.0))
+        .collect();
+    areas_fast.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    areas_slow.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    for (af, as_) in areas_fast.iter().zip(areas_slow.iter()) {
+        assert!((af - as_).abs() < 1e-4, "face area mismatch: {af} vs {as_}");
+    }
+
+    let quantize_normal = |n: DVec3| -> (i64, i64, i64) {
+        (
+            (n.x * 1000.0).round() as i64,
+            (n.y * 1000.0).round() as i64,
+            (n.z * 1000.0).round() as i64,
+        )
+    };
+    let mut normals_fast: Vec<_> = fast
+        .faces()
+        .values()
+        .map(|f| quantize_normal(f.plane.normal))
+        .collect();
+    let mut normals_slow: Vec<_> = slow
+        .faces()
+        .values()
+        .map(|f| quantize_normal(f.plane.normal))
+        .collect();
+    normals_fast.sort();
+    normals_slow.sort();
+    assert_eq!(normals_fast, normals_slow, "normals mismatch");
+
+    let mut mats_fast: Vec<_> = fast
+        .faces()
+        .values()
+        .map(|f| (f.material, f.color))
+        .collect();
+    let mut mats_slow: Vec<_> = slow
+        .faces()
+        .values()
+        .map(|f| (f.material, f.color))
+        .collect();
+    mats_fast.sort();
+    mats_slow.sort();
+    assert_eq!(mats_fast, mats_slow, "materials/colors mismatch");
+}
+
+fn verify_history_pushpull_equivalence(initial: &DocumentHistory, face: FaceId, distance: f64) {
+    let mut fast = initial.clone();
+    let mut slow = initial.clone();
+
+    let fast_changed = fast
+        .execute(Command::PushPull { face, distance })
+        .expect("fast execute");
+    let slow_changed = cindral_core::benchmark::with_reference(|| {
+        slow.execute(Command::PushPull { face, distance })
+    })
+    .expect("slow execute");
+    assert_eq!(fast_changed, slow_changed, "changed return mismatch");
+
+    assert_model_equivalence(fast.model(), slow.model());
+    assert_eq!(fast.tags(), slow.tags(), "tags mismatch");
+
+    if fast_changed {
+        assert!(fast.undo().expect("fast undo"));
+        assert!(slow.undo().expect("slow undo"));
+        assert_model_equivalence(fast.model(), initial.model());
+        assert_model_equivalence(slow.model(), initial.model());
+        assert_eq!(fast.tags(), initial.tags());
+
+        assert!(fast.redo().expect("fast redo"));
+        assert!(slow.redo().expect("slow redo"));
+        assert_model_equivalence(fast.model(), slow.model());
+        assert_eq!(fast.tags(), slow.tags());
+    }
+}
+
+#[test]
+fn test_synthetic_faces_pushpull_equivalence() {
+    let cube_solid = direct(cube(false));
+    println!(
+        "INITIAL cube_solid: vertices={}, faces={}, edges={}",
+        cube_solid.model().vertices().len(),
+        cube_solid.model().faces().len(),
+        cube_solid.model().edges().len(),
+    );
+    let top_face = *cube_solid
+        .model()
+        .faces()
+        .iter()
+        .find(|(_, f)| (f.plane.normal - DVec3::Z).length() < 1e-4)
+        .unwrap()
+        .0;
+
+    let mut fast = cube_solid.clone();
+    let mut slow = cube_solid.clone();
+    fast.execute(Command::PushPull {
+        face: top_face,
+        distance: -0.3,
+    })
+    .unwrap();
+    cindral_core::benchmark::with_reference(|| {
+        slow.execute(Command::PushPull {
+            face: top_face,
+            distance: -0.3,
+        })
+    })
+    .unwrap();
+    println!(
+        "FAST -0.3: vertices={}, faces={}, edges={}",
+        fast.model().vertices().len(),
+        fast.model().faces().len(),
+        fast.model().edges().len(),
+    );
+    println!(
+        "SLOW -0.3: vertices={}, faces={}, edges={}",
+        slow.model().vertices().len(),
+        slow.model().faces().len(),
+        slow.model().edges().len(),
+    );
+    for (v, pos) in fast.model().vertices() {
+        println!("FAST v{:?}: {:?}", v, pos.position);
+    }
+    for (v, pos) in slow.model().vertices() {
+        println!("SLOW v{:?}: {:?}", v, pos.position);
+    }
+    for (fid, f) in fast.model().faces() {
+        println!(
+            "FAST face {:?}: normal={:?}, outer={:?}",
+            fid, f.plane.normal, f.outer
+        );
+    }
+    for (fid, f) in slow.model().faces() {
+        println!(
+            "SLOW face {:?}: normal={:?}, outer={:?}",
+            fid, f.plane.normal, f.outer
+        );
+    }
+
+    // Outward push
+    verify_history_pushpull_equivalence(&cube_solid, top_face, 0.5);
+    // Negative depth push
+    verify_history_pushpull_equivalence(&cube_solid, top_face, -0.3);
+    // Zero depth push
+    verify_history_pushpull_equivalence(&cube_solid, top_face, 0.0);
+
+    // Test annulus in free space (no coplanar merging side walls)
+    fn create_annulus() -> DocumentHistory {
+        let g = BulkGeometry {
+            vertices: vec![
+                DVec3::new(0., 0., 0.),
+                DVec3::new(4., 0., 0.),
+                DVec3::new(4., 4., 0.),
+                DVec3::new(0., 4., 0.),
+                DVec3::new(1., 1., 0.),
+                DVec3::new(3., 1., 0.),
+                DVec3::new(3., 3., 0.),
+                DVec3::new(1., 3., 0.),
+            ],
+            faces: vec![BulkFace {
+                outer: vec![0, 1, 2, 3],
+                holes: vec![vec![4, 5, 6, 7]],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        direct(g)
+    }
+
+    let annulus = create_annulus();
+    let annulus_face = *annulus.model().faces().keys().next().unwrap();
+    verify_history_pushpull_equivalence(&annulus, annulus_face, 0.5);
+    verify_history_pushpull_equivalence(&annulus, annulus_face, -0.3);
+    verify_history_pushpull_equivalence(&annulus, annulus_face, 0.0);
+}
+
+fn verify_mybedroom_face_equivalence(initial: &DocumentHistory, face: FaceId, distance: f64) {
+    let mut fast = initial.clone();
+    let mut slow = initial.clone();
+
+    let fast_changed = fast
+        .execute(Command::PushPull { face, distance })
+        .expect("fast execute");
+    let slow_changed = cindral_core::benchmark::with_reference(|| {
+        slow.execute(Command::PushPull { face, distance })
+    })
+    .expect("slow execute");
+    assert_eq!(fast_changed, slow_changed, "changed return mismatch");
+
+    assert_open_boundary_equivalence(fast.model(), slow.model());
+    assert_eq!(fast.tags(), slow.tags(), "tags mismatch");
+
+    if fast_changed {
+        assert!(fast.undo().expect("fast undo"));
+        assert!(slow.undo().expect("slow undo"));
+        assert_open_boundary_equivalence(fast.model(), initial.model());
+        assert_eq!(fast.tags(), initial.tags());
+
+        assert!(fast.redo().expect("fast redo"));
+        assert!(slow.redo().expect("slow redo"));
+        assert_open_boundary_equivalence(fast.model(), slow.model());
+        assert_eq!(fast.tags(), slow.tags());
+    }
+}
+
+#[test]
+fn test_mybedroom_real_faces_pushpull_equivalence() {
+    let path = std::path::Path::new("/home/earl/Desktop/Cindral/Drafter/SKP/mybedroom.skp");
+    if !path.exists() {
+        return;
+    }
+    let h = import_file(
+        path,
+        &ImportOptions {
+            as_component: false,
+            ..Default::default()
+        },
+        &ImportControl::default(),
+    )
+    .unwrap()
+    .history;
+
+    // Item 1: planar face with no hole (Face 900)
+    let face_900 = FaceId::from_raw(900);
+    println!("Face 900 0.05");
+    verify_mybedroom_face_equivalence(&h, face_900, 0.05);
+    println!("Face 900 -0.05");
+    verify_mybedroom_face_equivalence(&h, face_900, -0.05);
+    println!("Face 900 0.0");
+    verify_mybedroom_face_equivalence(&h, face_900, 0.0);
+
+    // Item 2: face with inner ring / cavity (Face 905)
+    let face_905 = FaceId::from_raw(905);
+    println!("Face 905 plane: {:?}", h.model().faces()[&face_905].plane);
+    println!("Face 905 0.05");
+    verify_mybedroom_face_equivalence(&h, face_905, 0.05);
+    verify_mybedroom_face_equivalence(&h, face_905, -0.05);
+    verify_mybedroom_face_equivalence(&h, face_905, 0.0);
+
+    // Additional real faces from mybedroom
+    for &raw_id in &[348, 364, 390] {
+        let fid = FaceId::from_raw(raw_id);
+        if h.model().faces().contains_key(&fid) {
+            verify_mybedroom_face_equivalence(&h, fid, 0.05);
+            verify_mybedroom_face_equivalence(&h, fid, -0.05);
+            verify_mybedroom_face_equivalence(&h, fid, 0.0);
+        }
+    }
+}

@@ -85,6 +85,7 @@ pub struct Model {
     pub(crate) next_id: u64,
     pub(crate) spatial: Option<Box<crate::spatial::Spatial>>,
     pub(crate) protected: BTreeSet<VertexId>,
+    pub(crate) protected_edges: BTreeSet<[VertexId; 2]>,
     pub(crate) heal_scope: Option<BTreeSet<VertexId>>,
 }
 
@@ -97,6 +98,7 @@ impl Default for Model {
             next_id: 1,
             spatial: None,
             protected: BTreeSet::new(),
+            protected_edges: BTreeSet::new(),
             heal_scope: None,
         }
     }

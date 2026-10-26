@@ -21,30 +21,10 @@ pub(crate) fn prepare(
         return Ok(None);
     }
     let source = model.faces.get(face).ok_or(KernelError::MissingEntity)?;
-    if model.faces.values().any(|face| !face.holes.is_empty()) {
+    if !source.holes.is_empty() {
         return Ok(None);
     }
     let index = model.spatial.as_ref().ok_or(KernelError::MissingEntity)?;
-    // No shell walk or orientation propagation: prove that the entire model is behind
-    // the starting plane in the requested direction. The new prism is then disjoint
-    // from all old surfaces except its base. This also handles reflections/holes.
-    let closed = index
-        .edge_faces
-        .values()
-        .filter(|v| !v.is_empty())
-        .all(|v| v.len() == 2);
-    if !closed && !planar_sheet(model, *face)? {
-        return Ok(None);
-    }
-    let normal = source.plane.normal * distance.signum();
-    let origin = model.position(source.outer[0])?;
-    let supported = |direction: DVec3| {
-        model
-            .vertices
-            .values()
-            .all(|v| (v.position - origin).dot(direction) <= TOLERANCE)
-    };
-    let delta = source.plane.normal * *distance;
     let boundary = index
         .face_edges
         .get(face)
@@ -52,56 +32,185 @@ pub(crate) fn prepare(
     let attached = boundary
         .iter()
         .any(|edge| index.edge_faces[edge].iter().any(|other| other != face));
-    // Include only the walls that can merge with this sweep, rather than
-    // reconstructing the entire connected imported object.
-    let walls: BTreeSet<_> = boundary
+    if !attached && !planar_sheet(model, *face)? {
+        return Ok(None);
+    }
+    let closed = index
+        .edge_faces
+        .values()
+        .filter(|v| !v.is_empty())
+        .all(|v| v.len() == 2);
+    let normal = source.plane.normal * distance.signum();
+    let origin = model.position(source.outer[0])?;
+    let delta = source.plane.normal * *distance;
+
+    if closed && distance < &0.0 {
+        return Ok(None);
+    }
+    if !source.holes.is_empty() && closed {
+        return Ok(None);
+    }
+
+    if !source.holes.is_empty() {
+        let moves_into_adjacent = boundary.iter().any(|edge| {
+            index.edge_faces[edge].iter().any(|other| {
+                *other != *face
+                    && !model.faces[other].plane.equivalent(&source.plane)
+                    && model.faces[other]
+                        .outer
+                        .iter()
+                        .chain(model.faces[other].holes.iter().flatten())
+                        .any(|v| (model.vertices[v].position - origin).dot(delta) > TOLERANCE)
+            })
+        });
+        if moves_into_adjacent {
+            return Ok(None);
+        }
+    }
+
+    for v in source.outer.iter().chain(source.holes.iter().flatten()) {
+        let pv = model.vertices[v].position;
+        for &e in &index.adjacency[v] {
+            let ov = if model.edges[&e].vertices[0] == *v {
+                model.edges[&e].vertices[1]
+            } else {
+                model.edges[&e].vertices[0]
+            };
+            let dir = model.vertices[&ov].position - pv;
+            if dir.dot(delta) > TOLERANCE
+                && dir.cross(delta).length_squared()
+                    <= TOLERANCE * TOLERANCE * dir.length_squared() * delta.length_squared()
+            {
+                return Ok(None);
+            }
+        }
+    }
+
+    let walls: BTreeSet<_> = if source.holes.is_empty() {
+        boundary
+            .iter()
+            .flat_map(|edge| &index.edge_faces[edge])
+            .filter(|other| {
+                **other != *face
+                    && !model.faces[other].plane.equivalent(&source.plane)
+                    && model.faces[other].plane.normal.dot(normal).abs() <= TOLERANCE
+                    && model.faces[other].color == source.color
+                    && model.faces[other].material == source.material
+            })
+            .copied()
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
+    let points = source
+        .outer
         .iter()
-        .flat_map(|edge| &index.edge_faces[edge])
-        .filter(|other| {
-            *other != face
-                && !model.faces[other].plane.equivalent(&source.plane)
-                && model.faces[other].plane.normal.dot(normal).abs() <= TOLERANCE
-                && model.faces[other].color == source.color
-                && model.faces[other].material == source.material
-        })
-        .copied()
-        .collect();
-    if !supported(normal) {
-        // A blind interior pocket is local only if its coplanar neighboring faces stay
-        // above the cavity, and the swept prism does not reach any other shell surface.
-        if !supported(-normal) {
-            return Ok(None);
-        }
-        let boundary = index
-            .face_edges
-            .get(face)
-            .ok_or(KernelError::MissingEntity)?;
-        if boundary
+        .chain(source.holes.iter().flatten())
+        .map(|id| model.position(*id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let bounds = crate::spatial::envelope(
+        points
             .iter()
-            .flat_map(|e| index.edge_faces.get(e).into_iter().flatten())
-            .filter(|other| **other != *face)
-            .any(|other| !model.faces[other].plane.equivalent(&source.plane))
-        {
-            return Ok(None);
-        }
-        let points = source
-            .outer
+            .copied()
+            .chain(points.iter().map(|p| *p + delta)),
+    )
+    .ok_or(KernelError::MissingEntity)?;
+
+    // Fall back to full check if the swept prism penetrates non-incident geometry.
+    {
+        let slab_tol = TOLERANCE;
+        let sweep_min = points
             .iter()
-            .map(|id| model.position(*id))
+            .copied()
+            .chain(points.iter().map(|p| *p + delta))
+            .fold(DVec3::splat(f64::INFINITY), |a, b| a.min(b));
+        let sweep_max = points
+            .iter()
+            .copied()
+            .chain(points.iter().map(|p| *p + delta))
+            .fold(DVec3::splat(f64::NEG_INFINITY), |a, b| a.max(b));
+
+        let (u, v) = source.plane.basis();
+        let project2d = |p: DVec3| glam::DVec2::new((p - origin).dot(u), (p - origin).dot(v));
+        let outer_2d = model.project_at(&source.outer, source.plane, origin)?;
+        let holes_2d = source
+            .holes
+            .iter()
+            .map(|h| model.project_at(h, source.plane, origin))
             .collect::<Result<Vec<_>, _>>()?;
-        let bounds = crate::spatial::envelope(
-            points
+
+        for other in index.query_faces(bounds) {
+            if other == *face || walls.contains(&other) {
+                continue;
+            }
+            let of = &model.faces[&other];
+            if of.plane.equivalent(&source.plane) {
+                let of_triangles = model.triangulate(other)?;
+                let source_triangles = model.triangulate(*face)?;
+                let (u, v) = source.plane.basis();
+                let project = |t: [DVec3; 3]| {
+                    t.map(|p| glam::DVec2::new((p - origin).dot(u), (p - origin).dot(v)))
+                };
+                let a_tris: Vec<_> = source_triangles.into_iter().map(project).collect();
+                for b_tri in of_triangles.into_iter().map(project) {
+                    for a in &a_tris {
+                        if triangles_overlap(*a, b_tri) {
+                            return Ok(None);
+                        }
+                    }
+                }
+                continue;
+            }
+            let of_points = of
+                .outer
                 .iter()
-                .copied()
-                .chain(points.iter().map(|p| *p + delta)),
-        )
-        .ok_or(KernelError::MissingEntity)?;
-        if index
-            .query_faces(bounds)
-            .iter()
-            .any(|other| !model.faces[other].plane.equivalent(&source.plane))
-        {
-            return Ok(None);
+                .chain(of.holes.iter().flatten())
+                .map(|v| model.vertices[v].position);
+            let of_min = of_points
+                .clone()
+                .fold(DVec3::splat(f64::INFINITY), |a, b| a.min(b));
+            let of_max = of_points.fold(DVec3::splat(f64::NEG_INFINITY), |a, b| a.max(b));
+
+            if of_max.x <= sweep_min.x + slab_tol
+                || of_min.x >= sweep_max.x - slab_tol
+                || of_max.y <= sweep_min.y + slab_tol
+                || of_min.y >= sweep_max.y - slab_tol
+                || of_max.z <= sweep_min.z + slab_tol
+                || of_min.z >= sweep_max.z - slab_tol
+            {
+                continue;
+            }
+
+            // Check if the sweep path from any source vertex penetrates `of`
+            let dot = of.plane.normal.dot(delta);
+            if dot.abs() > TOLERANCE {
+                for v in source.outer.iter().chain(source.holes.iter().flatten()) {
+                    let p = model.vertices[v].position;
+                    let t = -of.plane.signed_distance(p) / dot;
+                    if t > TOLERANCE && t < 1.0 - TOLERANCE {
+                        let hit = p + delta * t;
+                        if crate::transaction::contains_face(model, of, hit)? {
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+
+            for vert in of.outer.iter().chain(of.holes.iter().flatten()) {
+                let p = model.vertices[vert].position;
+                let dot = (p - origin).dot(normal);
+                if dot > slab_tol && dot < distance.abs() - slab_tol {
+                    let p2d = project2d(p);
+                    let on_boundary = is_on_loop_boundary(&outer_2d, p2d)
+                        || holes_2d.iter().any(|h| is_on_loop_boundary(h, p2d));
+                    if !on_boundary
+                        && crate::geometry::contains(&outer_2d, p2d)
+                        && !holes_2d.iter().any(|h| crate::geometry::contains(h, p2d))
+                    {
+                        return Ok(None);
+                    }
+                }
+            }
         }
     }
     let mut before = Model {
@@ -228,6 +337,14 @@ pub(crate) fn prepare(
                 after.protected.insert(*v);
             }
         }
+        for (edge_id, e) in &before.edges {
+            if index.edge_faces[edge_id]
+                .iter()
+                .any(|id| !before.faces.contains_key(id))
+            {
+                after.protected_edges.insert(e.vertices);
+            }
+        }
         let mut polygons = Vec::new();
         for id in after.faces.keys() {
             for triangle in after.triangulate(*id)? {
@@ -245,6 +362,7 @@ pub(crate) fn prepare(
 /// Coplanarity excludes swept-volume collisions in either normal direction.
 /// Triangle separation additionally excludes overlapping source surfaces at the
 /// base. Work is bounded; ambiguous/expensive inputs retain the general path.
+#[allow(dead_code)]
 #[tracing::instrument(level = "info", skip_all, name = "extrusion.planar_sheet")]
 fn planar_sheet(model: &Model, face: FaceId) -> Result<bool, KernelError> {
     let source = &model.faces[&face];
@@ -291,6 +409,7 @@ fn planar_sheet(model: &Model, face: FaceId) -> Result<bool, KernelError> {
     }
     Ok(true)
 }
+#[allow(dead_code)]
 fn triangles_overlap(a: [glam::DVec2; 3], b: [glam::DVec2; 3]) -> bool {
     // Separating axis theorem; boundary-only contact is allowed at model tolerance.
     for triangle in [a, b] {
@@ -313,6 +432,21 @@ fn triangles_overlap(a: [glam::DVec2; 3], b: [glam::DVec2; 3]) -> bool {
         }
     }
     true
+}
+
+fn is_on_loop_boundary(loop_pts: &[glam::DVec2], p: glam::DVec2) -> bool {
+    for (a, b) in loop_pts.iter().zip(loop_pts.iter().cycle().skip(1)) {
+        let ab = *b - *a;
+        let ap = p - *a;
+        let len_sq = ab.length_squared();
+        if len_sq > TOLERANCE * TOLERANCE {
+            let t = (ap.dot(ab) / len_sq).clamp(0.0, 1.0);
+            if (*a + ab * t).distance(p) <= TOLERANCE {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

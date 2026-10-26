@@ -117,7 +117,8 @@ pub fn add_test_solid(history: &mut History) -> Result<crate::FaceId, KernelErro
 
 /// Execute the retained reference algorithm for small-model equivalence tests.
 /// This benchmark-only API must never be used for interactive large models.
-pub fn reference_execute(history: &mut History, command: Command) -> Result<bool, KernelError> {
+/// Execute a closure with reference (slow CSG) path forced.
+pub fn with_reference<R>(f: impl FnOnce() -> R) -> R {
     struct Reset(bool);
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -126,7 +127,12 @@ pub fn reference_execute(history: &mut History, command: Command) -> Result<bool
     }
     let previous = REFERENCE.with(|r| r.replace(true));
     let _reset = Reset(previous);
-    history.execute(command)
+    f()
+}
+
+/// Execute a command using the reference (slow CSG) fallback path.
+pub fn reference_execute(history: &mut History, command: Command) -> Result<bool, KernelError> {
+    with_reference(|| history.execute(command))
 }
 thread_local! {static REFERENCE: std::cell::Cell<bool> = const {std::cell::Cell::new(false)};}
 pub(crate) fn reference_enabled() -> bool {

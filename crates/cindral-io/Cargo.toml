@@ -35,4 +35,5 @@ name = "dae_benchmark"
 required-features = ["bench-fixtures"]
 
 [dev-dependencies]
+cindral-core = { path = "../cindral-core", features = ["bench-fixtures"] }
 cindral-tools = { path = "../cindral-tools" }
