@@ -21,9 +21,6 @@ pub(crate) fn prepare(
         return Ok(None);
     }
     let source = model.faces.get(face).ok_or(KernelError::MissingEntity)?;
-    if !source.holes.is_empty() {
-        return Ok(None);
-    }
     let index = model.spatial.as_ref().ok_or(KernelError::MissingEntity)?;
     let boundary = index
         .face_edges
